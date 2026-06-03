@@ -1,0 +1,59 @@
+export type Lane = -1 | 0 | 1;
+
+export type ObstacleKind = 'barrier' | 'overhead' | 'wall' | 'trainGap';
+
+export type ActionCue =
+  | 'jump'
+  | 'duck'
+  | 'left'
+  | 'right'
+  /**
+   * Combined leap-to-the-side cue used by the train roof-run 'lane'
+   * variant, where the player is already on a train and the upcoming
+   * forced lane change will fire a jump and a lane shift simultaneously.
+   */
+  | 'jump-left'
+  | 'jump-right'
+  | null;
+
+export type RoofRunRole = 'entry' | 'run' | 'exit';
+
+/**
+ * Roof-run section flavour.
+ *   - 'gap'  : original forward-jump variant. All chunks in the section sit
+ *              in lane 0 and the player jumps the visible gap between train
+ *              groups via a `trainGap` obstacle.
+ *   - 'lane' : sideways-jump variant. Each chunk's train group is anchored
+ *              to a specific lane (alternating left / center / right) so the
+ *              player must leap to a DIFFERENT lane's train at every chunk
+ *              boundary. No `trainGap` obstacles are spawned in this
+ *              variant - the forced lane change drives the jump.
+ */
+export type RoofRunVariant = 'gap' | 'lane';
+
+export type ObstacleSpec = {
+  id: string;
+  kind: ObstacleKind;
+  lane: Lane;
+  z: number;
+};
+
+export type ChunkSpec = {
+  id: string;
+  seed: number;
+  startZ: number;
+  length: number;
+  obstacles: ObstacleSpec[];
+  roofRun?: { role: RoofRunRole; variant: RoofRunVariant; lane: Lane };
+};
+
+export type Session = {
+  id: string;
+  startedAt: number;
+  durationSec: number;
+  estimatedCalories: number;
+};
+
+export type UserProfile = {
+  weightKg: number;
+};
