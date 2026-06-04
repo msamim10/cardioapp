@@ -2,6 +2,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useState } from 'react';
 import {
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -141,39 +142,11 @@ export default function HomeScreen() {
 
         {/* ── Hero banner ── */}
         <View style={styles.heroBanner}>
-          <LinearGradient
-            colors={['#1a0533', '#0d1b3e', '#0a0e14']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={StyleSheet.absoluteFillObject}
+          <Image
+            source={require('../../assets/images/topbanner.png')}
+            style={styles.heroBannerImage}
+            resizeMode="cover"
           />
-
-          {/* Floating coins */}
-          {([
-            { top: 18, left: 28 },
-            { top: 60, left: 200 },
-            { top: 120, left: 80 },
-            { top: 30, left: 280 },
-            { top: 90, left: 310 },
-          ] as Array<{ top: number; left: number }>).map((pos, i) => (
-            <View key={i} style={[styles.floatingCoin, { top: pos.top, left: pos.left }]} />
-          ))}
-
-          {/* Left: KEEP MOVING */}
-          <View style={styles.heroLeft}>
-            <Text style={styles.heroKeep}>KEEP</Text>
-            <Text style={styles.heroMoving}>MOVING</Text>
-          </View>
-
-          {/* Right: NO LIMITS */}
-          <View style={styles.heroRight}>
-            <Text style={styles.heroNoLimits}>NO{'\n'}LIMITS</Text>
-          </View>
-
-          {/* Track lines */}
-          <View style={[styles.trackLine, { bottom: 28 }]} />
-          <View style={[styles.trackLine, { bottom: 20 }]} />
-          <View style={[styles.trackLine, { bottom: 12 }]} />
         </View>
 
         {/* ── START RUN button ── */}
@@ -455,10 +428,10 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: 'hidden',
     marginBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    justifyContent: 'space-between',
+  },
+  heroBannerImage: {
+    width: '100%',
+    height: '100%',
   },
   heroLeft: {
     gap: 0,
