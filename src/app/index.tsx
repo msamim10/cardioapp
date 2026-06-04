@@ -1,4 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -202,7 +203,12 @@ export default function HomeScreen() {
 
         {/* ── Hero card ── */}
         <View style={styles.heroCard}>
-          <View style={styles.heroBgOverlay} />
+          <LinearGradient
+            colors={['#0e2235', '#0a1a2a', '#091420']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[StyleSheet.absoluteFillObject, { borderRadius: styles.heroCard.borderRadius }]}
+          />
           <View style={styles.heroLeft}>
             <Text style={styles.heroGreeting}>{greeting()}</Text>
             {profile.level && (
@@ -387,14 +393,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
     marginBottom: theme.spacing.md,
     overflow: 'hidden',
-  },
-  heroBgOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: '40%',
-    bottom: 0,
-    backgroundColor: 'rgba(34,211,238,0.04)',
   },
   heroLeft: {
     flex: 1,
