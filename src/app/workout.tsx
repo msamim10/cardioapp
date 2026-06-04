@@ -104,6 +104,7 @@ export default function WorkoutScreen() {
       params: {
         durationSec: finalSec.toString(),
         calories: finalCal.toFixed(2),
+        coins: collectedCoinIdsRef.current.size.toString(),
       },
     });
   };

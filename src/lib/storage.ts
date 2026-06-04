@@ -30,6 +30,7 @@ export async function loadProfile(): Promise<UserProfile> {
     if (!raw) return { weightKg: DEFAULT_WEIGHT_KG };
     const parsed = JSON.parse(raw) as Partial<UserProfile>;
     return {
+      ...parsed,
       weightKg:
         typeof parsed.weightKg === 'number' && parsed.weightKg > 0
           ? parsed.weightKg
@@ -44,12 +45,37 @@ export async function saveProfile(profile: UserProfile): Promise<void> {
   await AsyncStorage.setItem(STORAGE_KEYS.profile, JSON.stringify(profile));
 }
 
+export async function addCoinsToProfile(earned: number): Promise<void> {
+  const profile = await loadProfile();
+  await saveProfile({ ...profile, totalCoins: (profile.totalCoins ?? 0) + earned });
+}
+
 export function summarizeSessions(sessions: Session[]) {
   const totalSec = sessions.reduce((acc, s) => acc + s.durationSec, 0);
   const totalCalories = sessions.reduce((acc, s) => acc + s.estimatedCalories, 0);
+  const totalCoins = sessions.reduce((acc, s) => acc + (s.coins ?? 0), 0);
+  const longestSec = sessions.reduce((acc, s) => Math.max(acc, s.durationSec), 0);
   return {
     count: sessions.length,
     totalSec,
     totalCalories,
+    totalCoins,
+    longestSec,
   };
+}
+
+export function computeStreak(sessions: Session[]): number {
+  if (sessions.length === 0) return 0;
+  const days = new Set(sessions.map((s) => new Date(s.startedAt).toDateString()));
+  let streak = 0;
+  const d = new Date();
+  // If today has no session yet, start counting from yesterday
+  if (!days.has(d.toDateString())) {
+    d.setDate(d.getDate() - 1);
+  }
+  while (days.has(d.toDateString())) {
+    streak++;
+    d.setDate(d.getDate() - 1);
+  }
+  return streak;
 }
