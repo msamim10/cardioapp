@@ -155,7 +155,7 @@ export default function HomeScreen() {
               <Image
                 source={source}
                 style={styles.modeImage}
-                resizeMode="contain"
+                resizeMode="cover"
               />
             </Pressable>
           ))}
@@ -535,8 +535,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modeImageCard: {
-    width: 138,
-    aspectRatio: 1,
+    width: 142,
+    height: 142,
     backgroundColor: '#070a0e',
     borderRadius: 16,
     overflow: 'hidden',
