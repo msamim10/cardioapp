@@ -160,106 +160,13 @@ export default function HomeScreen() {
         </View>
 
         {/* ── GAME MODES ── */}
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionLabel}>👑 GAME MODES</Text>
-          <Text style={styles.viewAll}>View all ›</Text>
+        <View style={styles.modeImageCard}>
+          <Image
+            source={require('../../assets/images/mode.png')}
+            style={styles.modeImage}
+            resizeMode="contain"
+          />
         </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.modeScroll}
-        >
-          {/* Endless Run */}
-          <Pressable
-            style={[
-              styles.modeCard,
-              { backgroundColor: '#1a0533', borderColor: '#7c3aed' },
-            ]}
-            onPress={() => router.push('/workout')}
-          >
-            <View
-              style={[
-                styles.modeGlow,
-                { backgroundColor: 'rgba(124,58,237,0.3)' },
-              ]}
-            />
-            <Text style={styles.modeEmoji}>🚂</Text>
-            <Text style={styles.modeLabel}>Endless Run</Text>
-            <View
-              style={[styles.modeArrowBadge, { backgroundColor: '#f97316' }]}
-            >
-              <Text style={styles.modeArrowText}>→</Text>
-            </View>
-          </Pressable>
-
-          {/* Beginner */}
-          <Pressable
-            style={[
-              styles.modeCard,
-              { backgroundColor: '#052e16', borderColor: '#16a34a' },
-            ]}
-            onPress={() => router.push('/workout')}
-          >
-            <View
-              style={[
-                styles.modeGlow,
-                { backgroundColor: 'rgba(22,163,74,0.3)' },
-              ]}
-            />
-            <Text style={styles.modeEmoji}>👟</Text>
-            <Text style={styles.modeLabel}>Beginner</Text>
-            <View
-              style={[styles.modeArrowBadge, { backgroundColor: '#16a34a' }]}
-            >
-              <Text style={styles.modeArrowText}>→</Text>
-            </View>
-          </Pressable>
-
-          {/* Fat Burn */}
-          <Pressable
-            style={[
-              styles.modeCard,
-              { backgroundColor: '#431407', borderColor: '#ea580c' },
-            ]}
-            onPress={() => router.push('/workout')}
-          >
-            <View
-              style={[
-                styles.modeGlow,
-                { backgroundColor: 'rgba(234,88,12,0.3)' },
-              ]}
-            />
-            <Text style={styles.modeEmoji}>🔥</Text>
-            <Text style={styles.modeLabel}>Fat Burn</Text>
-            <View
-              style={[styles.modeArrowBadge, { backgroundColor: '#f97316' }]}
-            >
-              <Text style={styles.modeArrowText}>→</Text>
-            </View>
-          </Pressable>
-
-          {/* Friends Challenge */}
-          <View
-            style={[
-              styles.modeCard,
-              { backgroundColor: '#0f172a', borderColor: '#3b82f6' },
-            ]}
-          >
-            <View
-              style={[
-                styles.modeGlow,
-                { backgroundColor: 'rgba(59,130,246,0.3)' },
-              ]}
-            />
-            <Text style={styles.modeEmoji}>👥</Text>
-            <Text style={[styles.modeLabel, { textAlign: 'center' }]}>
-              {'Friends\nChallenge'}
-            </Text>
-            <View style={styles.comingSoonPill}>
-              <Text style={styles.comingSoonText}>COMING SOON</Text>
-            </View>
-          </View>
-        </ScrollView>
 
         {/* ── YOUR STATS ── */}
         <View style={styles.statsHeader}>
@@ -686,69 +593,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // ── Game mode cards ──
-  modeScroll: {
-    gap: 10,
-    paddingRight: 16,
+  // ── Game modes image ──
+  modeImageCard: {
+    width: '100%',
+    aspectRatio: 2172 / 724,
+    backgroundColor: '#070a0e',
+    borderRadius: 16,
+    overflow: 'hidden',
     marginBottom: 20,
   },
-  modeCard: {
-    width: 130,
-    height: 145,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    padding: 12,
-    justifyContent: 'space-between',
-    overflow: 'hidden',
-  },
-  modeGlow: {
-    position: 'absolute',
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    top: 10,
-    alignSelf: 'center',
-  },
-  modeEmoji: {
-    fontSize: 36,
-    zIndex: 1,
-  },
-  modeLabel: {
-    color: '#ffffff',
-    fontWeight: '800',
-    fontSize: 13,
-    zIndex: 1,
-  },
-  modeArrowBadge: {
-    position: 'absolute',
-    bottom: 12,
-    right: 12,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1,
-  },
-  modeArrowText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  comingSoonPill: {
-    backgroundColor: 'rgba(34,211,238,0.15)',
-    borderWidth: 1,
-    borderColor: '#22d3ee',
-    borderRadius: 999,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    alignSelf: 'flex-start',
-    zIndex: 1,
-  },
-  comingSoonText: {
-    color: '#22d3ee',
-    fontSize: 9,
-    fontWeight: '800',
+  modeImage: {
+    width: '100%',
+    height: '100%',
   },
 
   // ── YOUR STATS ──
