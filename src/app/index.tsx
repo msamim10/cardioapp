@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -156,73 +157,24 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* ── Hero Banner ── */}
-        <View style={styles.heroBanner}>
-          <LinearGradient
-            colors={['#1a0533', '#0d1b3e', '#0c0a1e']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
-
-          {/* Left text block */}
-          <View style={styles.heroLeft}>
-            <Text style={styles.heroKeep}>KEEP</Text>
-            <Text style={styles.heroMoving}>MOVING</Text>
-          </View>
-
-          {/* Right text block */}
-          <View style={styles.heroRight}>
-            <Text style={styles.heroPinkText}>NO</Text>
-            <Text style={styles.heroPinkText}>LIMITS</Text>
-          </View>
-
-          {/* Floating coins */}
-          {COIN_POSITIONS.map((pos, i) => (
-            <View key={i} style={[styles.floatingCoin, pos]} />
-          ))}
-
-          {/* Procedural character */}
-          <View style={styles.heroCharacter}>
-            <View style={styles.charHead} />
-            <View style={styles.charBody} />
-            <View style={styles.charLegs}>
-              <View style={styles.charLeg} />
-              <View style={styles.charLeg} />
-            </View>
-          </View>
-
-          {/* Neon ground lines */}
-          {[8, 14, 20].map((b) => (
-            <View key={b} style={[styles.groundLine, { bottom: b }]} />
-          ))}
-
-          {/* Smiley badge */}
-          <View style={styles.smileyBadge}>
-            <Text style={styles.smileyText}>XX</Text>
-          </View>
-        </View>
-
-        {/* ── START RUN button ── */}
-        <Animated.View
-          style={[styles.startBtn, { transform: [{ scale: pulseAnim }] }]}
+        {/* ── Hero banner + START RUN button ── */}
+        <Pressable
+          onPress={() => router.push('/workout')}
+          style={({ pressed }) => [styles.heroBanner, pressed && { opacity: 0.9 }]}
         >
-          <Pressable
-            style={{ flex: 1 }}
-            onPress={() => router.push('/workout')}
-          >
-            <LinearGradient
-              colors={['#f97316', '#ef4444']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.startBtnGradient}
-            >
-              <Text style={styles.startBtnEmoji}>🏃</Text>
-              <Text style={styles.startBtnLabel}>START RUN</Text>
-              <Text style={styles.startBtnArrow}>{'>>'}</Text>
-            </LinearGradient>
-          </Pressable>
-        </Animated.View>
+          {/* Main banner image */}
+          <Image
+            source={require('../../assets/images/real1.png')}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+          />
+          {/* Button image overlaid at the bottom */}
+          <Animated.Image
+            source={require('../../assets/images/real2.png')}
+            style={[styles.heroBtn, { transform: [{ scale: pulseAnim }] }]}
+            resizeMode="contain"
+          />
+        </Pressable>
 
         {/* ── Duration pills ── */}
         <View style={styles.pillRow}>
@@ -576,10 +528,18 @@ const styles = StyleSheet.create({
 
   // ── Hero Banner ──
   heroBanner: {
-    height: 230,
+    aspectRatio: 1586 / 992,
     width: '100%',
     borderRadius: 20,
     overflow: 'hidden',
+    marginBottom: 14,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  heroBtn: {
+    // real2 is 2172×724 — rendered at 88% width, pinned near the bottom
+    width: '88%',
+    aspectRatio: 2172 / 724,
     marginBottom: 14,
   },
   heroLeft: {
