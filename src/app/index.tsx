@@ -410,7 +410,10 @@ const styles = StyleSheet.create({
 
   // ── Hero banner ──
   heroBanner: {
-    height: 300,
+    // aspect ratio matches the source image (379×255) so it renders
+    // pixel-perfect without any upscale blur
+    aspectRatio: 379 / 255,
+    width: '100%',
     borderRadius: 20,
     overflow: 'hidden',
     marginBottom: 16,
