@@ -140,30 +140,16 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* ── Hero banner ── */}
-        <View style={styles.heroBanner}>
+        {/* ── Hero banner — tap to start run ── */}
+        <Pressable
+          onPress={() => router.push('/workout')}
+          style={({ pressed }) => [styles.heroBanner, pressed && { opacity: 0.88 }]}
+        >
           <Image
             source={require('../../assets/images/topbanner.png')}
             style={styles.heroBannerImage}
             resizeMode="cover"
           />
-        </View>
-
-        {/* ── START RUN button ── */}
-        <Pressable
-          onPress={() => router.push('/workout')}
-          style={({ pressed }) => [styles.startBtn, pressed && { opacity: 0.88 }]}
-        >
-          <LinearGradient
-            colors={['#f97316', '#ef4444']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.startBtnGradient}
-          >
-            <Text style={styles.startBtnEmoji}>🏃</Text>
-            <Text style={styles.startBtnLabel}>START RUN</Text>
-            <Text style={styles.startBtnArrow}>{'>>'}</Text>
-          </LinearGradient>
         </Pressable>
 
         {/* ── Quick duration pills ── */}
