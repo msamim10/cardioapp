@@ -348,8 +348,8 @@ const styles = StyleSheet.create({
 
   // ── Hero banner ──
   heroBanner: {
-    aspectRatio: 1672 / 941,
     width: '100%',
+    height: 280,
     borderRadius: 20,
     overflow: 'hidden',
     marginBottom: 16,
