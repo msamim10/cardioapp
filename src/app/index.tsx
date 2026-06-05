@@ -596,7 +596,7 @@ const styles = StyleSheet.create({
   // ── Game modes image ──
   modeImageCard: {
     width: '100%',
-    aspectRatio: 2172 / 724,
+    height: 135,
     backgroundColor: '#070a0e',
     borderRadius: 16,
     overflow: 'hidden',
