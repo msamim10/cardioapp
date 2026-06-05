@@ -219,49 +219,11 @@ export default function HomeScreen() {
 
         {/* ── TODAY'S CHALLENGE ── */}
         <View style={styles.challengeCard}>
-          <LinearGradient
-            colors={['#2d1b69', '#1a0e3d']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={[StyleSheet.absoluteFill, { borderRadius: 16 }]}
+          <Image
+            source={require('../../assets/images/chal.png')}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
           />
-          <View style={styles.challengeInner}>
-            {/* Duck illustration */}
-            <View style={styles.challengeIllustration}>
-              <View style={styles.duckHead} />
-              <View style={styles.duckBody} />
-              <View style={styles.duckBeak} />
-              <View style={styles.duckGlasses} />
-            </View>
-
-            {/* Text content */}
-            <View style={styles.challengeContent}>
-              <Text style={styles.challengeLabel}>👑 TODAY'S CHALLENGE</Text>
-              <Text style={styles.challengeTitle}>{todayChallenge.title}</Text>
-              <Text style={styles.challengeReward}>Reward: 🪙 +100 coins</Text>
-              <View style={styles.progressTrack}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    {
-                      width: `${Math.round(challengeProgress * 100)}%` as `${number}%`,
-                    },
-                  ]}
-                />
-              </View>
-              <Text style={styles.progressLabel}>
-                {stats.count} / {todayChallenge.target}
-              </Text>
-            </View>
-          </View>
-
-          {/* Crown */}
-          <Text style={styles.challengeCrown}>👑</Text>
-
-          {/* Arrow button */}
-          <View style={styles.challengeArrowBtn}>
-            <Text style={styles.challengeArrowText}>→</Text>
-          </View>
         </View>
 
         {/* ── GAME MODES ── */}
@@ -698,10 +660,10 @@ const styles = StyleSheet.create({
   // ── TODAY'S CHALLENGE ──
   challengeCard: {
     width: '100%',
+    aspectRatio: 2172 / 724,
     borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 16,
-    padding: 14,
   },
   challengeInner: {
     flexDirection: 'row',
