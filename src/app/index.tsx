@@ -207,50 +207,20 @@ export default function HomeScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.modeScroll}
         >
-          {/* Endless Run */}
-          <Pressable
-            style={[styles.modeCard, { backgroundColor: '#1a0533', borderColor: '#7c3aed' }]}
-            onPress={() => router.push('/workout')}
-          >
-            <Text style={styles.modeEmoji}>🚂</Text>
-            <Text style={styles.modeLabel}>Endless Run</Text>
-            <View style={[styles.modeArrowBadge, { backgroundColor: '#f97316' }]}>
-              <Text style={styles.modeArrowText}>→</Text>
-            </View>
-          </Pressable>
-
-          {/* Beginner */}
-          <Pressable
-            style={[styles.modeCard, { backgroundColor: '#052e16', borderColor: '#16a34a' }]}
-            onPress={() => router.push('/workout')}
-          >
-            <Text style={styles.modeEmoji}>👟</Text>
-            <Text style={styles.modeLabel}>Beginner</Text>
-            <View style={[styles.modeArrowBadge, { backgroundColor: '#16a34a' }]}>
-              <Text style={styles.modeArrowText}>→</Text>
-            </View>
-          </Pressable>
-
-          {/* Fat Burn */}
-          <Pressable
-            style={[styles.modeCard, { backgroundColor: '#431407', borderColor: '#ea580c' }]}
-            onPress={() => router.push('/workout')}
-          >
-            <Text style={styles.modeEmoji}>🔥</Text>
-            <Text style={styles.modeLabel}>Fat Burn</Text>
-            <View style={[styles.modeArrowBadge, { backgroundColor: '#f97316' }]}>
-              <Text style={styles.modeArrowText}>→</Text>
-            </View>
-          </Pressable>
-
-          {/* Friends */}
-          <View style={[styles.modeCard, { backgroundColor: '#0f172a', borderColor: '#3b82f6' }]}>
-            <Text style={styles.modeEmoji}>👥</Text>
-            <Text style={styles.modeLabel}>Friends</Text>
-            <View style={styles.comingSoonPill}>
-              <Text style={styles.comingSoonText}>COMING SOON</Text>
-            </View>
-          </View>
+          {[
+            { src: require('../../assets/images/c.png'), label: 'Endless Run', tappable: true },
+            { src: require('../../assets/images/m.png'), label: 'Beginner', tappable: true },
+            { src: require('../../assets/images/n.png'), label: 'Fat Burn', tappable: true },
+            { src: require('../../assets/images/x.png'), label: 'Friends', tappable: false },
+          ].map((mode, i) => (
+            <Pressable
+              key={i}
+              style={({ pressed }) => [styles.modeCard, pressed && { opacity: 0.85 }]}
+              onPress={() => mode.tappable && router.push('/workout')}
+            >
+              <Image source={mode.src} style={styles.modeCardImage} resizeMode="cover" />
+            </Pressable>
+          ))}
         </ScrollView>
 
         {/* ── YOUR STATS ── */}
@@ -568,15 +538,13 @@ const styles = StyleSheet.create({
   },
   modeCard: {
     width: 130,
-    height: 145,
+    aspectRatio: 1122 / 1402,
     borderRadius: 16,
-    borderWidth: 1.5,
-    padding: 14,
-    justifyContent: 'space-between',
     overflow: 'hidden',
   },
-  modeEmoji: {
-    fontSize: 40,
+  modeCardImage: {
+    width: '100%',
+    height: '100%',
   },
   modeLabel: {
     color: '#ffffff',
