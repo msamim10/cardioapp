@@ -153,28 +153,6 @@ export default function HomeScreen() {
           />
         </Pressable>
 
-        {/* ── Quick duration pills ── */}
-        <View style={styles.pillRow}>
-          {[
-            { label: '⚡ 3 min', color: '#22c55e', quickMin: 3 },
-            { label: '⏱ 5 min', color: '#a855f7', quickMin: 5, big: true },
-            { label: '⚡ 10 min', color: '#22c55e', quickMin: 10 },
-          ].map((p) => (
-            <Pressable
-              key={p.quickMin}
-              style={[
-                styles.pill,
-                { borderColor: p.color },
-                p.big && styles.pillBig,
-              ]}
-              onPress={() => router.push('/workout')}
-            >
-              <Text style={[styles.pillText, { color: p.color }, p.big && styles.pillTextBig]}>
-                {p.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
 
         {/* ── CHALLENGES — swipeable image cards ── */}
         <Text style={styles.challengesHeader}>👑 CHALLENGES</Text>
