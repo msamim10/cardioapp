@@ -31,9 +31,6 @@ const DAILY_CHALLENGES = [
   { title: 'Complete 3 roof runs', target: 3 },
 ];
 
-const SPARKLINE_HEIGHTS = [3, 7, 4, 9, 3, 6, 8, 4];
-const WAVE_HEIGHTS = [3, 6, 2, 8, 3, 7, 4, 5];
-
 type CoinPos = { top: number; left?: number; right?: number };
 const COIN_POSITIONS: CoinPos[] = [
   { top: 20, left: 60 },
@@ -42,27 +39,6 @@ const COIN_POSITIONS: CoinPos[] = [
   { top: 18, right: 100 },
   { top: 80, left: 30 },
 ];
-
-// ─────────────────────────── Sparkline ───────────────────────────
-
-function Sparkline({ color }: { color: string }) {
-  return (
-    <View style={styles.sparkline}>
-      {SPARKLINE_HEIGHTS.map((h, i) => (
-        <View
-          key={i}
-          style={{
-            width: 3,
-            height: h,
-            borderRadius: 1,
-            backgroundColor: color,
-            opacity: 0.5,
-          }}
-        />
-      ))}
-    </View>
-  );
-}
 
 // ─────────────────────────── Main screen ───────────────────────────
 
@@ -171,70 +147,12 @@ export default function HomeScreen() {
         </ScrollView>
 
         {/* ── YOUR STATS ── */}
-        <View style={styles.statsHeader}>
-          <View style={styles.waveDecor}>
-            {WAVE_HEIGHTS.map((h, i) => (
-              <View
-                key={i}
-                style={{
-                  width: 4,
-                  height: h,
-                  backgroundColor: 'rgba(139,92,246,0.5)',
-                  borderRadius: 2,
-                }}
-              />
-            ))}
-          </View>
-          <Text style={styles.sectionLabel}>YOUR STATS</Text>
-        </View>
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <View
-              style={[
-                styles.statIconCircle,
-                { backgroundColor: 'rgba(249,115,22,0.18)' },
-              ]}
-            >
-              <Text style={styles.statIconEmoji}>🔥</Text>
-            </View>
-            <Text style={[styles.statNumber, { color: '#f97316' }]}>
-              {Math.round(stats.totalCalories)}
-            </Text>
-            <Text style={styles.statLabel}>cal burned</Text>
-            <Sparkline color="#f97316" />
-          </View>
-
-          <View style={styles.statCard}>
-            <View
-              style={[
-                styles.statIconCircle,
-                { backgroundColor: 'rgba(34,211,238,0.18)' },
-              ]}
-            >
-              <Text style={styles.statIconEmoji}>⏱</Text>
-            </View>
-            <Text style={[styles.statNumber, { color: '#22d3ee' }]}>
-              {Math.round(stats.totalSec / 60)}
-            </Text>
-            <Text style={styles.statLabel}>min this week</Text>
-            <Sparkline color="#22d3ee" />
-          </View>
-
-          <View style={styles.statCard}>
-            <View
-              style={[
-                styles.statIconCircle,
-                { backgroundColor: 'rgba(34,197,94,0.18)' },
-              ]}
-            >
-              <Text style={styles.statIconEmoji}>🎯</Text>
-            </View>
-            <Text style={[styles.statNumber, { color: '#22c55e' }]}>
-              {stats.count * 4}
-            </Text>
-            <Text style={styles.statLabel}>dodges</Text>
-            <Sparkline color="#22c55e" />
-          </View>
+        <View style={styles.statsImageCard}>
+          <Image
+            source={require('../../assets/images/stats.png')}
+            style={styles.statsImage}
+            resizeMode="contain"
+          />
         </View>
 
         <View style={{ height: 20 }} />
@@ -609,54 +527,17 @@ const styles = StyleSheet.create({
     height: '100%',
   },
 
-  // ── YOUR STATS ──
-  statsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 10,
-  },
-  waveDecor: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 2,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: '#1c2330',
-    borderRadius: 14,
-    padding: 12,
-    gap: 2,
-    borderWidth: 1,
-    borderColor: '#2a3441',
-  },
-  statIconCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+  // ── YOUR STATS image ──
+  statsImageCard: {
+    width: '100%',
+    aspectRatio: 2172 / 724,
+    backgroundColor: '#070a0e',
+    borderRadius: 16,
+    overflow: 'hidden',
     marginBottom: 4,
   },
-  statIconEmoji: { fontSize: 14 },
-  statNumber: {
-    fontSize: 28,
-    fontWeight: '900',
-  },
-  statLabel: {
-    color: '#8a96a8',
-    fontSize: 11,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  sparkline: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 2,
-    height: 12,
+  statsImage: {
+    width: '100%',
+    height: '100%',
   },
 });
