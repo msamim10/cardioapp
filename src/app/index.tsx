@@ -140,31 +140,30 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* ── Hero banner ── */}
+        {/* ── Hero banner with embedded START RUN button ── */}
         <View style={styles.heroBanner}>
           <Image
             source={require('../../assets/images/topbanner.png')}
             style={styles.heroBannerImage}
             resizeMode="cover"
           />
-        </View>
-
-        {/* ── START RUN button ── */}
-        <Pressable
-          onPress={() => router.push('/workout')}
-          style={({ pressed }) => [styles.startBtn, pressed && { opacity: 0.88 }]}
-        >
-          <LinearGradient
-            colors={['#f97316', '#ef4444']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.startBtnGradient}
+          {/* START RUN sits over the bottom of the image */}
+          <Pressable
+            onPress={() => router.push('/workout')}
+            style={({ pressed }) => [styles.startBtn, pressed && { opacity: 0.88 }]}
           >
-            <Text style={styles.startBtnEmoji}>🏃</Text>
-            <Text style={styles.startBtnLabel}>START RUN</Text>
-            <Text style={styles.startBtnArrow}>{'>>'}</Text>
-          </LinearGradient>
-        </Pressable>
+            <LinearGradient
+              colors={['#f97316', '#ef4444']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.startBtnGradient}
+            >
+              <Text style={styles.startBtnEmoji}>🏃</Text>
+              <Text style={styles.startBtnLabel}>START RUN</Text>
+              <Text style={styles.startBtnArrow}>{'>>'}</Text>
+            </LinearGradient>
+          </Pressable>
+        </View>
 
         {/* ── Quick duration pills ── */}
         <View style={styles.pillRow}>
@@ -475,14 +474,17 @@ const styles = StyleSheet.create({
 
   // ── START RUN button ──
   startBtn: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    right: 16,
     borderRadius: 999,
-    height: 72,
-    marginBottom: 14,
+    height: 62,
     shadowColor: '#f97316',
-    shadowOpacity: 0.55,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 12,
+    shadowOpacity: 0.6,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 14,
     overflow: 'hidden',
   },
   startBtnGradient: {
