@@ -160,13 +160,15 @@ export default function HomeScreen() {
         </View>
 
         {/* ── GAME MODES ── */}
-        <View style={styles.modeImageCard}>
-          <Image
-            source={require('../../assets/images/mode.png')}
-            style={styles.modeImage}
-            resizeMode="contain"
-          />
-        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={styles.modeImageCard}>
+            <Image
+              source={require('../../assets/images/mode.png')}
+              style={styles.modeImage}
+              resizeMode="contain"
+            />
+          </View>
+        </ScrollView>
 
         {/* ── YOUR STATS ── */}
         <View style={styles.statsHeader}>
@@ -595,17 +597,16 @@ const styles = StyleSheet.create({
 
   // ── Game modes image ──
   modeImageCard: {
-    width: '100%',
-    height: 145,
+    width: 430,
+    aspectRatio: 2172 / 724,
     backgroundColor: '#070a0e',
     borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 20,
   },
   modeImage: {
-    width: '122%',
+    width: '100%',
     height: '100%',
-    alignSelf: 'center',
   },
 
   // ── YOUR STATS ──
