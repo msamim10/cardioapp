@@ -115,10 +115,13 @@ cardiosurf/
 - `_layout.tsx` — root `<Stack>`. Sets `headerShown: false`, dark
   `contentStyle`, `'fade'` animation. The `workout` screen has gestures
   disabled so a back-swipe doesn't kill your run.
-- `index.tsx` — home screen: "READY TO RUN?" hero, three stat cards
-  (Sessions / Total time / Calories), big `START WORKOUT` button, list
-  of the 5 most recent sessions. Pulls sessions from
-  `loadSessions()` / `summarizeSessions()` in `src/lib/storage.ts`.
+- `index.tsx` — home screen: image-led Gen-Z/game landing page.
+  Current top hero is `assets/images/top1.png` and is tappable to start
+  `/workout`. The challenge slot uses `assets/images/chal.png`. The
+  earlier generated game-mode cards and stats image were removed again,
+  so there is currently no game modes strip or stats section on home.
+  Header data still comes from `loadProfile()`, `loadSessions()`,
+  `computeStreak()`, and `summarizeSessions()` in `src/lib/storage.ts`.
 - `workout.tsx` — the entire game. Hosts `<SubwayScene>`,
   `<WorkoutHud>`, the loading overlay, the GLB preloader, the coin
   sound bank, the score ticker, the workout timer, and the cue
@@ -291,8 +294,14 @@ The interesting half of the codebase. Major components:
   embedded base64 textures failed on native. See §5.
 - **`sounds/coin.mp3`** — the only audio asset that's actually
   played. `coin.wav` exists but nothing references it.
-- **`images/`** — app icons and splash. Nothing here is referenced by
-  the 3D scene.
+- **`images/`** — app icons, splash, and current home-screen raster
+  artwork. As of this handoff, `src/app/index.tsx` references:
+  - `top1.png` — the tappable top hero / start-run image.
+  - `chal.png` — the challenge banner underneath the hero.
+  Older home mock assets (`topbanner.png`, `real.png`, `ch1`-`ch4`,
+  `c/m/n/x`, `mode*.png`, `stats.png`) were experimental and are not
+  part of the current home UI. The 3D scene does not reference
+  `assets/images/`.
 
 ---
 
