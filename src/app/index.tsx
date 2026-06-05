@@ -157,24 +157,38 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* ── Hero banner + START RUN button ── */}
+        {/* ── Hero Banner ── */}
         <Pressable
-          onPress={() => router.push('/workout')}
           style={({ pressed }) => [styles.heroBanner, pressed && { opacity: 0.9 }]}
+          onPress={() => router.push('/workout')}
         >
-          {/* Main banner image */}
           <Image
-            source={require('../../assets/images/real1.png')}
+            source={require('../../assets/images/top1.png')}
             style={StyleSheet.absoluteFill}
             resizeMode="cover"
           />
-          {/* Button image overlaid at the bottom */}
-          <Animated.Image
-            source={require('../../assets/images/real2.png')}
-            style={[styles.heroBtn, { transform: [{ scale: pulseAnim }] }]}
-            resizeMode="contain"
-          />
         </Pressable>
+
+        {/* ── START RUN button ── */}
+        <Animated.View
+          style={[styles.startBtn, { transform: [{ scale: pulseAnim }] }]}
+        >
+          <Pressable
+            style={{ flex: 1 }}
+            onPress={() => router.push('/workout')}
+          >
+            <LinearGradient
+              colors={['#f97316', '#ef4444']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.startBtnGradient}
+            >
+              <Text style={styles.startBtnEmoji}>🏃</Text>
+              <Text style={styles.startBtnLabel}>START RUN</Text>
+              <Text style={styles.startBtnArrow}>{'>>'}</Text>
+            </LinearGradient>
+          </Pressable>
+        </Animated.View>
 
         {/* ── Duration pills ── */}
         <View style={styles.pillRow}>
@@ -532,14 +546,6 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 20,
     overflow: 'hidden',
-    marginBottom: 14,
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
-  heroBtn: {
-    // real2 is 2172×724 — rendered at 88% width, pinned near the bottom
-    width: '88%',
-    aspectRatio: 2172 / 724,
     marginBottom: 14,
   },
   heroLeft: {
