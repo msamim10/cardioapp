@@ -596,15 +596,16 @@ const styles = StyleSheet.create({
   // ── Game modes image ──
   modeImageCard: {
     width: '100%',
-    height: 135,
+    height: 145,
     backgroundColor: '#070a0e',
     borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 20,
   },
   modeImage: {
-    width: '100%',
+    width: '122%',
     height: '100%',
+    alignSelf: 'center',
   },
 
   // ── YOUR STATS ──
