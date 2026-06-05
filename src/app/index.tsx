@@ -140,17 +140,6 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* ── Hero banner — tap to start run ── */}
-        <Pressable
-          onPress={() => router.push('/workout')}
-          style={({ pressed }) => [styles.heroBanner, pressed && { opacity: 0.88 }]}
-        >
-          <Image
-            source={require('../../assets/images/topbanner.png')}
-            style={styles.heroBannerImage}
-            resizeMode="cover"
-          />
-        </Pressable>
 
         {/* ── Quick duration pills ── */}
         <View style={styles.pillRow}>
