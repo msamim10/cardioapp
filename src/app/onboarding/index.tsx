@@ -1,5 +1,4 @@
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRef, useState } from 'react';
 import {
   Animated,
@@ -136,11 +135,8 @@ export default function OnboardingScreen() {
 function Slide0({ onNext }: { onNext: () => void }) {
   return (
     <ScrollView contentContainerStyle={styles.slideContent} showsVerticalScrollIndicator={false}>
-      <LinearGradient
-        colors={['#0a0e14', '#0e2235', '#091824']}
-        locations={[0, 0.5, 1]}
-        style={StyleSheet.absoluteFillObject}
-      />
+      <View style={styles.slide0BgTop} />
+      <View style={styles.slide0BgBottom} />
 
       <View style={styles.slide0Inner}>
         <Text style={styles.eyebrow}>CARDIO SURF</Text>
@@ -361,6 +357,22 @@ const styles = StyleSheet.create({
   },
 
   // Slide 0
+  slide0BgTop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '50%',
+    backgroundColor: '#0a0e14',
+  },
+  slide0BgBottom: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '50%',
+    backgroundColor: '#0e1f2e',
+  },
   slide0Inner: {
     flex: 1,
     justifyContent: 'center',
