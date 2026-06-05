@@ -150,33 +150,6 @@ export default function HomeScreen() {
           />
         </Pressable>
 
-        {/* ── Duration pills ── */}
-        <View style={styles.pillRow}>
-          {(
-            [
-              { label: '⚡ 3 min', color: '#22c55e', big: false },
-              { label: '⏱ 5 min', color: '#a855f7', big: true },
-              { label: '⚡ 10 min', color: '#22c55e', big: false },
-            ] as const
-          ).map((pill, i) => (
-            <Pressable
-              key={i}
-              style={[
-                styles.pill,
-                {
-                  borderColor: pill.color,
-                  paddingVertical: pill.big ? 12 : 10,
-                },
-              ]}
-              onPress={() => router.push('/workout')}
-            >
-              <Text style={[styles.pillText, { color: pill.color }]}>
-                {pill.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
         {/* ── TODAY'S CHALLENGE ── */}
         <View style={styles.challengeCard}>
           <Image
@@ -569,24 +542,6 @@ const styles = StyleSheet.create({
     color: '#a855f7',
     fontSize: 11,
     fontWeight: '900',
-  },
-
-  // ── Duration pills ──
-  pillRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
-  pill: {
-    flex: 1,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    backgroundColor: '#141a23',
-    alignItems: 'center',
-  },
-  pillText: {
-    fontSize: 13,
-    fontWeight: '700',
   },
 
   // ── TODAY'S CHALLENGE ──
