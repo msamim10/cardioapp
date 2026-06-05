@@ -135,6 +135,32 @@ export default function HomeScreen() {
           />
         </View>
 
+        {/* ── GAME MODES ── */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.modeImageScroll}
+        >
+          {[
+            require('../../assets/images/mode1.png'),
+            require('../../assets/images/mode2.png'),
+            require('../../assets/images/mode3.png'),
+            require('../../assets/images/mode4.png'),
+          ].map((source, index) => (
+            <Pressable
+              key={index}
+              onPress={() => index < 3 && router.push('/workout')}
+              style={({ pressed }) => [styles.modeImageCard, pressed && { opacity: 0.88 }]}
+            >
+              <Image
+                source={source}
+                style={styles.modeImage}
+                resizeMode="contain"
+              />
+            </Pressable>
+          ))}
+        </ScrollView>
+
         {/* ── YOUR STATS ── */}
         <View style={styles.statsImageCard}>
           <Image
@@ -500,6 +526,24 @@ const styles = StyleSheet.create({
     color: '#22d3ee',
     fontSize: 12,
     fontWeight: '600',
+  },
+
+  // ── Game mode images ──
+  modeImageScroll: {
+    gap: 10,
+    paddingRight: 16,
+    marginBottom: 20,
+  },
+  modeImageCard: {
+    width: 138,
+    aspectRatio: 1,
+    backgroundColor: '#070a0e',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  modeImage: {
+    width: '100%',
+    height: '100%',
   },
 
   // ── YOUR STATS image ──
