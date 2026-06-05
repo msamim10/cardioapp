@@ -164,8 +164,8 @@ export default function HomeScreen() {
         >
           <Image
             source={require('../../assets/images/top1.png')}
-            style={StyleSheet.absoluteFill}
-            resizeMode="cover"
+            style={styles.heroBannerImage}
+            resizeMode="contain"
           />
         </Pressable>
 
@@ -221,8 +221,8 @@ export default function HomeScreen() {
         <View style={styles.challengeCard}>
           <Image
             source={require('../../assets/images/chal.png')}
-            style={StyleSheet.absoluteFill}
-            resizeMode="cover"
+            style={styles.challengeImage}
+            resizeMode="contain"
           />
         </View>
 
@@ -506,9 +506,14 @@ const styles = StyleSheet.create({
   heroBanner: {
     aspectRatio: 1586 / 992,
     width: '100%',
+    backgroundColor: '#070a0e',
     borderRadius: 20,
     overflow: 'hidden',
     marginBottom: 14,
+  },
+  heroBannerImage: {
+    width: '100%',
+    height: '100%',
   },
   heroLeft: {
     paddingLeft: 20,
@@ -661,9 +666,14 @@ const styles = StyleSheet.create({
   challengeCard: {
     width: '100%',
     aspectRatio: 2172 / 724,
+    backgroundColor: '#070a0e',
     borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 16,
+  },
+  challengeImage: {
+    width: '100%',
+    height: '100%',
   },
   challengeInner: {
     flexDirection: 'row',
