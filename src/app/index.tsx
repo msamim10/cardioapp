@@ -141,6 +141,18 @@ export default function HomeScreen() {
         </View>
 
 
+        {/* ── Hero banner (real.png) — tap to start run ── */}
+        <Pressable
+          onPress={() => router.push('/workout')}
+          style={({ pressed }) => [styles.heroBanner, pressed && { opacity: 0.88 }]}
+        >
+          <Image
+            source={require('../../assets/images/real.png')}
+            style={styles.heroBannerImage}
+            resizeMode="cover"
+          />
+        </Pressable>
+
         {/* ── Quick duration pills ── */}
         <View style={styles.pillRow}>
           {[
@@ -164,37 +176,26 @@ export default function HomeScreen() {
           ))}
         </View>
 
-        {/* ── TODAY'S CHALLENGE ── */}
-        <View style={styles.challengeCard}>
-          <LinearGradient
-            colors={['#2d1b69', '#1a0e3d']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={StyleSheet.absoluteFillObject}
-          />
-          <View style={styles.challengeEmojiBg}>
-            <Text style={styles.challengeEmoji}>{challenge.emoji}</Text>
-          </View>
-          <View style={styles.challengeBody}>
-            <Text style={styles.challengeLabel}>👑 TODAY'S CHALLENGE</Text>
-            <Text style={styles.challengeTitle}>{challenge.title}</Text>
-            <Text style={styles.challengeReward}>Reward: 🪙 +100 coins</Text>
-            <View style={styles.progressTrack}>
-              <View
-                style={[
-                  styles.progressFill,
-                  { width: `${Math.round(challengeProgress * 100)}%` as `${number}%` },
-                ]}
-              />
+        {/* ── CHALLENGES — swipeable image cards ── */}
+        <Text style={styles.challengesHeader}>👑 CHALLENGES</Text>
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          decelerationRate="fast"
+          contentContainerStyle={styles.challengeScroll}
+        >
+          {[
+            require('../../assets/images/ch1.png'),
+            require('../../assets/images/ch2.png'),
+            require('../../assets/images/ch3.png'),
+            require('../../assets/images/ch4.png'),
+          ].map((src, i) => (
+            <View key={i} style={styles.challengeImageCard}>
+              <Image source={src} style={styles.challengeImage} resizeMode="cover" />
             </View>
-            <Text style={styles.challengeFraction}>
-              {Math.min(stats.count, challenge.target)} / {challenge.target}
-            </Text>
-          </View>
-          <View style={styles.challengeArrowBtn}>
-            <Text style={styles.challengeArrowText}>→</Text>
-          </View>
-        </View>
+          ))}
+        </ScrollView>
 
         {/* ── GAME MODES ── */}
         <View style={styles.sectionHeaderRow}>
@@ -399,9 +400,7 @@ const styles = StyleSheet.create({
 
   // ── Hero banner ──
   heroBanner: {
-    // aspect ratio matches the source image (379×255) so it renders
-    // pixel-perfect without any upscale blur
-    aspectRatio: 379 / 255,
+    aspectRatio: 1672 / 941,
     width: '100%',
     borderRadius: 20,
     overflow: 'hidden',
@@ -512,71 +511,29 @@ const styles = StyleSheet.create({
   },
 
   // ── Challenge card ──
-  challengeCard: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    gap: 12,
-  },
-  challengeEmojiBg: {
-    width: 60,
-    height: 60,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  challengeEmoji: {
-    fontSize: 30,
-  },
-  challengeBody: {
-    flex: 1,
-    gap: 4,
-  },
-  challengeLabel: {
-    color: '#fde047',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  challengeTitle: {
-    color: '#ffffff',
-    fontSize: 20,
-    fontWeight: '800',
-    lineHeight: 24,
-  },
-  challengeReward: {
-    color: 'rgba(255,255,255,0.5)',
+  challengesHeader: {
+    color: '#8a96a8',
     fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: 10,
   },
-  progressTrack: {
-    height: 6,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginTop: 2,
+  challengeScroll: {
+    gap: 12,
+    paddingBottom: 4,
   },
-  progressFill: {
-    height: 6,
-    backgroundColor: '#fde047',
-    borderRadius: 3,
-  },
-  challengeFraction: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
-  },
-  challengeArrowBtn: {
-    width: 32,
-    height: 32,
+  challengeImageCard: {
+    width: 300,
+    aspectRatio: 1672 / 941,
     borderRadius: 16,
-    backgroundColor: '#22c55e',
-    alignItems: 'center',
-    justifyContent: 'center',
+    overflow: 'hidden',
   },
+  challengeImage: {
+    width: '100%',
+    height: '100%',
+  },
+  // kept so unused refs don't break tsc
   challengeArrowText: {
     color: '#fff',
     fontSize: 16,
