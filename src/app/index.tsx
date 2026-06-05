@@ -1,8 +1,7 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
-  Animated,
   Image,
   Pressable,
   ScrollView,
@@ -71,7 +70,6 @@ export default function HomeScreen() {
   const router = useRouter();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [profile, setProfile] = useState<UserProfile>({ weightKg: 70 });
-  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useFocusEffect(
     useCallback(() => {
@@ -91,23 +89,6 @@ export default function HomeScreen() {
       };
     }, [router]),
   );
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.03,
-          duration: 1100,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1100,
-          useNativeDriver: true,
-        }),
-      ]),
-    ).start();
-  }, [pulseAnim]);
 
   const stats = summarizeSessions(sessions);
   const streak = computeStreak(sessions);
@@ -168,27 +149,6 @@ export default function HomeScreen() {
             resizeMode="contain"
           />
         </Pressable>
-
-        {/* ── START RUN button ── */}
-        <Animated.View
-          style={[styles.startBtn, { transform: [{ scale: pulseAnim }] }]}
-        >
-          <Pressable
-            style={{ flex: 1 }}
-            onPress={() => router.push('/workout')}
-          >
-            <LinearGradient
-              colors={['#f97316', '#ef4444']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.startBtnGradient}
-            >
-              <Text style={styles.startBtnEmoji}>🏃</Text>
-              <Text style={styles.startBtnLabel}>START RUN</Text>
-              <Text style={styles.startBtnArrow}>{'>>'}</Text>
-            </LinearGradient>
-          </Pressable>
-        </Animated.View>
 
         {/* ── Duration pills ── */}
         <View style={styles.pillRow}>
@@ -608,39 +568,6 @@ const styles = StyleSheet.create({
   smileyText: {
     color: '#a855f7',
     fontSize: 11,
-    fontWeight: '900',
-  },
-
-  // ── START RUN ──
-  startBtn: {
-    borderRadius: 999,
-    height: 68,
-    marginBottom: 12,
-    shadowColor: '#f97316',
-    shadowOpacity: 0.55,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 12,
-    overflow: 'hidden',
-  },
-  startBtnGradient: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    borderRadius: 999,
-  },
-  startBtnEmoji: { fontSize: 26 },
-  startBtnLabel: {
-    color: '#ffffff',
-    fontSize: 22,
-    fontWeight: '900',
-    letterSpacing: 3,
-  },
-  startBtnArrow: {
-    color: '#ffffff',
-    fontSize: 20,
     fontWeight: '900',
   },
 
