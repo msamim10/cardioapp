@@ -1,496 +1,82 @@
-import { useFocusEffect, useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useState } from 'react';
-import {
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  computeStreak,
-  loadProfile,
-  loadSessions,
-  summarizeSessions,
-} from '@/lib/storage';
-import type { Session, UserProfile } from '@/lib/types';
+import { useRouter } from 'expo-router';
+import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { AppHeader, ChallengeFeatureCard, InfoPill, MetricCard, ModeTile, NeonScreen, SectionHeader, neon } from '@/components/neon/NeonUi';
 import { BottomTabBar } from '@/components/BottomTabBar';
-
-// ─────────────────────────── constants ───────────────────────────
-
-const AVATAR_COLORS = ['#7c3aed', '#db2777', '#059669', '#d97706', '#2563eb'];
-
-const DAILY_CHALLENGES = [
-  { title: 'Duck 20 obstacles', target: 20 },
-  { title: 'Collect 50 coins', target: 50 },
-  { title: 'Run 10 minutes', target: 10 },
-  { title: 'Jump 15 barriers', target: 15 },
-  { title: 'Complete 3 roof runs', target: 3 },
-];
-
-type CoinPos = { top: number; left?: number; right?: number };
-const COIN_POSITIONS: CoinPos[] = [
-  { top: 20, left: 60 },
-  { top: 55, right: 45 },
-  { top: 100, left: 130 },
-  { top: 18, right: 100 },
-  { top: 80, left: 30 },
-];
-
-// ─────────────────────────── Main screen ───────────────────────────
+import { useRunnerUiData } from '@/hooks/useRunnerUiData';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [profile, setProfile] = useState<UserProfile>({ weightKg: 70 });
-
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-      Promise.all([loadSessions(), loadProfile()]).then(([s, p]) => {
-        if (!cancelled) {
-          if (!p.hasSeenOnboarding) {
-            router.replace('/onboarding');
-            return;
-          }
-          setSessions(s);
-          setProfile(p);
-        }
-      });
-      return () => {
-        cancelled = true;
-      };
-    }, [router]),
-  );
-
-  const stats = summarizeSessions(sessions);
-  const streak = computeStreak(sessions);
-  const coins = profile.totalCoins ?? 0;
-  const displayName = profile.name ?? 'You';
-  const avatarLetter = displayName.charAt(0).toUpperCase();
-  const avatarBg = AVATAR_COLORS[(profile.name?.[0]?.charCodeAt(0) ?? 77) % 5];
-
-  const todayChallenge = DAILY_CHALLENGES[new Date().getDate() % 5];
-  const challengeProgress = Math.min(1, stats.count / todayChallenge.target);
+  const { data } = useRunnerUiData();
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ── Header ── */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
-              <Text style={styles.avatarLetter}>{avatarLetter}</Text>
-            </View>
-            <View style={styles.headerNameCol}>
-              <Text style={styles.headerName}>{displayName}</Text>
-              <View style={styles.streakPill}>
-                <Text style={styles.streakPillText}>🔥 {streak} DAY STREAK</Text>
-              </View>
-            </View>
-          </View>
+    <View style={styles.root}>
+      <NeonScreen>
+        <AppHeader user={data.user} onActionPress={() => router.push('/settings')} />
 
-          <View style={styles.headerRight}>
-            <View style={styles.coinRow}>
-              <View style={styles.coinCircle} />
-              <Text style={styles.coinCount}>{coins}</Text>
-              <View style={styles.coinPlus}>
-                <Text style={styles.coinPlusText}>+</Text>
-              </View>
-            </View>
-            <Pressable
-              style={styles.settingsBtn}
-              onPress={() => router.push('/settings')}
-              hitSlop={10}
-            >
-              <Text style={styles.settingsIcon}>⚙️</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* ── Hero Banner ── */}
         <Pressable
-          style={({ pressed }) => [styles.heroBanner, pressed && { opacity: 0.9 }]}
-          onPress={() => router.push('/workout')}
+          onPress={() => router.push('/start-run')}
+          style={({ pressed }) => [styles.homeHeroCard, pressed && styles.pressed]}
         >
-          <Image
-            source={require('../../assets/images/top1.png')}
-            style={styles.heroBannerImage}
-            resizeMode="contain"
-          />
+          <Image source={data.homeHeroImage} style={styles.homeHeroImage} resizeMode="cover" />
         </Pressable>
 
-        {/* ── TODAY'S CHALLENGE ── */}
-        <View style={styles.challengeCard}>
-          <Image
-            source={require('../../assets/images/chal.png')}
-            style={styles.challengeImage}
-            resizeMode="contain"
-          />
+        <View style={styles.quickRow}>
+          {data.quickDurations.map((item) => (
+            <InfoPill key={item.id} icon={item.icon} accent={item.accent} label={item.label} />
+          ))}
         </View>
 
-        <View style={{ height: 20 }} />
-      </ScrollView>
+        <ChallengeFeatureCard challenge={data.dailyChallenge} onPress={() => router.push('/challenges')} />
 
+        <SectionHeader title="Game Modes" actionLabel="View all" onActionPress={() => router.push('/play')} />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modeList}>
+          {data.modes.slice(0, 4).map((mode) => (
+            <ModeTile key={mode.id} mode={mode} onPress={() => router.push('/start-run')} />
+          ))}
+        </ScrollView>
+
+        <SectionHeader title="Your Stats" />
+        <View style={styles.statsRow}>
+          {data.homeStats.map((metric) => (
+            <MetricCard key={metric.id} metric={metric} />
+          ))}
+        </View>
+      </NeonScreen>
       <BottomTabBar />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#070a0e' },
-  scroll: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 16,
+  root: {
+    flex: 1,
+    backgroundColor: neon.bg,
   },
-
-  // ── Header ──
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
+  homeHeroCard: {
+    width: '100%',
+    aspectRatio: 1.6,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: neon.panel,
   },
-  headerLeft: {
+  homeHeroImage: {
+    width: '100%',
+    height: '100%',
+  },
+  quickRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 10,
   },
-  avatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    alignItems: 'center',
-    justifyContent: 'center',
+  modeList: {
+    gap: 12,
+    paddingRight: 18,
   },
-  avatarLetter: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  headerNameCol: { gap: 4 },
-  headerName: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  streakPill: {
-    backgroundColor: 'rgba(251,146,60,0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(251,146,60,0.4)',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    alignSelf: 'flex-start',
-  },
-  streakPillText: {
-    color: '#fb923c',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  headerRight: {
+  statsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  coinRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  coinCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#fde047',
-  },
-  coinCount: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  coinPlus: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#22c55e',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  coinPlusText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '900',
-    lineHeight: 18,
-  },
-  settingsBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: '#1c2330',
-    borderWidth: 1,
-    borderColor: '#2a3441',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  settingsIcon: { fontSize: 18 },
-
-  // ── Hero Banner ──
-  heroBanner: {
-    aspectRatio: 1586 / 992,
-    width: '100%',
-    backgroundColor: '#070a0e',
-    borderRadius: 20,
-    overflow: 'hidden',
-    marginBottom: 14,
-  },
-  heroBannerImage: {
-    width: '100%',
-    height: '100%',
-  },
-  heroLeft: {
-    paddingLeft: 20,
-    paddingTop: 28,
-    zIndex: 2,
-  },
-  heroKeep: {
-    color: '#39d353',
-    fontSize: 40,
-    fontWeight: '900',
-    transform: [{ rotate: '-4deg' }],
-  },
-  heroMoving: {
-    color: '#fde047',
-    fontSize: 40,
-    fontWeight: '900',
-    transform: [{ rotate: '-4deg' }],
-    marginTop: -6,
-  },
-  heroRight: {
-    position: 'absolute',
-    right: 18,
-    top: 24,
-    zIndex: 2,
-  },
-  heroPinkText: {
-    color: '#f472b6',
-    fontSize: 22,
-    fontWeight: '900',
-    textAlign: 'right',
-  },
-  floatingCoin: {
-    position: 'absolute',
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#fde047',
-    borderWidth: 2,
-    borderColor: '#f59e0b',
-    zIndex: 2,
-  },
-  heroCharacter: {
-    position: 'absolute',
-    bottom: 0,
-    left: '38%',
-    alignItems: 'center',
-    zIndex: 3,
-  },
-  charHead: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#fbbf24',
-  },
-  charBody: {
-    width: 30,
-    height: 45,
-    borderRadius: 6,
-    backgroundColor: '#f97316',
-  },
-  charLegs: {
-    flexDirection: 'row',
-    gap: 4,
-  },
-  charLeg: {
-    width: 10,
-    height: 28,
-    borderRadius: 5,
-    backgroundColor: '#1c1c2e',
-  },
-  groundLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: 'rgba(139,92,246,0.35)',
-  },
-  smileyBadge: {
-    position: 'absolute',
-    right: 14,
-    bottom: 40,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderWidth: 1,
-    borderColor: '#a855f7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 2,
-  },
-  smileyText: {
-    color: '#a855f7',
-    fontSize: 11,
-    fontWeight: '900',
-  },
-
-  // ── TODAY'S CHALLENGE ──
-  challengeCard: {
-    width: '100%',
-    aspectRatio: 2172 / 724,
-    backgroundColor: '#070a0e',
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 16,
-  },
-  challengeImage: {
-    width: '100%',
-    height: '100%',
-  },
-  challengeInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 12,
   },
-  challengeIllustration: {
-    width: 64,
-    height: 64,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
+  pressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.985 }],
   },
-  duckBody: {
-    width: 40,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: '#6d28d9',
-    position: 'absolute',
-    bottom: 6,
-    alignSelf: 'center',
-  },
-  duckHead: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#7c3aed',
-    position: 'absolute',
-    top: 4,
-    alignSelf: 'center',
-  },
-  duckBeak: {
-    width: 10,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#fde047',
-    position: 'absolute',
-    top: 22,
-    left: 38,
-  },
-  duckGlasses: {
-    width: 20,
-    height: 4,
-    backgroundColor: '#065f46',
-    position: 'absolute',
-    top: 18,
-    alignSelf: 'center',
-  },
-  challengeContent: { flex: 1 },
-  challengeLabel: {
-    color: '#fde047',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    marginBottom: 2,
-  },
-  challengeTitle: {
-    color: '#ffffff',
-    fontSize: 20,
-    fontWeight: '800',
-    marginBottom: 2,
-  },
-  challengeReward: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 12,
-    marginBottom: 6,
-  },
-  progressTrack: {
-    width: '100%',
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    marginBottom: 4,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 3,
-    backgroundColor: '#22c55e',
-  },
-  progressLabel: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 11,
-  },
-  challengeCrown: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    fontSize: 22,
-  },
-  challengeArrowBtn: {
-    position: 'absolute',
-    bottom: 12,
-    right: 12,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#22c55e',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  challengeArrowText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '900',
-  },
-
-  // ── Section headers ──
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  sectionLabel: {
-    color: '#8a96a8',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-  },
-  viewAll: {
-    color: '#22d3ee',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-
 });

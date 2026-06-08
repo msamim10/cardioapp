@@ -27,6 +27,11 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="index" />
+        <Stack.Screen name="play" />
+        <Stack.Screen name="start-run" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="challenges" />
+        <Stack.Screen name="progress" />
+        <Stack.Screen name="profile" />
         <Stack.Screen name="onboarding/index" options={{ animation: 'fade', gestureEnabled: false }} />
         <Stack.Screen name="community" options={{ animation: 'fade' }} />
         <Stack.Screen
