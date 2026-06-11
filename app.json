@@ -35,7 +35,14 @@
           }
         }
       ],
-      "expo-asset",
+      [
+        "expo-asset",
+        {
+          "assets": [
+            "./assets/models/gameplay"
+          ]
+        }
+      ],
       "expo-font",
       "expo-web-browser",
       "expo-audio"
