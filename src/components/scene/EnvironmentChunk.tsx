@@ -1,169 +1,168 @@
 import { memo, useMemo } from 'react';
-import { ARCADE_PALETTE, CHUNK_LENGTH, GROUND_COLOR, LANE_X, TRACK_WIDTH } from '@/lib/constants';
-import { getModelAsset, type ModelKey } from '@/lib/modelRegistry';
-import { Building, type BuildingSpec } from './buildings';
+import { CHUNK_LENGTH, LANE_X } from '@/lib/constants';
+import { getCityAsset, getCityAtlas, type CityModelKey } from '@/lib/cityBuilderRegistry';
+import { RAMP_ANGLE, RAMP_END_Z, groundHeightAtZ, isOnRamp } from '@/lib/terrain';
+import type { WorkoutSceneVariant } from '@/lib/types';
 import { GLBModel } from './models/GLBModel';
-import { RoundedBox } from './RoundedBox';
-import { StreetProp, type StreetPropSpec } from './StreetProps';
 
 type Props = {
   startZ: number;
   seed?: number;
+  variant?: WorkoutSceneVariant;
 };
 
-const HALF_WIDTH = TRACK_WIDTH / 2;
-const TIE_SPACING = 1.4;
-const RAIL_OFFSET = 0.55;
-const SIDE_BARRIER_INSET = 0.25;
-const BARRIER_HEIGHT = 0.95;
-const BARRIER_WIDTH = 0.5;
-const FENCE_POST_SPACING = 3.0;
-const TRAFFIC_LIGHT_RAIL_Y = BARRIER_HEIGHT + 0.05;
+const ROAD_WIDTH = 6.8;
+const SIDEWALK_WIDTH = 2.4;
+const SIDEWALK_X = ROAD_WIDTH / 2 + SIDEWALK_WIDTH / 2;
+const BUILDING_X = ROAD_WIDTH / 2 + SIDEWALK_WIDTH + 4.2;
+const PROP_CURB_X = ROAD_WIDTH / 2 + 0.7;
+const PROP_SIDEWALK_X = ROAD_WIDTH / 2 + 1.7;
 
-type CityPropKey = Extract<
-  ModelKey,
-  | 'trafficLight'
-  | 'billboard'
-  | 'busStop'
-  | 'busStopSign'
-  | 'stopSign'
-  | 'fireHydrant'
-  | 'trashCan'
-  | 'bench'
-  | 'tree'
-  | 'mailbox'
-  | 'dumpster'
-  | 'cone'
+// The run begins inside a tunnel that climbs the ramp up to the city. The
+// tunnel spans the ramp region (startZ down to RAMP_END_Z); everything past it
+// is the open, elevated city. Because recycled chunks always get a MORE
+// negative startZ, the tunnel only ever appears once, at the start of the run.
+const TUNNEL_HALF_W = 4.6;
+const TUNNEL_H = 5.6;
+
+const ATLAS = getCityAtlas();
+
+type BuildingKey = Extract<
+  CityModelKey,
+  | 'buildingA'
+  | 'buildingB'
+  | 'buildingC'
+  | 'buildingD'
+  | 'buildingE'
+  | 'buildingF'
+  | 'buildingG'
+  | 'buildingH'
+  | 'watertower'
 >;
 
-type CityGltfProp = {
-  kind: CityPropKey;
+type PropKey = Extract<
+  CityModelKey,
+  | 'bench'
+  | 'box'
+  | 'boxB'
+  | 'bush'
+  | 'dumpster'
+  | 'fireHydrant'
+  | 'rocks'
+  | 'streetlight'
+  | 'trafficLight'
+  | 'trafficLightB'
+>;
+
+type CityBuildingSpec = {
+  key: BuildingKey;
+  side: -1 | 1;
+  z: number;
+  height: number;
+  rotY: number;
+};
+
+type CityPropSpec = {
+  key: PropKey;
   side: -1 | 1;
   x: number;
   z: number;
   rotY: number;
 };
 
-const CITY_PROP_HEIGHTS: Record<CityPropKey, number> = {
-  trafficLight: 2.45,
-  billboard: 2.15,
-  busStop: 1.65,
-  busStopSign: 1.6,
-  stopSign: 1.25,
-  fireHydrant: 0.55,
-  trashCan: 0.7,
-  bench: 0.62,
-  tree: 2.35,
-  mailbox: 0.75,
-  dumpster: 0.82,
-  cone: 0.42,
-};
-
-const TRAFFIC_LIGHT_TEXTURE = require('../../../assets/models/trafficLight.png');
-
-const CITY_PROP_KEYS: CityPropKey[] = [
-  'trafficLight',
-  'billboard',
-  'stopSign',
-  'fireHydrant',
-  'trashCan',
-  'bench',
-  'tree',
-  'mailbox',
-  'dumpster',
-  'cone',
+const BUILDING_KEYS: BuildingKey[] = [
+  'buildingA',
+  'buildingB',
+  'buildingC',
+  'buildingD',
+  'buildingE',
+  'buildingF',
+  'buildingG',
+  'buildingH',
 ];
 
+const PROP_KEYS: PropKey[] = [
+  'bench',
+  'box',
+  'boxB',
+  'bush',
+  'dumpster',
+  'fireHydrant',
+  'rocks',
+  'streetlight',
+  'trafficLight',
+  'trafficLightB',
+];
+
+const CURB_PROPS = new Set<PropKey>([
+  'streetlight',
+  'trafficLight',
+  'trafficLightB',
+  'fireHydrant',
+  'bush',
+  'rocks',
+]);
+
 /**
- * One reusable chunk of OUTDOOR cartoon subway environment.
- * Bright arcade palette, rounded geometry, painted graffiti on buildings
- * and barriers. No ceiling / no walls - open sky.
+ * City runner chunk assembled from City Builder Bits GLB pieces.
+ * The center road stays clear for three-lane gameplay; buildings and props
+ * only frame the sides of the runner path.
  */
-function EnvironmentChunkComponent({ startZ, seed = 0 }: Props) {
+function EnvironmentChunkComponent({ startZ, seed = 0, variant = 'city-builder' }: Props) {
   const centerZ = -CHUNK_LENGTH / 2;
+  const isCity = variant === 'city-builder';
+  const isTunnel = isCity && startZ > RAMP_END_Z;
+  // The exit chunk is the last tunnel chunk: its far edge crosses the ramp end.
+  const isTunnelExit = isTunnel && startZ - CHUNK_LENGTH <= RAMP_END_Z;
+
+  // Place + tilt the chunk so its floor follows the elevation profile. Ramp
+  // chunks are rotated about X so their floors join into one continuous climb;
+  // flat chunks (the start approach and the elevated city) stay level.
+  const centerWorldZ = startZ - CHUNK_LENGTH / 2;
+  const onRamp = isCity && isOnRamp(centerWorldZ);
+  const groupY = isCity ? groundHeightAtZ(startZ) : 0;
+  const groupTilt = onRamp ? RAMP_ANGLE : 0;
 
   const decor = useMemo(() => {
     const rng = mulberry32(seed >>> 0 || 1);
+    const buildings: CityBuildingSpec[] = [];
+    const props: CityPropSpec[] = [];
 
-    const tieCount = Math.floor(CHUNK_LENGTH / TIE_SPACING);
-    const ties: { z: number }[] = [];
-    for (let i = 0; i < tieCount; i++) {
-      ties.push({ z: -i * TIE_SPACING - TIE_SPACING / 2 });
-    }
-
-    // Skyline - 5 buildings per side, close enough to read as a dense city wall.
-    const buildings: BuildingSpec[] = [];
-    for (const side of [-1, 1] as const) {
-      for (let i = 0; i < 5; i++) {
-        const variant = Math.floor(rng() * 7);
-        const width = 3.0 + rng() * 2.6;
-        const depth = 2.6 + rng() * 1.6;
-        // GLB city assets are broad after fitting. Keep them skyline-sized
-        // and push them well beyond the barriers so they never overlap lanes.
-        const height = 6.4 + rng() * 3.4;
-        const baseX = (HALF_WIDTH + 2.25) * side;
-        const jitterX = rng() * 0.25;
-        const z = -(i + 0.45) * (CHUNK_LENGTH / 5) - rng() * 0.55;
-        const bodyColor = ARCADE_PALETTE.buildings[
-          Math.floor(rng() * ARCADE_PALETTE.buildings.length)
-        ];
-        let accentColor = ARCADE_PALETTE.buildings[
-          Math.floor(rng() * ARCADE_PALETTE.buildings.length)
-        ];
-        // Ensure accent != body for visual contrast
-        if (accentColor === bodyColor) {
-          accentColor = ARCADE_PALETTE.graffiti[
-            Math.floor(rng() * ARCADE_PALETTE.graffiti.length)
-          ];
+    if (variant === 'city-builder') {
+      for (const side of [-1, 1] as const) {
+        const perSide = 3;
+        for (let i = 0; i < perSide; i++) {
+          // Occasionally drop a water tower in to break up the skyline.
+          const useTower = rng() > 0.82;
+          buildings.push({
+            key: useTower
+              ? 'watertower'
+              : BUILDING_KEYS[Math.floor(rng() * BUILDING_KEYS.length)],
+            side,
+            z: -(i + 0.5) * (CHUNK_LENGTH / perSide) + (rng() - 0.5) * 1.4,
+            height: useTower ? 5.5 + rng() * 1.5 : 9 + rng() * 6,
+            rotY: Math.floor(rng() * 4) * (Math.PI / 2),
+          });
         }
-        buildings.push({
-          variant,
-          x: baseX + jitterX * side,
-          z,
-          width,
-          depth,
-          height,
-          bodyColor,
-          accentColor,
-          windowRows: Math.max(2, Math.floor(height / 1.5)),
-          hasGraffiti: rng() > 0.35,
-          graffitiSeed: Math.floor(rng() * 100000) + seed,
-          hasRoofBox: rng() > 0.45,
-          hasSign: rng() > 0.55,
-          hasFireExit: rng() > 0.58,
-          hasWashingLine: rng() > 0.62,
-          hasSideBusStop: rng() > 0.72,
-          signColor: ARCADE_PALETTE.graffiti[
-            Math.floor(rng() * ARCADE_PALETTE.graffiti.length)
-          ],
-          facingIn: side === 1 ? 1 : -1, // building's graffiti always faces the track
-        });
       }
-    }
 
-    const posts: { x: number; z: number }[] = [];
-    const postCount = 1 + Math.floor(rng() * 2);
-    for (let i = 0; i < postCount; i++) {
-      const side = rng() > 0.5 ? 1 : -1;
-      const x = (HALF_WIDTH + 0.6) * side;
-      const z = -3 - rng() * (CHUNK_LENGTH - 6);
-      posts.push({ x, z });
-    }
-
-    const fencePosts: { side: -1 | 1; z: number }[] = [];
-    const fenceCount = Math.ceil(CHUNK_LENGTH / FENCE_POST_SPACING);
-    for (const side of [-1, 1] as const) {
-      for (let i = 0; i < fenceCount; i++) {
-        fencePosts.push({
+      const propCount = 5 + Math.floor(rng() * 3);
+      for (let i = 0; i < propCount; i++) {
+        const side = rng() > 0.5 ? 1 : -1;
+        const key = PROP_KEYS[Math.floor(rng() * PROP_KEYS.length)];
+        const onCurb = CURB_PROPS.has(key);
+        props.push({
+          key,
           side,
-          z: -i * FENCE_POST_SPACING - FENCE_POST_SPACING / 2,
+          x: (onCurb ? PROP_CURB_X : PROP_SIDEWALK_X) * side,
+          z: -2 - rng() * (CHUNK_LENGTH - 4),
+          rotY: side > 0 ? -Math.PI / 2 : Math.PI / 2,
         });
       }
     }
 
-    // Painted boost arrows on the ground (1-2 per chunk)
     const arrows: { x: number; z: number }[] = [];
-    if (rng() > 0.4) {
+    if (rng() > 0.45) {
       const lane = ([-1, 0, 1] as const)[Math.floor(rng() * 3)];
       arrows.push({
         x: LANE_X[lane.toString() as '-1' | '0' | '1'],
@@ -171,225 +170,318 @@ function EnvironmentChunkComponent({ startZ, seed = 0 }: Props) {
       });
     }
 
-    // Stickers / posters on side jersey barriers (1-2 per side per chunk)
-    const stickers: {
-      side: -1 | 1;
-      z: number;
-      color: string;
-      shape: 'circle' | 'rect';
-    }[] = [];
-    for (const side of [-1, 1] as const) {
-      const count = 1 + Math.floor(rng() * 2);
-      for (let i = 0; i < count; i++) {
-        stickers.push({
-          side,
-          z: -2 - rng() * (CHUNK_LENGTH - 4),
-          color: ARCADE_PALETTE.graffiti[
-            Math.floor(rng() * ARCADE_PALETTE.graffiti.length)
-          ],
-          shape: rng() > 0.5 ? 'circle' : 'rect',
-        });
-      }
-    }
-
-    // Street props in the strip between the barrier and the buildings.
-    // 2-4 per chunk total, sparse so they don't overcrowd.
-    const propKinds: StreetPropSpec['kind'][] = [
-      'hydrant', 'trashcan', 'bench', 'vendor', 'stopsign', 'newsbox',
-    ];
-    const propCount = 2 + Math.floor(rng() * 3);
-    const props: StreetPropSpec[] = [];
-    for (let i = 0; i < propCount; i++) {
-      const side = rng() > 0.5 ? 1 : -1;
-      const kind = propKinds[Math.floor(rng() * propKinds.length)];
-      // The vendor stall is wider so push it a bit further out.
-      const lateralOffset = kind === 'vendor' ? 1.2 : 0.7;
-      const x = (HALF_WIDTH + SIDE_BARRIER_INSET + BARRIER_WIDTH / 2 + lateralOffset) * side
-        + (rng() - 0.5) * 0.4;
-      const z = -2 - rng() * (CHUNK_LENGTH - 4);
-      // Face inward toward the track
-      const rotY = side > 0 ? -Math.PI / 2 : Math.PI / 2;
-      props.push({
-        kind,
-        x,
-        z,
-        rotY: rotY + (rng() - 0.5) * 0.3,
-        accent: ARCADE_PALETTE.graffiti[
-          Math.floor(rng() * ARCADE_PALETTE.graffiti.length)
-        ],
-      });
-    }
-
-    const cityGltfProps: CityGltfProp[] = [];
-    const gltfPropCount = 3 + Math.floor(rng() * 2);
-    for (let i = 0; i < gltfPropCount; i++) {
-      const side = rng() > 0.5 ? 1 : -1;
-      const kind = CITY_PROP_KEYS[Math.floor(rng() * CITY_PROP_KEYS.length)];
-      const nearFence =
-        kind === 'trafficLight' || kind === 'busStopSign' || kind === 'stopSign' || kind === 'cone';
-      const lateralOffset = nearFence ? 1.05 + rng() * 0.5 : 1.75 + rng() * 1.15;
-      const x = kind === 'trafficLight'
-        ? (HALF_WIDTH + SIDE_BARRIER_INSET) * side
-        : (HALF_WIDTH + SIDE_BARRIER_INSET + lateralOffset) * side;
-      const z = -1.5 - rng() * (CHUNK_LENGTH - 3);
-      cityGltfProps.push({
-        kind,
-        side,
-        x,
-        z,
-        rotY: side > 0 ? -Math.PI / 2 : Math.PI / 2,
-      });
-    }
-
-    // Readable sidewalk anchors per chunk. Keep bus stop signs rare so the
-    // sidewalk does not look like repeated signage every few meters.
-    const busStopSide = rng() > 0.5 ? 1 : -1;
-    const busStopRotY = busStopSide > 0 ? -Math.PI / 2 : Math.PI / 2;
-    if (rng() > 0.35) {
-      cityGltfProps.push({
-        kind: 'busStopSign',
-        side: busStopSide,
-        x: (HALF_WIDTH + SIDE_BARRIER_INSET + 1.25) * busStopSide,
-        z: -CHUNK_LENGTH * 0.28 - rng() * 2.5,
-        rotY: busStopRotY,
-      });
-    }
-
-    // Benches are less visually repetitive, so keep one on each side.
-    for (const side of [-1, 1] as const) {
-      const rotY = side > 0 ? -Math.PI / 2 : Math.PI / 2;
-      cityGltfProps.push({
-        kind: 'bench',
-        side,
-        x: (HALF_WIDTH + SIDE_BARRIER_INSET + 1.85) * side,
-        z: -CHUNK_LENGTH * 0.68 - rng() * 1.4,
-        rotY,
-      });
-    }
-
-    return { ties, buildings, posts, arrows, stickers, props, fencePosts, cityGltfProps };
-  }, [seed]);
+    return { buildings, props, arrows };
+  }, [seed, variant]);
 
   return (
-    <group position={[0, 0, startZ]}>
-      {/* Dirt ground */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, centerZ]}>
-        <planeGeometry args={[TRACK_WIDTH + 9.5, CHUNK_LENGTH]} />
-        <meshLambertMaterial color={GROUND_COLOR} />
-      </mesh>
+    <group position={[0, groupY, startZ]} rotation={[groupTilt, 0, 0]}>
+      {variant === 'city-builder' ? (
+        isTunnel ? (
+          <TunnelChunk isExit={isTunnelExit} />
+        ) : (
+          <CityChunk centerZ={centerZ} buildings={decor.buildings} props={decor.props} seed={seed} />
+        )
+      ) : (
+        <SimpleRunnerChunk centerZ={centerZ} />
+      )}
 
-      {/* Sidewalk strips cover the space between fence and buildings so lane
-          shifts never reveal blue sky gaps beside the skyline. */}
-      {([-1, 1] as const).map((side) => (
-        <mesh
-          key={`sidewalk-${side}`}
-          rotation={[-Math.PI / 2, 0, 0]}
-          position={[side * (HALF_WIDTH + 2.25), 0.01, centerZ]}
-        >
-          <planeGeometry args={[4.25, CHUNK_LENGTH]} />
-          <meshLambertMaterial color={side > 0 ? '#b9c0c9' : '#aeb7c2'} />
-        </mesh>
+      {/* Lane guide stripes. */}
+      {[-0.8, 0.8].map((x) => (
+        <group key={`lane-stripe-${x}`} position={[x, 0.09, centerZ]}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <mesh key={i} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -i * 4 - 1]}>
+              <planeGeometry args={[0.08, 1.6]} />
+              <meshBasicMaterial color="#f8fafc" />
+            </mesh>
+          ))}
+        </group>
       ))}
 
-      {/* Painted boost arrows on the ground */}
       {decor.arrows.map((a, i) => (
         <BoostArrow key={`arrow-${i}`} x={a.x} z={a.z} />
       ))}
+    </group>
+  );
+}
 
-      {/* Wooden ties */}
-      {decor.ties.map((t, i) => (
-        <RoundedBox
-          key={`tie-${i}`}
-          args={[TRACK_WIDTH - 0.2, 0.1, 0.34, 2, 0.03]}
-          position={[0, 0.05, t.z]}
-        >
-          <meshLambertMaterial color="#3b2615" />
-        </RoundedBox>
+function CityChunk({
+  centerZ,
+  buildings,
+  props,
+  seed,
+}: {
+  centerZ: number;
+  buildings: CityBuildingSpec[];
+  props: CityPropSpec[];
+  seed: number;
+}) {
+  return (
+    <group>
+      {/* Grass / lot ground that fills behind the sidewalks. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.04, centerZ]}>
+        <planeGeometry args={[40, CHUNK_LENGTH]} />
+        <meshLambertMaterial color="#6b7b53" />
+      </mesh>
+
+      {/* Asphalt road surface. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, centerZ]}>
+        <planeGeometry args={[ROAD_WIDTH, CHUNK_LENGTH]} />
+        <meshLambertMaterial color="#2f343b" />
+      </mesh>
+
+      {/* Curbs separate the road from the sidewalks. */}
+      {([-1, 1] as const).map((side) => (
+        <mesh key={`curb-${side}`} position={[side * (ROAD_WIDTH / 2 + 0.05), 0.1, centerZ]}>
+          <boxGeometry args={[0.14, 0.2, CHUNK_LENGTH]} />
+          <meshLambertMaterial color="#d6dae0" />
+        </mesh>
       ))}
 
-      {/* Silver rails (6: two per lane) */}
-      {([-1, 0, 1] as const).map((laneKey) =>
-        [-RAIL_OFFSET, RAIL_OFFSET].map((off, j) => {
-          const x = LANE_X[laneKey.toString() as '-1' | '0' | '1'] + off;
-          return (
-            <RoundedBox
-              key={`rail-${laneKey}-${j}`}
-              args={[0.08, 0.09, CHUNK_LENGTH, 2, 0.02]}
-              position={[x, 0.12, centerZ]}
-            >
-              <meshLambertMaterial color="#dde2ea" />
-            </RoundedBox>
-          );
-        }),
-      )}
+      {/* Sidewalk strips. */}
+      {([-1, 1] as const).map((side) => (
+        <mesh key={`sidewalk-${side}`} position={[SIDEWALK_X * side, 0.04, centerZ]}>
+          <boxGeometry args={[SIDEWALK_WIDTH, 0.12, CHUNK_LENGTH]} />
+          <meshLambertMaterial color={side > 0 ? '#9aa3ad' : '#8f98a3'} />
+        </mesh>
+      ))}
 
-      {/* Lightweight continuous side fence. Repeated GLB fence pieces caused
-          frame hitches whenever a chunk recycled; this keeps the same visual
-          barrier role without cloning dozens of GLBs every few seconds. */}
-      {([-1, 1] as const).map((side) => {
-        const x = side * (HALF_WIDTH + SIDE_BARRIER_INSET);
+      {buildings.map((building, i) => (
+        <GLBModel
+          key={`building-${i}`}
+          assetModule={getCityAsset(building.key)}
+          atlasModule={ATLAS}
+          fitHeight={building.height}
+          position={[BUILDING_X * building.side, 0, building.z]}
+          rotation={[0, building.rotY, 0]}
+          fallback={<BuildingFallback spec={building} />}
+        />
+      ))}
+
+      {props.map((prop, i) => {
+        const fit = propFit(prop.key);
         return (
-          <group key={`barrier-${side}`}>
-            <RoundedBox
-              args={[0.12, 0.12, CHUNK_LENGTH, 2, 0.03]}
-              position={[x, 0.95, centerZ]}
-            >
-              <meshLambertMaterial color="#f5f7fb" />
-            </RoundedBox>
-            <RoundedBox
-              args={[0.1, 0.1, CHUNK_LENGTH, 2, 0.03]}
-              position={[x, 0.48, centerZ]}
-            >
-              <meshLambertMaterial color="#cbd5e1" />
-            </RoundedBox>
-            {decor.fencePosts
-              .filter((piece) => piece.side === side)
-              .map((piece, i) => (
-                <RoundedBox
-                  key={`fence-post-${side}-${i}`}
-                  args={[0.22, 1.05, 0.16, 2, 0.04]}
-                  position={[x, 0.52, piece.z]}
-                >
-                  <meshLambertMaterial color={i % 2 === 0 ? '#e2e8f0' : '#f8fafc'} />
-                </RoundedBox>
-              ))}
-          </group>
+          <GLBModel
+            key={`prop-${i}`}
+            assetModule={getCityAsset(prop.key)}
+            atlasModule={ATLAS}
+            fitWidth={fit.w}
+            fitHeight={fit.h}
+            fitDepth={fit.d}
+            position={[prop.x, 0.06, prop.z]}
+            rotation={[0, prop.rotY, 0]}
+            fallback={<PropFallback spec={prop} />}
+          />
         );
       })}
 
-      {/* Street-level props (hydrants, benches, vendor stalls, etc.) */}
-      {decor.props.map((p, i) => (
-        <StreetProp key={`prop-${i}`} spec={p} />
+      {seed === 1 && <CityBanner z={-5.2} />}
+    </group>
+  );
+}
+
+function SimpleRunnerChunk({ centerZ }: { centerZ: number }) {
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, centerZ]}>
+      <planeGeometry args={[ROAD_WIDTH, CHUNK_LENGTH]} />
+      <meshLambertMaterial color="#2f343b" />
+    </mesh>
+  );
+}
+
+/**
+ * Enclosed starting tunnel. Full-length tunnel chunks are sealed walls +
+ * ceiling with light strips and arch ribs; the exit chunk stops the tunnel
+ * partway through and frames a bright portal that opens onto the city road.
+ */
+function TunnelChunk({ isExit }: { isExit: boolean }) {
+  const len = isExit ? CHUNK_LENGTH * 0.55 : CHUNK_LENGTH;
+  const segZ = -len / 2;
+  const ribCount = Math.max(2, Math.round(len / 3));
+  const lightCount = Math.max(2, Math.round(len / 5));
+  return (
+    <group>
+      {/* Tunnel floor (dark asphalt). */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, segZ]}>
+        <planeGeometry args={[TUNNEL_HALF_W * 2, len]} />
+        <meshLambertMaterial color="#23262b" />
+      </mesh>
+
+      {/* Side walls. */}
+      {([-1, 1] as const).map((side) => (
+        <mesh key={`wall-${side}`} position={[side * TUNNEL_HALF_W, TUNNEL_H / 2, segZ]}>
+          <boxGeometry args={[0.6, TUNNEL_H, len]} />
+          <meshLambertMaterial color="#3a3f47" />
+        </mesh>
       ))}
 
-      {/* GLB city props from the downloaded city pack: traffic lights,
-          billboards, signs, trees, benches, hydrants, cans, and cones. */}
-      {decor.cityGltfProps.map((p, i) => (
-        <CityGltfProp key={`city-gltf-prop-${i}`} spec={p} />
+      {/* Glowing service stripe low on each wall. */}
+      {([-1, 1] as const).map((side) => (
+        <mesh key={`trim-${side}`} position={[side * (TUNNEL_HALF_W - 0.32), 1.0, segZ]}>
+          <boxGeometry args={[0.06, 0.4, len]} />
+          <meshBasicMaterial color="#7fb2d6" />
+        </mesh>
       ))}
 
-      {/* Background skyline buildings (5 procedural variants) */}
-      {decor.buildings.map((b, i) => (
-        <Building key={`bldg-${i}`} spec={b} />
+      {/* Ceiling slab. */}
+      <mesh position={[0, TUNNEL_H, segZ]}>
+        <boxGeometry args={[TUNNEL_HALF_W * 2 + 0.6, 0.5, len]} />
+        <meshLambertMaterial color="#2b2f35" />
+      </mesh>
+
+      {/* Arch ribs at intervals. */}
+      {Array.from({ length: ribCount }).map((_, i) => (
+        <TunnelRib key={`rib-${i}`} z={-(i + 0.5) * (len / ribCount)} />
       ))}
 
-      {/* Lamp / signal posts */}
-      {decor.posts.map((p, i) => (
-        <group key={`post-${i}`} position={[p.x, 0, p.z]}>
-          <RoundedBox args={[0.12, 3.4, 0.12, 2, 0.04]} position={[0, 1.7, 0]}>
-            <meshLambertMaterial color="#3a3f47" />
-          </RoundedBox>
-          <RoundedBox
-            args={[0.7, 0.12, 0.12, 2, 0.04]}
-            position={[p.x > 0 ? -0.35 : 0.35, 3.15, 0]}
+      {/* Ceiling light strips. */}
+      {Array.from({ length: lightCount }).map((_, i) => (
+        <mesh
+          key={`light-${i}`}
+          position={[0, TUNNEL_H - 0.36, -(i + 0.5) * (len / lightCount)]}
+        >
+          <boxGeometry args={[1.4, 0.12, 0.55]} />
+          <meshBasicMaterial color="#fff4c9" />
+        </mesh>
+      ))}
+
+      {isExit && (
+        <>
+          <TunnelPortal z={-len} />
+          {/* Open city road beyond the tunnel mouth. */}
+          <mesh
+            rotation={[-Math.PI / 2, 0, 0]}
+            position={[0, 0.005, -(len + (CHUNK_LENGTH - len) / 2)]}
           >
-            <meshLambertMaterial color="#3a3f47" />
-          </RoundedBox>
-          <mesh position={[p.x > 0 ? -0.6 : 0.6, 2.95, 0]}>
-            <sphereGeometry args={[0.18, 12, 10]} />
-            <meshBasicMaterial color="#fff7b8" />
+            <planeGeometry args={[ROAD_WIDTH, CHUNK_LENGTH - len]} />
+            <meshLambertMaterial color="#2f343b" />
           </mesh>
-        </group>
+          {/* Daylight glow filling the portal opening. */}
+          <mesh position={[0, TUNNEL_H / 2, -len + 0.06]}>
+            <planeGeometry args={[TUNNEL_HALF_W * 2, TUNNEL_H]} />
+            <meshBasicMaterial color="#e4f1ff" transparent opacity={0.4} />
+          </mesh>
+        </>
+      )}
+    </group>
+  );
+}
+
+function TunnelRib({ z }: { z: number }) {
+  return (
+    <group position={[0, 0, z]}>
+      <mesh position={[0, TUNNEL_H - 0.2, 0]}>
+        <boxGeometry args={[TUNNEL_HALF_W * 2, 0.4, 0.4]} />
+        <meshLambertMaterial color="#21252b" />
+      </mesh>
+      {([-1, 1] as const).map((side) => (
+        <mesh key={side} position={[side * (TUNNEL_HALF_W - 0.25), TUNNEL_H / 2, 0]}>
+          <boxGeometry args={[0.4, TUNNEL_H, 0.4]} />
+          <meshLambertMaterial color="#21252b" />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+function TunnelPortal({ z }: { z: number }) {
+  return (
+    <group position={[0, 0, z]}>
+      {([-1, 1] as const).map((side) => (
+        <mesh key={side} position={[side * (TUNNEL_HALF_W + 0.2), TUNNEL_H / 2, 0]}>
+          <boxGeometry args={[0.7, TUNNEL_H + 0.6, 0.7]} />
+          <meshLambertMaterial color="#e2a23b" />
+        </mesh>
+      ))}
+      <mesh position={[0, TUNNEL_H + 0.3, 0]}>
+        <boxGeometry args={[TUNNEL_HALF_W * 2 + 1.4, 0.7, 0.7]} />
+        <meshLambertMaterial color="#e2a23b" />
+      </mesh>
+      {/* Hazard band across the top beam. */}
+      <mesh position={[0, TUNNEL_H + 0.3, 0.36]}>
+        <planeGeometry args={[TUNNEL_HALF_W * 2 + 1.4, 0.5]} />
+        <meshBasicMaterial color="#f5d76e" />
+      </mesh>
+    </group>
+  );
+}
+
+/** Target fit dimensions (meters) per prop so the tiny source models read well. */
+function propFit(key: PropKey): { w?: number; h?: number; d?: number } {
+  switch (key) {
+    case 'streetlight':
+      return { h: 3.0 };
+    case 'trafficLight':
+    case 'trafficLightB':
+      return { h: 2.6 };
+    case 'bench':
+      return { w: 1.4 };
+    case 'dumpster':
+      return { w: 1.5 };
+    case 'fireHydrant':
+      return { h: 0.95 };
+    case 'bush':
+      return { h: 1.1 };
+    case 'box':
+      return { h: 0.85 };
+    case 'boxB':
+      return { h: 0.7 };
+    case 'rocks':
+      return { w: 1.2 };
+    default:
+      return { h: 1.0 };
+  }
+}
+
+function BuildingFallback({ spec }: { spec: CityBuildingSpec }) {
+  const color = spec.side > 0 ? '#7891a8' : '#a87f6a';
+  const height = spec.height;
+  const footprint = 4.5;
+  return (
+    <group position={[BUILDING_X * spec.side, 0, spec.z]}>
+      <mesh position={[0, height / 2, 0]}>
+        <boxGeometry args={[footprint, height, footprint]} />
+        <meshLambertMaterial color={color} />
+      </mesh>
+    </group>
+  );
+}
+
+function PropFallback({ spec }: { spec: CityPropSpec }) {
+  const color =
+    spec.key === 'dumpster'
+      ? '#3f7d52'
+      : spec.key === 'bush'
+        ? '#3f9d4a'
+        : spec.key === 'rocks'
+          ? '#94a3b8'
+          : '#475569';
+  return (
+    <mesh position={[spec.x, 0.5, spec.z]}>
+      <boxGeometry args={[0.5, 1, 0.5]} />
+      <meshLambertMaterial color={color} />
+    </mesh>
+  );
+}
+
+function CityBanner({ z }: { z: number }) {
+  return (
+    <group position={[0, 0, z]}>
+      {[-1, 1].map((side) => (
+        <mesh key={`post-${side}`} position={[side * 3.55, 1.9, 0]}>
+          <boxGeometry args={[0.14, 3.8, 0.14]} />
+          <meshLambertMaterial color="#1f2937" />
+        </mesh>
+      ))}
+      <mesh position={[0, 3.2, 0]}>
+        <boxGeometry args={[5.8, 0.72, 0.14]} />
+        <meshLambertMaterial color="#8b5cf6" />
+      </mesh>
+      {/* Blocky fake text marks the city scene without font geometry. */}
+      {Array.from({ length: 11 }).map((_, i) => (
+        <mesh key={i} position={[-2.25 + i * 0.45, 3.2, -0.09]}>
+          <boxGeometry args={[0.24, 0.28, 0.04]} />
+          <meshBasicMaterial color="#fef3c7" />
+        </mesh>
       ))}
     </group>
   );
@@ -397,7 +489,7 @@ function EnvironmentChunkComponent({ startZ, seed = 0 }: Props) {
 
 function BoostArrow({ x, z }: { x: number; z: number }) {
   return (
-    <group position={[x, 0.03, z]} rotation={[-Math.PI / 2, 0, 0]}>
+    <group position={[x, 0.025, z]} rotation={[-Math.PI / 2, 0, 0]}>
       {[0, 0.6, 1.2].map((dz, i) => (
         <group key={i} position={[0, -dz, 0]}>
           <mesh position={[-0.35, 0, 0]} rotation={[0, 0, Math.PI / 4]}>
@@ -411,26 +503,6 @@ function BoostArrow({ x, z }: { x: number; z: number }) {
         </group>
       ))}
     </group>
-  );
-}
-
-function CityGltfProp({ spec }: { spec: CityGltfProp }) {
-  const asset = getModelAsset(spec.kind);
-  if (!asset) return null;
-  const rotY = spec.kind === 'trafficLight' ? spec.rotY + Math.PI / 2 : spec.rotY;
-
-  return (
-    <GLBModel
-      assetModule={asset}
-      fitHeight={CITY_PROP_HEIGHTS[spec.kind]}
-      position={[
-        spec.x,
-        spec.kind === 'trafficLight' ? TRAFFIC_LIGHT_RAIL_Y : 0,
-        spec.z,
-      ]}
-      rotation={[0, rotY, 0]}
-      textureAssetModule={spec.kind === 'trafficLight' ? TRAFFIC_LIGHT_TEXTURE : undefined}
-    />
   );
 }
 

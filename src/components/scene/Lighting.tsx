@@ -15,8 +15,8 @@ export function Lighting() {
         intensity={0.45}
         color="#bee0ff"
       />
-      {/* Sky bounce + warm ground bounce */}
-      <hemisphereLight args={['#9ed7f5', '#7a4e2a', 0.55]} />
+      {/* Sky bounce + warm gravel ground bounce */}
+      <hemisphereLight args={['#9ed7f5', '#8a7a63', 0.55]} />
     </>
   );
 }

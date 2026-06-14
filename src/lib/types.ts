@@ -1,5 +1,7 @@
 export type Lane = -1 | 0 | 1;
 
+export type WorkoutSceneVariant = 'city-builder' | 'current';
+
 export type ObstacleKind = 'barrier' | 'overhead' | 'wall' | 'trainGap';
 
 export type ActionCue =
@@ -45,6 +47,21 @@ export type ChunkSpec = {
   length: number;
   obstacles: ObstacleSpec[];
   roofRun?: { role: RoofRunRole; variant: RoofRunVariant; lane: Lane };
+};
+
+/**
+ * Mutable per-frame pose data the auto-runner writes and the visible
+ * character reads to animate itself (no React state - 60fps friendly).
+ */
+export type RunnerPose = {
+  /** Accumulating run-cycle phase in radians. */
+  runPhase: number;
+  /** 0..1 progress through the jump arc, 0 when grounded. */
+  jumpT: number;
+  /** 0..1 progress through the duck/roll, 0 when upright. */
+  duckT: number;
+  /** -1..1 lateral lean during lane changes (negative = leaning left). */
+  lean: number;
 };
 
 export type GoalVibe = 'sweat' | 'streak' | 'zone' | 'compete';

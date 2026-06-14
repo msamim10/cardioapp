@@ -12,7 +12,7 @@
  *     (alternating left / center / right). The player must leap sideways
  *     between trains at every chunk boundary instead of jumping forward.
  *     No `trainGap` obstacle is spawned; the forced lane change in
- *     AutoCamera triggers the leap.
+ *     AutoRunner triggers the leap.
  *
  * This module holds:
  *   - constants for layout, scaling, and camera transitions
@@ -242,7 +242,7 @@ export function cameraBaseY(chunks: ChunkSpec[], cameraZ: number): number {
  * next train (rather than the gap in front of it).
  *
  * `lookAhead` defaults to 3m so that for the 'lane' variant the combined
- * jump+lane-change triggered by AutoCamera ends right on top of the next
+ * jump+lane-change triggered by AutoRunner ends right on top of the next
  * chunk's first train (which starts ~4.65m past the chunk boundary in
  * 'run' chunks).
  */
@@ -265,7 +265,7 @@ export function forcedLaneFor(
 /**
  * The lane the closest upcoming roof chunk will require (within `lookAhead`),
  * even when that chunk is still further ahead than `forcedLaneFor` cares
- * about. Used by AutoCamera to PRE-cue the player ('left' / 'right') before
+ * about. Used by AutoRunner to PRE-cue the player ('left' / 'right') before
  * the actual forced lane change kicks in.
  */
 export function upcomingRoofLane(

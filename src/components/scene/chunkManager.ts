@@ -1,38 +1,18 @@
 import { CHUNKS_AHEAD, CHUNKS_BEHIND, CHUNK_LENGTH } from '@/lib/constants';
-import { roofRunForStartZ, trainGapObstacleSpec } from '@/lib/roofRun';
 import type {
   ChunkSpec,
-  Lane,
   ObstacleSpec,
-  RoofRunRole,
-  RoofRunVariant,
 } from '@/lib/types';
 
 /**
- * Computes the obstacle list and roofRun marker for a chunk that's being
- * (re)built. Roof-run chunks always suppress the normal spawner:
- *   - 'run' in the 'gap' variant gets a single trainGap that triggers a
- *     forward jump over the visible gap between train groups.
- *   - 'run' in the 'lane' variant gets NO obstacle - the forced lane
- *     change in AutoCamera (driven by the chunk's lane field) is what
- *     produces the sideways leap onto the next chunk's train.
- *   - 'entry' / 'exit' always get no obstacles.
- * Returns null when the chunk should fall through to the normal spawner.
+ * The City Builder version is intentionally a simple road endless runner,
+ * so no special train roof-run sections are generated.
  */
 function buildRoofRunForChunk(
-  startZ: number,
-  seed: number,
-): {
-  obstacles: ObstacleSpec[];
-  roofRun: { role: RoofRunRole; variant: RoofRunVariant; lane: Lane };
-} | null {
-  const roof = roofRunForStartZ(startZ);
-  if (!roof) return null;
-  const wantsGap = roof.role === 'run' && roof.variant === 'gap';
-  return {
-    obstacles: wantsGap ? [trainGapObstacleSpec(startZ, seed)] : [],
-    roofRun: { role: roof.role, variant: roof.variant, lane: roof.lane },
-  };
+  _startZ: number,
+  _seed: number,
+): { obstacles: ObstacleSpec[]; roofRun: NonNullable<ChunkSpec['roofRun']> } | null {
+  return null;
 }
 
 let chunkIdCounter = 0;

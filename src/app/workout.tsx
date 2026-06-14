@@ -1,15 +1,15 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useKeepAwake } from 'expo-keep-awake';
 import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import { SubwayScene } from '@/components/scene/SubwayScene';
 import { WorkoutHud } from '@/components/hud/WorkoutHud';
-import { preloadModel } from '@/components/scene/models/GLBModel';
+import { preloadGlbModel } from '@/components/scene/models/GLBModel';
 import { estimateCalories } from '@/lib/calories';
-import { getAllModelAssets } from '@/lib/modelRegistry';
+import { getCityPreloadAssets } from '@/lib/cityBuilderRegistry';
 import { theme } from '@/lib/theme';
-import type { ActionCue } from '@/lib/types';
+import type { ActionCue, WorkoutSceneVariant } from '@/lib/types';
 import { useUserWeight } from '@/hooks/useUserWeight';
 import { useWorkoutTimer } from '@/hooks/useWorkoutTimer';
 
@@ -18,6 +18,9 @@ const COIN_SOUND = require('../../assets/sounds/coin.mp3');
 export default function WorkoutScreen() {
   useKeepAwake();
   const router = useRouter();
+  const params = useLocalSearchParams<{ scene?: string }>();
+  const sceneVariant: WorkoutSceneVariant =
+    params.scene === 'current' ? 'current' : 'city-builder';
   const { weightKg } = useUserWeight();
   const [paused, setPaused] = useState(false);
   const [collectedCoinIds, setCollectedCoinIds] = useState<ReadonlySet<string>>(
@@ -30,38 +33,34 @@ export default function WorkoutScreen() {
   const coinSoundC = useAudioPlayer(COIN_SOUND, { downloadFirst: true });
   const [score, setScore] = useState(0);
   const [actionCue, setActionCue] = useState<ActionCue>(null);
-  // The workout is "loading" until every GLB has been pulled into the
-  // cache and the Canvas has had a beat to warm up. While loading we keep
-  // everything paused (scene animation, score ticker, workout timer) so
-  // the player doesn't lose game time to the first-frame hitch, and we
-  // mask the heavy initial render behind a Getting Ready overlay.
+  // The workout is "loading" while the selected scene warms up. For the
+  // City option we preload the City Builder Bits GLB models; the current runner
+  // option only needs a short Canvas warm-up. While loading we keep everything paused
+  // (scene animation, score ticker, workout timer) so the player doesn't
+  // lose game time to the first-frame hitch, and we mask the initial render
+  // behind a Getting Ready overlay.
   const [isReady, setIsReady] = useState(false);
   const isLoading = !isReady;
   const scenePaused = paused || isLoading;
 
-  // Warm the GLB cache as soon as the workout screen opens.
   useEffect(() => {
     let cancelled = false;
-    const assets = getAllModelAssets();
-    Promise.all(assets.map((asset) => preloadModel(asset)))
-      // Small extra delay so the Canvas can render its first frame after
-      // the preload promises resolve (preload finishing doesn't mean the
-      // GPU has built every material yet).
-      .then(() => new Promise<void>((resolve) => setTimeout(resolve, 400)))
+    const preload =
+      sceneVariant === 'city-builder'
+        ? Promise.all(getCityPreloadAssets().map((asset) => preloadGlbModel(asset)))
+        : Promise.resolve();
+    preload
+      .then(() => new Promise<void>((resolve) => setTimeout(resolve, 250)))
       .then(() => {
         if (!cancelled) setIsReady(true);
       })
       .catch(() => {
-        // If preloads fail we still want to enter the game eventually -
-        // GLBModel falls back to its `fallback` prop and missing assets
-        // just don't render, which is better than being stuck on the
-        // loading screen.
         if (!cancelled) setIsReady(true);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [sceneVariant]);
   useEffect(() => {
     setAudioModeAsync({
       playsInSilentMode: true,
@@ -112,6 +111,7 @@ export default function WorkoutScreen() {
   return (
     <View style={styles.root}>
       <SubwayScene
+        variant={sceneVariant}
         paused={scenePaused}
         collectedCoinIds={collectedCoinIds}
         onCoinCollect={handleCoinCollect}

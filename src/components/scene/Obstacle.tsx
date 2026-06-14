@@ -1,396 +1,223 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { ARCADE_PALETTE, LANE_X } from '@/lib/constants';
-import { getModelAsset } from '@/lib/modelRegistry';
-import type { ObstacleSpec } from '@/lib/types';
+import { getCityAsset, getCityAtlas, type CityModelKey } from '@/lib/cityBuilderRegistry';
+import { terrainHeight } from '@/lib/terrain';
+import type { ObstacleSpec, WorkoutSceneVariant } from '@/lib/types';
 import { GLBModel } from './models/GLBModel';
 import { RoundedBox } from './RoundedBox';
 
 type Props = {
   spec: ObstacleSpec;
+  variant?: WorkoutSceneVariant;
 };
 
 const LANE_WIDTH = 1.55;
-const TRAFFIC_BARRIER_TEXTURE = require('../../../assets/models/trafficBarrier.png');
-const OVERHEAD_OBSTACLE_TEXTURE = require('../../../assets/models/overheadObstacle.png');
 
-export function Obstacle({ spec }: Props) {
+const CAR_WIDTH = 1.55;
+const CAR_HEIGHT = 1.25;
+const CAR_DEPTH = 2.4;
+
+export function Obstacle({ spec, variant }: Props) {
   const x = LANE_X[spec.lane.toString() as '-1' | '0' | '1'];
-  const paletteIdx = useMemo(() => {
+  const hash = useMemo(() => {
     let h = 0;
     for (let i = 0; i < spec.id.length; i++) {
       h = (h * 31 + spec.id.charCodeAt(i)) & 0xffff;
     }
-    return h % ARCADE_PALETTE.trainBodies.length;
+    return h;
   }, [spec.id]);
 
+  let content: ReactNode;
   switch (spec.kind) {
-    case 'barrier': {
-      const barrierAsset = getModelAsset('trafficBarrier');
-      if (barrierAsset) {
-        return (
-          <GLBModel
-            assetModule={barrierAsset}
-            fitWidth={1.65}
-            scale={[1.1, 1.18, 1.1]}
-            position={[x, 0, spec.z]}
-            rotation={[0, 0, 0]}
-            textureAssetModule={TRAFFIC_BARRIER_TEXTURE}
-            fallback={<BarrierProp x={x} z={spec.z} />}
-          />
-        );
-      }
-      return <BarrierProp x={x} z={spec.z} />;
-    }
-    case 'overhead': {
-      const overheadAsset = getModelAsset('overheadObstacle');
-      if (overheadAsset) {
-        return <DuckObstacleModel assetModule={overheadAsset} x={x} z={spec.z} />;
-      }
-      return <CrossingArm x={x} z={spec.z} />;
-    }
-    case 'trainGap': {
+    case 'barrier':
+      content = <JumpBarrier x={x} z={spec.z} />;
+      break;
+    case 'overhead':
+      content = <RollBarrier x={x} z={spec.z} />;
+      break;
+    case 'trainGap':
       // Non-rendering jump trigger used by the roof-run section. The trains
-      // themselves are drawn by <TrainRoofRun />; this case just keeps the
-      // wall/train default below from accidentally rendering a train here.
+      // themselves are drawn by <TrainRoofRun />.
       return null;
-    }
     case 'wall':
-    default: {
-      const body = ARCADE_PALETTE.trainBodies[paletteIdx];
-      const roof = ARCADE_PALETTE.trainRoofs[paletteIdx];
-      const trim = ARCADE_PALETTE.trainTrims[paletteIdx];
-      const trainAsset = getModelAsset('train');
-      if (trainAsset) {
-        // GLB only. Workout screen preloads it during the countdown so the
-        // first train obstacle pops in instantly.
-        return (
-          <GLBModel
-            assetModule={trainAsset}
-            fitWidth={4.4}
-            scale={[1.08, 1.34, 1.08]}
-            position={[x, 0, spec.z]}
-            rotation={[0, Math.PI / 2, 0]}
-          />
-        );
-      }
-      return <TrainPrimitive x={x} z={spec.z} body={body} roof={roof} trim={trim} />;
-    }
+    default:
+      content = <CarObstacle x={x} z={spec.z} variant={hash % 4} />;
+      break;
   }
+
+  // Lift the obstacle onto the sloped terrain so it sits on the road surface.
+  const y = terrainHeight(variant, spec.z);
+  return y === 0 ? <>{content}</> : <group position={[0, y, 0]}>{content}</group>;
 }
 
-function DuckObstacleModel({
-  assetModule,
-  x,
-  z,
-}: {
-  assetModule: number;
-  x: number;
-  z: number;
-}) {
+function CarObstacle({ x, z, variant }: { x: number; z: number; variant: number }) {
+  const key: CityModelKey =
+    variant === 0
+      ? 'carHatchback'
+      : variant === 1
+        ? 'taxi'
+        : variant === 2
+          ? 'stationwagon'
+          : 'policeCar';
+  const isLongCar = key === 'stationwagon' || key === 'policeCar';
   return (
-    <group position={[x, 0, z]}>
-      <GLBModel
-        assetModule={assetModule}
-        fitWidth={1.7}
-        scale={[1.1, 1.4, 1.1]}
-        textureAssetModule={OVERHEAD_OBSTACLE_TEXTURE}
-        fallback={<CrossingArm x={0} z={0} />}
-      />
-    </group>
+    <GLBModel
+      assetModule={getCityAsset(key)}
+      atlasModule={getCityAtlas()}
+      fitWidth={CAR_WIDTH}
+      fitHeight={isLongCar ? 1.35 : CAR_HEIGHT}
+      fitDepth={isLongCar ? 2.75 : CAR_DEPTH}
+      position={[x, 0, z]}
+      rotation={[0, Math.PI, 0]}
+      fallback={<CarFallback x={x} z={z} van={isLongCar} />}
+    />
   );
 }
 
-function BarrierProp({ x, z }: { x: number; z: number }) {
+function CarFallback({ x, z, van }: { x: number; z: number; van: boolean }) {
   return (
     <group position={[x, 0, z]}>
-      <RoundedBox args={[LANE_WIDTH, 1.0, 0.55, 4, 0.12]} position={[0, 0.5, 0]}>
-        <meshLambertMaterial color="#fb923c" />
+      <RoundedBox args={[CAR_WIDTH, van ? 1.35 : 0.9, van ? 2.6 : 2.2, 3, 0.12]} position={[0, van ? 0.68 : 0.45, 0]}>
+        <meshLambertMaterial color={van ? '#38bdf8' : '#ef4444'} />
       </RoundedBox>
-      {/* Vertical-bar hazard stripes painted on the front (more readable) */}
-      {[-0.55, -0.18, 0.18, 0.55].map((sx, i) => (
-        <mesh key={`stripe-${i}`} position={[sx, 0.55, 0.29]} rotation={[0, 0, Math.PI / 7]}>
-          <planeGeometry args={[0.16, 0.85]} />
-          <meshBasicMaterial color="#0f172a" />
-        </mesh>
-      ))}
-      {/* Bright reflective top */}
-      <RoundedBox args={[LANE_WIDTH + 0.05, 0.12, 0.58, 3, 0.04]} position={[0, 1.05, 0]}>
-        <meshBasicMaterial color="#fef3c7" />
+      <RoundedBox args={[CAR_WIDTH * 0.72, 0.42, 0.7, 2, 0.08]} position={[0, van ? 1.25 : 0.9, -0.2]}>
+        <meshLambertMaterial color="#bae6fd" />
       </RoundedBox>
-    </group>
-  );
-}
-
-function CrossingArm({ x, z }: { x: number; z: number }) {
-  return (
-    <group position={[x, 0, z]}>
-      {/* Posts with stripes */}
-      {[-(LANE_WIDTH / 2) + 0.1, LANE_WIDTH / 2 - 0.1].map((px, i) => (
-        <group key={`post-${i}`} position={[px, 0, 0]}>
-          <RoundedBox args={[0.16, 2.0, 0.16, 2, 0.04]} position={[0, 1.0, 0]}>
-            <meshLambertMaterial color="#facc15" />
-          </RoundedBox>
-          {[0.35, 0.95, 1.55].map((y, j) => (
-            <mesh key={j} position={[0, y, 0.085]}>
-              <planeGeometry args={[0.18, 0.22]} />
-              <meshBasicMaterial color="#0f172a" />
-            </mesh>
-          ))}
-          {/* Concrete base */}
-          <RoundedBox args={[0.34, 0.16, 0.34, 2, 0.04]} position={[0, 0.08, 0]}>
-            <meshLambertMaterial color="#b8babf" />
-          </RoundedBox>
-        </group>
-      ))}
-      <RoundedBox args={[LANE_WIDTH + 0.15, 0.28, 0.26, 3, 0.07]} position={[0, 1.5, 0]}>
-        <meshLambertMaterial color="#fef9f5" />
-      </RoundedBox>
-      {[-0.55, -0.18, 0.18, 0.55].map((sx, i) => (
-        <mesh key={`stripe-${i}`} position={[sx, 1.5, 0.135]} rotation={[0, 0, Math.PI / 5]}>
-          <planeGeometry args={[0.24, 0.42]} />
-          <meshBasicMaterial color="#dc2626" />
-        </mesh>
-      ))}
-      {[-(LANE_WIDTH / 2) - 0.05, LANE_WIDTH / 2 + 0.05].map((lx, i) => (
-        <mesh key={`lamp-${i}`} position={[lx, 1.5, 0.16]}>
-          <sphereGeometry args={[0.11, 14, 12]} />
-          <meshBasicMaterial color="#fca5a5" />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
-function TrainPrimitive({
-  x,
-  z,
-  body,
-  roof,
-  trim,
-}: {
-  x: number;
-  z: number;
-  body: string;
-  roof: string;
-  trim: string;
-}) {
-  // A composition of ~50 primitives standing in for a stylized cartoon subway
-  // car: rounded body + bullet nose, four wheels on bogies, headlight housings
-  // with sphere bulbs, three door panels per side with frames + handles, four
-  // windows per side, route badge, side mirrors, multi-piece roof (vents +
-  // pantograph + AC unit), trim stripes, and rear lights.
-  return (
-    <group position={[x, 0, z]}>
-      {/* === BOGIES + WHEELS === */}
-      {/* Bogie housings (dark boxes under the body) */}
-      {[-1.0, 1.0].map((bz, i) => (
-        <RoundedBox
-          key={`bogie-${i}`}
-          args={[LANE_WIDTH * 0.7, 0.32, 0.7, 2, 0.06]}
-          position={[0, 0.35, bz]}
-        >
-          <meshLambertMaterial color="#1f2937" />
-        </RoundedBox>
-      ))}
-      {/* 4 wheels (cylinders rotated 90deg around z so axis is horizontal/x) */}
-      {[
-        [-LANE_WIDTH / 2 - 0.03, -1.0],
-        [LANE_WIDTH / 2 + 0.03, -1.0],
-        [-LANE_WIDTH / 2 - 0.03, 1.0],
-        [LANE_WIDTH / 2 + 0.03, 1.0],
-      ].map(([wx, wz], i) => (
-        <group key={`wheel-${i}`} position={[wx, 0.32, wz]} rotation={[0, 0, Math.PI / 2]}>
-          <mesh>
-            <cylinderGeometry args={[0.32, 0.32, 0.18, 18]} />
-            <meshLambertMaterial color="#0f172a" />
+      {[-0.52, 0.52].map((wx) =>
+        [-0.7, 0.7].map((wz) => (
+          <mesh key={`${wx}-${wz}`} position={[wx, 0.16, wz]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.18, 0.18, 0.12, 14]} />
+            <meshLambertMaterial color="#111827" />
           </mesh>
-          {/* Hubcap */}
-          <mesh position={[0.1, 0, 0]}>
-            <cylinderGeometry args={[0.18, 0.18, 0.02, 14]} />
-            <meshLambertMaterial color="#9aa3b2" />
-          </mesh>
-        </group>
-      ))}
-
-      {/* === MAIN BODY === */}
-      <RoundedBox args={[LANE_WIDTH, 2.3, 3.2, 5, 0.24]} position={[0, 1.55, 0]}>
-        <meshLambertMaterial color={body} />
-      </RoundedBox>
-      {/* Bullet nose (slightly smaller and forward) */}
-      <RoundedBox args={[LANE_WIDTH * 0.88, 2.05, 0.7, 5, 0.32]} position={[0, 1.5, 1.75]}>
-        <meshLambertMaterial color={body} />
-      </RoundedBox>
-
-      {/* === ROOF === */}
-      <RoundedBox args={[LANE_WIDTH + 0.12, 0.22, 3.35, 3, 0.06]} position={[0, 2.78, 0]}>
-        <meshLambertMaterial color={roof} />
-      </RoundedBox>
-      {/* AC unit */}
-      <RoundedBox args={[0.7, 0.28, 0.95, 3, 0.07]} position={[0, 3.03, 0.6]}>
-        <meshLambertMaterial color={trim} />
-      </RoundedBox>
-      {/* Air vents */}
-      {[-0.7, -0.25, 0.2].map((vz, i) => (
-        <RoundedBox key={`vent-${i}`} args={[0.55, 0.1, 0.18, 2, 0.03]} position={[0, 2.95, vz - 0.5]}>
-          <meshLambertMaterial color="#1f2937" />
-        </RoundedBox>
-      ))}
-
-      {/* === PANTOGRAPH (electrical pickup on the roof) === */}
-      <PantographAssembly />
-
-      {/* === FRONT FACE / "FACE" === */}
-      {/* Dark windshield */}
-      <mesh position={[0, 1.85, 2.105]}>
-        <planeGeometry args={[LANE_WIDTH * 0.72, 0.85]} />
-        <meshBasicMaterial color="#0b1320" />
-      </mesh>
-      {/* Windshield frame */}
-      <RoundedBox args={[LANE_WIDTH * 0.76, 0.95, 0.04, 3, 0.04]} position={[0, 1.85, 2.09]}>
-        <meshLambertMaterial color="#1f2937" />
-      </RoundedBox>
-      {/* Lower bumper */}
-      <RoundedBox args={[LANE_WIDTH * 0.95, 0.42, 0.18, 3, 0.06]} position={[0, 0.7, 2.1]}>
-        <meshLambertMaterial color={trim} />
-      </RoundedBox>
-      {/* Coupler / hitch */}
-      <RoundedBox args={[0.22, 0.16, 0.32, 2, 0.04]} position={[0, 0.5, 2.27]}>
-        <meshLambertMaterial color="#1f2937" />
-      </RoundedBox>
-      {/* Big chunky headlight housings with sphere bulbs */}
-      {[-0.45, 0.45].map((hx, i) => (
-        <group key={`hl-${i}`} position={[hx, 1.05, 2.105]}>
-          <RoundedBox args={[0.36, 0.3, 0.16, 3, 0.06]}>
-            <meshLambertMaterial color="#1f2937" />
-          </RoundedBox>
-          <mesh position={[0, 0, 0.085]}>
-            <sphereGeometry args={[0.13, 16, 12]} />
-            <meshBasicMaterial color="#fff8d4" />
-          </mesh>
-        </group>
-      ))}
-      {/* Route number badge - colored circle */}
-      <mesh position={[0, 2.4, 2.11]}>
-        <circleGeometry args={[0.2, 18]} />
-        <meshBasicMaterial color={trim} />
-      </mesh>
-      <mesh position={[0, 2.4, 2.115]}>
-        <ringGeometry args={[0.13, 0.17, 18]} />
-        <meshBasicMaterial color="#fef9f5" />
-      </mesh>
-
-      {/* === SIDE PANELS, DOORS, WINDOWS === */}
-      {([-1, 1] as const).map((side) => (
-        <SidePanels key={`side-${side}`} side={side} body={body} trim={trim} />
-      ))}
-
-      {/* === SIDE MIRRORS === */}
-      {([-1, 1] as const).map((side) => (
-        <group
-          key={`mirror-${side}`}
-          position={[side * (LANE_WIDTH / 2 + 0.18), 1.85, 1.6]}
-        >
-          <RoundedBox args={[0.22, 0.04, 0.04, 2, 0.02]} position={[side * 0.1, 0, 0]}>
-            <meshLambertMaterial color="#1f2937" />
-          </RoundedBox>
-          <RoundedBox args={[0.14, 0.18, 0.06, 2, 0.03]} position={[side * 0.22, 0, 0]}>
-            <meshLambertMaterial color={trim} />
-          </RoundedBox>
-        </group>
-      ))}
-
-      {/* === REAR LIGHTS === */}
-      {[-0.45, 0.45].map((rx, i) => (
-        <mesh key={`tail-${i}`} position={[rx, 1.05, -1.605]}>
-          <boxGeometry args={[0.28, 0.18, 0.04]} />
-          <meshBasicMaterial color="#fca5a5" />
-        </mesh>
-      ))}
+        )),
+      )}
     </group>
   );
 }
 
-function PantographAssembly() {
+/** Shared toll-gate pylon: rounded concrete post with hazard-striped base. */
+function BarrierPylon({ x, height }: { x: number; height: number }) {
   return (
-    <group position={[0, 3.1, -0.6]}>
-      {/* Base */}
-      <RoundedBox args={[0.4, 0.08, 0.4, 2, 0.03]} position={[0, 0, 0]}>
-        <meshLambertMaterial color="#1f2937" />
+    <group position={[x, 0, 0]}>
+      {/* Concrete foot */}
+      <RoundedBox args={[0.3, 0.24, 0.34, 2, 0.06]} position={[0, 0.12, 0]}>
+        <meshLambertMaterial color="#9aa0a8" />
       </RoundedBox>
-      {/* Two angled arms forming a diamond shape */}
-      {[-1, 1].map((s, i) => (
+      {/* Post */}
+      <RoundedBox args={[0.18, height, 0.2, 3, 0.06]} position={[0, height / 2 + 0.1, 0]}>
+        <meshLambertMaterial color="#b9bec6" />
+      </RoundedBox>
+      {/* Yellow/black hazard band */}
+      <mesh position={[0, 0.42, -0.105]} rotation={[0, Math.PI, 0]}>
+        <planeGeometry args={[0.18, 0.22]} />
+        <meshBasicMaterial color="#f7c623" />
+      </mesh>
+      {/* Beacon on top */}
+      <mesh position={[0, height + 0.16, 0]}>
+        <sphereGeometry args={[0.07, 12, 10]} />
+        <meshBasicMaterial color="#ff8a2a" />
+      </mesh>
+    </group>
+  );
+}
+
+/** White beam with red diagonal stripes, drawn on both faces. */
+function StripedBeam({ y, width }: { y: number; width: number }) {
+  const stripeCount = Math.max(4, Math.round(width / 0.34));
+  return (
+    <group position={[0, y, 0]}>
+      <RoundedBox args={[width, 0.3, 0.22, 3, 0.09]}>
+        <meshLambertMaterial color={ARCADE_PALETTE.hazardWhite} />
+      </RoundedBox>
+      {([1, -1] as const).map((face) =>
+        Array.from({ length: stripeCount }).map((_, i) => (
+          <mesh
+            key={`stripe-${face}-${i}`}
+            position={[-width / 2 + (i + 0.5) * (width / stripeCount), 0, face * 0.115]}
+            rotation={[0, face === 1 ? 0 : Math.PI, 0.55]}
+          >
+            <planeGeometry args={[0.17, 0.38]} />
+            <meshBasicMaterial color={ARCADE_PALETTE.hazardRed} />
+          </mesh>
+        )),
+      )}
+    </group>
+  );
+}
+
+/**
+ * The SS "jump only" barrier: striped beam at hip height with a grey
+ * lattice blocking the gap underneath (so no rolling under) - the player
+ * hops over the whole thing.
+ */
+function JumpBarrier({ x, z }: { x: number; z: number }) {
+  const width = LANE_WIDTH + 0.12;
+  const postX = width / 2 + 0.06;
+  const beamY = 0.82;
+  return (
+    <group position={[x, 0, z]}>
+      <BarrierPylon x={-postX} height={beamY + 0.12} />
+      <BarrierPylon x={postX} height={beamY + 0.12} />
+      <StripedBeam y={beamY} width={width} />
+      {/* Lattice fill below the beam: vertical bars + bottom rail */}
+      {Array.from({ length: 5 }).map((_, i) => (
         <mesh
-          key={`arm-${i}`}
-          position={[s * 0.13, 0.25, 0]}
-          rotation={[0, 0, s * 0.4]}
+          key={`bar-${i}`}
+          position={[-width / 2 + (i + 0.5) * (width / 5), beamY / 2, 0]}
         >
-          <boxGeometry args={[0.03, 0.55, 0.03]} />
-          <meshLambertMaterial color="#1f2937" />
+          <boxGeometry args={[0.05, beamY - 0.2, 0.05]} />
+          <meshLambertMaterial color={ARCADE_PALETTE.steelLight} />
         </mesh>
       ))}
-      {/* Top contact strip */}
-      <RoundedBox args={[0.55, 0.05, 0.12, 2, 0.02]} position={[0, 0.55, 0]}>
-        <meshLambertMaterial color="#9aa3b2" />
-      </RoundedBox>
+      <mesh position={[0, 0.18, 0]}>
+        <boxGeometry args={[width, 0.08, 0.08]} />
+        <meshLambertMaterial color={ARCADE_PALETTE.steel} />
+      </mesh>
     </group>
   );
 }
 
-function SidePanels({ side, body, trim }: { side: -1 | 1; body: string; trim: string }) {
-  const x = side * (LANE_WIDTH / 2 + 0.005);
-  const rotY = side === 1 ? -Math.PI / 2 : Math.PI / 2;
+/**
+ * The SS "roll only" barrier: the striped beam hangs at head height with a
+ * big blocked panel ABOVE it (so jumping is clearly impossible) and an open
+ * gap below - the player somersaults underneath.
+ */
+function RollBarrier({ x, z }: { x: number; z: number }) {
+  const width = LANE_WIDTH + 0.12;
+  const postX = width / 2 + 0.06;
+  const beamY = 1.3;
+  const panelH = 1.25;
+  const topY = beamY + 0.15 + panelH; // ~2.6m, far above the jump arc
   return (
-    <group position={[x, 0, 0]} rotation={[0, rotY, 0]}>
-      {/* Trim stripe along the bottom */}
-      <mesh position={[0, 0.95, 0.01]}>
-        <planeGeometry args={[2.95, 0.22]} />
-        <meshBasicMaterial color={trim} />
+    <group position={[x, 0, z]}>
+      <BarrierPylon x={-postX} height={topY - 0.2} />
+      <BarrierPylon x={postX} height={topY - 0.2} />
+      <StripedBeam y={beamY} width={width} />
+      {/* Blocked panel above the beam */}
+      <RoundedBox
+        args={[width, panelH, 0.14, 3, 0.05]}
+        position={[0, beamY + 0.15 + panelH / 2, 0]}
+      >
+        <meshLambertMaterial color={ARCADE_PALETTE.steel} />
+      </RoundedBox>
+      {/* Down-chevrons on the panel telling the player to go LOW (front face) */}
+      {[0.42, 0.78].map((dy, i) => (
+        <group key={`chev-${i}`} position={[0, beamY + 0.15 + panelH - dy, -0.075]}>
+          <mesh position={[-0.17, 0, 0]} rotation={[0, Math.PI, 0.6]}>
+            <planeGeometry args={[0.4, 0.12]} />
+            <meshBasicMaterial color="#f7c623" />
+          </mesh>
+          <mesh position={[0.17, 0, 0]} rotation={[0, Math.PI, -0.6]}>
+            <planeGeometry args={[0.4, 0.12]} />
+            <meshBasicMaterial color="#f7c623" />
+          </mesh>
+        </group>
+      ))}
+      {/* Thin edge frame for the panel */}
+      <mesh position={[0, beamY + 0.15 + panelH / 2, -0.082]} rotation={[0, Math.PI, 0]}>
+        <planeGeometry args={[width * 0.94, panelH * 0.06]} />
+        <meshBasicMaterial color={ARCADE_PALETTE.steelLight} />
       </mesh>
-      {/* 3 door panels along the side with frames */}
-      {[-1.0, 0, 1.0].map((dz, i) => (
-        <group key={`door-${i}`} position={[dz, 1.7, 0.005]}>
-          {/* Door body (slightly darker color than train body) */}
-          <mesh>
-            <planeGeometry args={[0.7, 1.5]} />
-            <meshLambertMaterial color={body} />
-          </mesh>
-          {/* Door frame */}
-          <mesh position={[0, 0, 0.002]}>
-            <planeGeometry args={[0.76, 1.56]} />
-            <meshBasicMaterial color="#0f172a" />
-          </mesh>
-          {/* Door body on top of frame */}
-          <mesh position={[0, 0, 0.004]}>
-            <planeGeometry args={[0.7, 1.5]} />
-            <meshLambertMaterial color={body} />
-          </mesh>
-          {/* Window in upper door */}
-          <mesh position={[0, 0.35, 0.006]}>
-            <planeGeometry args={[0.5, 0.5]} />
-            <meshBasicMaterial color="#0b1320" />
-          </mesh>
-          {/* Door handle */}
-          <mesh position={[0.25, -0.05, 0.02]}>
-            <boxGeometry args={[0.06, 0.16, 0.03]} />
-            <meshLambertMaterial color="#1f2937" />
-          </mesh>
-        </group>
-      ))}
-      {/* Windows between doors (4 total) */}
-      {[-1.5, -0.5, 0.5, 1.5].map((wz, i) => (
-        <group key={`win-${i}`} position={[wz, 2.05, 0.008]}>
-          {/* Window frame */}
-          <mesh>
-            <planeGeometry args={[0.42, 0.58]} />
-            <meshBasicMaterial color="#0f172a" />
-          </mesh>
-          {/* Window glass */}
-          <mesh position={[0, 0, 0.002]}>
-            <planeGeometry args={[0.36, 0.52]} />
-            <meshBasicMaterial color="#0b1320" />
-          </mesh>
-        </group>
-      ))}
     </group>
   );
 }

@@ -1,5 +1,5 @@
-import { useMemo, useRef } from 'react';
-import { useFrame, useThree } from '@react-three/fiber/native';
+import { useMemo, useRef, type MutableRefObject } from 'react';
+import { useFrame } from '@react-three/fiber/native';
 import * as THREE from 'three';
 import { CHUNK_LENGTH, LANE_X } from '@/lib/constants';
 import {
@@ -7,7 +7,8 @@ import {
   TRAIN_LENGTH,
   TRAIN_ROOF_COIN_Y,
 } from '@/lib/roofRun';
-import type { ChunkSpec, Lane } from '@/lib/types';
+import { terrainHeight } from '@/lib/terrain';
+import type { ChunkSpec, Lane, WorkoutSceneVariant } from '@/lib/types';
 
 type CoinPos = {
   key: string;
@@ -121,14 +122,15 @@ function laneX(lane: Lane) {
 }
 
 type Props = {
+  runnerRef: MutableRefObject<THREE.Group | null>;
   chunks: ChunkSpec[];
   collectedIds: ReadonlySet<string>;
   onCollect: (coinId: string) => void;
+  variant?: WorkoutSceneVariant;
 };
 
-export function Coins({ chunks, collectedIds, onCollect }: Props) {
-  const { camera } = useThree();
-  const previousCameraZRef = useRef(camera.position.z);
+export function Coins({ runnerRef, chunks, collectedIds, onCollect, variant }: Props) {
+  const previousRunnerZRef = useRef<number | null>(null);
   const collectedIdsRef = useRef(collectedIds);
   collectedIdsRef.current = collectedIds;
   const coins = useMemo(
@@ -170,23 +172,26 @@ export function Coins({ chunks, collectedIds, onCollect }: Props) {
   );
 
   useFrame((state) => {
+    const runner = runnerRef.current;
+    if (!runner) return;
     const t = state.clock.elapsedTime;
     const spin = t * 3.5;
-    const previousZ = previousCameraZRef.current;
-    const currentZ = camera.position.z;
-    previousCameraZRef.current = currentZ;
+    const currentZ = runner.position.z;
+    const previousZ = previousRunnerZRef.current ?? currentZ;
+    previousRunnerZRef.current = currentZ;
     for (let i = 0; i < refs.current.length; i++) {
       const g = refs.current[i];
       const c = visibleCoins[i];
       if (!g || !c) continue;
       g.rotation.y = spin + c.phase;
-      g.position.y = c.baseY + Math.sin(t * 2 + c.phase) * 0.035;
+      g.position.y =
+        c.baseY + terrainHeight(variant, c.z) + Math.sin(t * 2 + c.phase) * 0.035;
     }
     for (const coin of visibleCoins) {
       if (collectedIdsRef.current.has(coin.key)) continue;
       const crossedCoin = previousZ >= coin.z && currentZ <= coin.z;
       const nearCoin = Math.abs(currentZ - coin.z) <= COIN_COLLECT_Z_WINDOW;
-      const inLane = Math.abs(camera.position.x - laneX(coin.lane)) <= COIN_COLLECT_LANE_WINDOW;
+      const inLane = Math.abs(runner.position.x - laneX(coin.lane)) <= COIN_COLLECT_LANE_WINDOW;
       if ((crossedCoin || nearCoin) && inLane) {
         onCollect(coin.key);
       }
@@ -201,7 +206,7 @@ export function Coins({ chunks, collectedIds, onCollect }: Props) {
           ref={(el) => {
             refs.current[i] = el;
           }}
-          position={[c.x, c.baseY, c.z]}
+          position={[c.x, c.baseY + terrainHeight(variant, c.z), c.z]}
         >
           {/* Coin disc (cylinder rotated so its flat faces look toward ±z) */}
           <mesh rotation={[Math.PI / 2, 0, 0]} geometry={ringGeom} material={ringMat} />

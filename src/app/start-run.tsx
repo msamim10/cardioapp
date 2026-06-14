@@ -11,6 +11,12 @@ export default function StartRunScreen() {
   const { data } = useRunnerUiData();
   const mode = data.featuredMode;
   const challenge = data.dailyChallenge;
+  const startRun = (scene: 'city-builder' | 'current') => {
+    router.push({
+      pathname: '/workout',
+      params: { scene },
+    });
+  };
 
   return (
     <View style={styles.root}>
@@ -79,7 +85,45 @@ export default function StartRunScreen() {
           </Text>
         </View>
 
-        <GradientButton label="BEGIN RUN" icon="runner" onPress={() => router.push('/workout')} />
+        <SectionHeader title="Choose Scene" />
+        <View style={styles.sceneOptions}>
+          <Panel style={styles.scenePanel}>
+            <View style={styles.sceneIconWrap}>
+              <IconBadge kind="home" accent="cyan" size={48} />
+            </View>
+            <View style={styles.sceneTextWrap}>
+              <Text style={styles.sceneEyebrow}>NEW SCENE</Text>
+              <Text style={styles.sceneTitle}>City Builder</Text>
+              <Text style={styles.sceneSub}>
+                Endless city runner built from the City Builder Bits model pack — real
+                buildings, cars, and street props.
+              </Text>
+            </View>
+            <GradientButton
+              label="START CITY BUILDER"
+              icon="runner"
+              onPress={() => startRun('city-builder')}
+            />
+          </Panel>
+
+          <Panel style={styles.scenePanel}>
+            <View style={styles.sceneIconWrap}>
+              <IconBadge kind="runner" accent="purple" size={48} />
+            </View>
+            <View style={styles.sceneTextWrap}>
+              <Text style={styles.sceneEyebrow}>CURRENT SCENE</Text>
+              <Text style={styles.sceneTitle}>Classic Runner</Text>
+              <Text style={styles.sceneSub}>
+                Current lightweight endless-runner track without the City Builder Bits model set.
+              </Text>
+            </View>
+            <GradientButton
+              label="START CURRENT"
+              icon="runner"
+              onPress={() => startRun('current')}
+            />
+          </Panel>
+        </View>
       </NeonScreen>
     </View>
   );
@@ -193,5 +237,34 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     fontSize: 17,
     fontWeight: '900',
+  },
+  sceneOptions: {
+    gap: 12,
+  },
+  scenePanel: {
+    gap: 12,
+    padding: 14,
+  },
+  sceneIconWrap: {
+    alignSelf: 'flex-start',
+  },
+  sceneTextWrap: {
+    gap: 4,
+  },
+  sceneEyebrow: {
+    color: neon.lime,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+  },
+  sceneTitle: {
+    color: neon.text,
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  sceneSub: {
+    color: neon.muted,
+    fontSize: 13,
+    lineHeight: 18,
   },
 });
