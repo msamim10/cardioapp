@@ -1,48 +1,23 @@
-import { Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { loadProfile } from '@/lib/storage';
+import { colors } from '@/theme';
 
 export default function RootLayout() {
-  const router = useRouter();
-
-  useEffect(() => {
-    loadProfile().then((p) => {
-      if (!p.hasSeenOnboarding) {
-        router.replace('/onboarding');
-      }
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: '#0a0e14' },
-          animation: 'fade',
+          contentStyle: { backgroundColor: colors.bg },
+          animation: 'slide_from_right',
         }}
       >
-        <Stack.Screen name="index" />
-        <Stack.Screen name="play" />
-        <Stack.Screen name="start-run" options={{ animation: 'slide_from_right' }} />
-        <Stack.Screen name="challenges" />
-        <Stack.Screen name="progress" />
-        <Stack.Screen name="profile" />
-        <Stack.Screen name="onboarding/index" options={{ animation: 'fade', gestureEnabled: false }} />
-        <Stack.Screen name="community" options={{ animation: 'fade' }} />
-        <Stack.Screen
-          name="workout"
-          options={{
-            gestureEnabled: false,
-            animation: 'fade',
-          }}
-        />
-        <Stack.Screen name="summary" options={{ gestureEnabled: false }} />
-        <Stack.Screen name="settings" />
+        <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
+        <Stack.Screen name="level/[id]" options={{ presentation: 'card' }} />
+        <Stack.Screen name="workout" options={{ animation: 'fade', gestureEnabled: false }} />
+        <Stack.Screen name="summary" options={{ animation: 'fade', gestureEnabled: false }} />
       </Stack>
     </SafeAreaProvider>
   );

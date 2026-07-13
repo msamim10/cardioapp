@@ -54,6 +54,11 @@ example
 .env.production
 .env.production.local
 .env.*
+!.env.example
+
+# service-account keys / large media staging live OUTSIDE the repo; never commit
+*serviceaccount*.json
+*-admin.json
 
 # editors / IDEs
 .vscode/

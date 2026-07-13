@@ -1,165 +1,142 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useKeepAwake } from 'expo-keep-awake';
-import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
-import { SubwayScene } from '@/components/scene/SubwayScene';
-import { WorkoutHud } from '@/components/hud/WorkoutHud';
-import { preloadGlbModel } from '@/components/scene/models/GLBModel';
-import { estimateCalories } from '@/lib/calories';
-import { getCityPreloadAssets } from '@/lib/cityBuilderRegistry';
-import { theme } from '@/lib/theme';
-import type { ActionCue, WorkoutSceneVariant } from '@/lib/types';
-import { useUserWeight } from '@/hooks/useUserWeight';
-import { useWorkoutTimer } from '@/hooks/useWorkoutTimer';
-
-const COIN_SOUND = require('../../assets/sounds/coin.mp3');
+import { StatusBar } from 'expo-status-bar';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GradientButton } from '@/components/ui';
+import { getVideoSource } from '@/lib/videoSources';
+import { colors, font, radius, spacing } from '@/theme';
 
 export default function WorkoutScreen() {
-  useKeepAwake();
+  const { level } = useLocalSearchParams<{ level: string; name?: string }>();
   const router = useRouter();
-  const params = useLocalSearchParams<{ scene?: string }>();
-  const sceneVariant: WorkoutSceneVariant =
-    params.scene === 'current' ? 'current' : 'city-builder';
-  const { weightKg } = useUserWeight();
-  const [paused, setPaused] = useState(false);
-  const [collectedCoinIds, setCollectedCoinIds] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
-  const collectedCoinIdsRef = useRef<Set<string>>(new Set());
-  const coinSoundIndexRef = useRef(0);
-  const coinSoundA = useAudioPlayer(COIN_SOUND, { downloadFirst: true });
-  const coinSoundB = useAudioPlayer(COIN_SOUND, { downloadFirst: true });
-  const coinSoundC = useAudioPlayer(COIN_SOUND, { downloadFirst: true });
-  const [score, setScore] = useState(0);
-  const [actionCue, setActionCue] = useState<ActionCue>(null);
-  // The workout is "loading" while the selected scene warms up. For the
-  // City option we preload the City Builder Bits GLB models; the current runner
-  // option only needs a short Canvas warm-up. While loading we keep everything paused
-  // (scene animation, score ticker, workout timer) so the player doesn't
-  // lose game time to the first-frame hitch, and we mask the initial render
-  // behind a Getting Ready overlay.
-  const [isReady, setIsReady] = useState(false);
-  const isLoading = !isReady;
-  const scenePaused = paused || isLoading;
+  const insets = useSafeAreaInsets();
+  useKeepAwake();
+
+  const source = getVideoSource(level, 'vertical');
+
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [progress, setProgress] = useState(0);
+
+  const finish = () => router.replace('/summary');
+
+  const player = useVideoPlayer(source, (p) => {
+    p.loop = false;
+    p.timeUpdateEventInterval = 0.5;
+    if (source) p.play();
+  });
 
   useEffect(() => {
-    let cancelled = false;
-    const preload =
-      sceneVariant === 'city-builder'
-        ? Promise.all(getCityPreloadAssets().map((asset) => preloadGlbModel(asset)))
-        : Promise.resolve();
-    preload
-      .then(() => new Promise<void>((resolve) => setTimeout(resolve, 250)))
-      .then(() => {
-        if (!cancelled) setIsReady(true);
-      })
-      .catch(() => {
-        if (!cancelled) setIsReady(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sceneVariant]);
-  useEffect(() => {
-    setAudioModeAsync({
-      playsInSilentMode: true,
-      interruptionMode: 'mixWithOthers',
-    }).catch(() => undefined);
-  }, []);
-
-  const { elapsedSec } = useWorkoutTimer({ paused: scenePaused, active: true });
-  const calories = useMemo(
-    () => estimateCalories(weightKg, elapsedSec),
-    [weightKg, elapsedSec],
-  );
-  useEffect(() => {
-    if (scenePaused) return;
-    const id: ReturnType<typeof setInterval> = setInterval(() => {
-      setScore((value) => value + 1);
-    }, 35);
-    return () => clearInterval(id);
-  }, [scenePaused]);
-  const playCoinSound = useCallback(() => {
-    const players = [coinSoundA, coinSoundB, coinSoundC];
-    const player = players[coinSoundIndexRef.current % players.length];
-    coinSoundIndexRef.current += 1;
-    player.volume = 0.10;
-    player.seekTo(0).catch(() => undefined);
-    player.play();
-  }, [coinSoundA, coinSoundB, coinSoundC]);
-  const handleCoinCollect = useCallback((coinId: string) => {
-    if (collectedCoinIdsRef.current.has(coinId)) return;
-    collectedCoinIdsRef.current.add(coinId);
-    playCoinSound();
-    setCollectedCoinIds(new Set(collectedCoinIdsRef.current));
-  }, [playCoinSound]);
-
-  const handleEnd = () => {
-    const finalSec = Math.round(elapsedSec);
-    const finalCal = estimateCalories(weightKg, finalSec);
-    router.replace({
-      pathname: '/summary',
-      params: {
-        durationSec: finalSec.toString(),
-        calories: finalCal.toFixed(2),
-        coins: collectedCoinIdsRef.current.size.toString(),
-      },
+    if (!source) return;
+    const endSub = player.addListener('playToEnd', finish);
+    const timeSub = player.addListener('timeUpdate', (e) => {
+      const d = player.duration;
+      if (d > 0) setProgress(Math.min(1, e.currentTime / d));
     });
-  };
+    const statusSub = player.addListener('statusChange', (e) => {
+      if (e.status === 'error') setStatus('error');
+      else if (e.status === 'readyToPlay') setStatus('ready');
+    });
+    return () => {
+      endSub.remove();
+      timeSub.remove();
+      statusSub.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [player, source]);
+
+  // No streamable source configured: let the flow continue to results.
+  if (!source) {
+    return (
+      <View style={[styles.root, styles.center]}>
+        <StatusBar hidden />
+        <Text style={styles.fallbackEmoji}>🎬</Text>
+        <Text style={styles.fallbackTitle}>Level not available yet</Text>
+        <Text style={styles.fallbackSub}>This video isn't hosted yet. Continue to see your results.</Text>
+        <GradientButton label="CONTINUE" icon="arrow-forward" onPress={finish} style={{ marginTop: spacing.xl, alignSelf: 'stretch' }} />
+        <Pressable onPress={() => router.back()} style={{ marginTop: spacing.lg }}>
+          <Text style={styles.link}>Go back</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
-      <SubwayScene
-        variant={sceneVariant}
-        paused={scenePaused}
-        collectedCoinIds={collectedCoinIds}
-        onCoinCollect={handleCoinCollect}
-        onCueChange={setActionCue}
-      />
-      <WorkoutHud
-        score={score}
-        coins={collectedCoinIds.size}
-        actionCue={actionCue}
-        paused={paused}
-        onPauseToggle={() => setPaused((value) => !value)}
-        onEnd={handleEnd}
-      />
-      {isLoading && (
-        <View style={styles.loadingOverlay} pointerEvents="auto">
-          <ActivityIndicator size="large" color={theme.colors.primary} />
-          <Text style={styles.loadingTitle}>GETTING READY</Text>
-          <Text style={styles.loadingSubtitle}>Warming up the run…</Text>
+      <StatusBar hidden />
+      <VideoView style={StyleSheet.absoluteFill} player={player} contentFit="cover" nativeControls={false} />
+
+      {/* Loading */}
+      {status === 'loading' ? (
+        <View style={styles.centerOverlay} pointerEvents="none">
+          <ActivityIndicator size="large" color={colors.lime} />
+          <Text style={styles.loadingText}>Loading level…</Text>
         </View>
-      )}
+      ) : null}
+
+      {/* Error / not uploaded yet */}
+      {status === 'error' ? (
+        <View style={styles.endOverlay}>
+          <Text style={styles.endEmoji}>🚧</Text>
+          <Text style={styles.endTitle}>Level not ready yet</Text>
+          <Text style={styles.fallbackSub}>This video is still uploading. Try Downtown Run, or check back soon.</Text>
+          <GradientButton label="BACK" icon="arrow-back" onPress={() => router.back()} style={{ alignSelf: 'stretch', marginTop: spacing.lg }} />
+        </View>
+      ) : null}
+
+      {/* Single exit control */}
+      <Pressable
+        onPress={() => router.back()}
+        style={[styles.exitBtn, { top: insets.top + spacing.sm }]}
+        hitSlop={12}
+      >
+        <Ionicons name="close" size={22} color={colors.white} />
+      </Pressable>
+
+      {/* Slim progress bar */}
+      {status === 'ready' ? (
+        <View style={[styles.progressWrap, { bottom: insets.bottom + spacing.xl }]}>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.colors.bg },
-  loadingOverlay: {
+  root: { flex: 1, backgroundColor: colors.black },
+  center: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl },
+  fallbackEmoji: { fontSize: 60, marginBottom: spacing.md },
+  fallbackTitle: { color: colors.text, fontSize: 22, fontWeight: font.black },
+  fallbackSub: { color: colors.textDim, fontSize: 14, fontWeight: font.medium, textAlign: 'center', marginTop: spacing.sm },
+  link: { color: colors.lime, fontSize: 15, fontWeight: font.bold },
+  centerOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  loadingText: { color: colors.white, fontSize: 14, fontWeight: font.semibold, marginTop: spacing.md },
+  exitBtn: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    left: spacing.lg,
+    width: 38,
+    height: 38,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.colors.bg,
-    gap: 14,
   },
-  loadingTitle: {
-    color: theme.colors.text,
-    fontSize: 22,
-    fontWeight: '900',
-    letterSpacing: 3,
-    marginTop: 6,
+  endOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+    backgroundColor: 'rgba(0,0,0,0.7)',
   },
-  loadingSubtitle: {
-    color: theme.colors.textMuted,
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: 1.2,
-  },
+  endEmoji: { fontSize: 64 },
+  endTitle: { color: colors.white, fontSize: 26, fontWeight: font.black, marginTop: spacing.sm },
+  progressWrap: { position: 'absolute', left: spacing.lg, right: spacing.lg },
+  progressTrack: { height: 5, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.25)', overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: radius.pill, backgroundColor: colors.lime },
 });
