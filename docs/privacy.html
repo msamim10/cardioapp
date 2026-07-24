@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="index,follow" />
+  <title>Privacy Policy — CardioSurf</title>
+  <style>
+    :root {
+      --bg: #0f1524;
+      --card: #161d30;
+      --text: #e7ecf5;
+      --muted: #a4afc4;
+      --accent: #4aa8ff;
+      --border: #26304a;
+    }
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 96px; }
+    header { border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 8px; }
+    h1 { font-size: 1.9rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+    h2 { font-size: 1.25rem; margin: 34px 0 10px; letter-spacing: -0.01em; }
+    h3 { font-size: 1.05rem; margin: 22px 0 6px; }
+    p, li { color: var(--text); }
+    .muted { color: var(--muted); }
+    .updated { color: var(--muted); font-size: 0.95rem; margin: 0; }
+    a { color: var(--accent); }
+    ul { padding-left: 22px; }
+    li { margin: 6px 0; }
+    .lead { font-size: 1.05rem; }
+    .callout {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin: 18px 0;
+    }
+    footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.9rem; }
+    @media (prefers-color-scheme: light) {
+      :root { --bg:#f6f8fc; --card:#ffffff; --text:#141a26; --muted:#556077; --accent:#0a66d0; --border:#e2e8f2; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Privacy Policy</h1>
+      <p class="updated">CardioSurf &middot; Last updated: July 24, 2026</p>
+    </header>
+
+    <p class="lead">CardioSurf is a camera-based cardio fitness game. You play workouts by physically moving — jumping, ducking, and stepping side to side — in front of your device's front camera. This Privacy Policy explains what information the app collects, how it is used, and the choices you have.</p>
+
+    <div class="callout">
+      <strong>The short version:</strong> Your camera is used only to detect your body movements <em>on your device</em>. Camera video is never recorded, saved, or uploaded. We store the minimum account and progress data needed to run your account and sync your workouts.
+    </div>
+
+    <h2>1. Who we are</h2>
+    <p>This app is "CardioSurf" (the "App"). This policy applies to the CardioSurf mobile application. If you have questions, contact us using the details in the <a href="#contact">Contact</a> section below.</p>
+
+    <h2>2. Camera and movement tracking</h2>
+    <p>Gameplay uses your device's <strong>front camera</strong> to track your body movements. This is how it works:</p>
+    <ul>
+      <li>Camera frames are analyzed <strong>entirely on your device</strong> using Apple's on-device Vision body-pose technology.</li>
+      <li>The App only derives <strong>body-position keypoints</strong> (for example, the approximate on-screen position of your shoulders, hips, knees, and ankles) to recognize moves like jump, duck, left, and right.</li>
+      <li>Camera video and images are processed in real time and <strong>are not recorded, saved to your device, or transmitted off your device</strong>. The App does not upload camera frames, photos, or video to us or to any third party.</li>
+      <li>The camera runs only while you are on a workout/tracking screen, and stops when you leave it.</li>
+    </ul>
+    <p>On devices or builds where on-device pose tracking is unavailable, the App simply reports tracking as unavailable; it does not send your camera data anywhere as an alternative.</p>
+
+    <h2>3. Account information</h2>
+    <p>To create and access an account, you can sign in with email and password, Sign in with Apple, or Sign in with Google. Depending on the method you choose, we store:</p>
+    <ul>
+      <li>Your <strong>email address</strong>;</li>
+      <li>Your <strong>display name</strong> and/or chosen <strong>username</strong>;</li>
+      <li>A profile <strong>photo URL</strong>, if provided by your sign-in provider.</li>
+    </ul>
+    <p>Account authentication and this profile data are handled using <strong>Firebase Authentication</strong> and <strong>Cloud Firestore</strong> (Google). If you use Sign in with Apple's "Hide My Email" feature, we receive only the relay email Apple provides.</p>
+
+    <h2>4. Progress and usage data</h2>
+    <p>To save your progress and let you resume across sessions and devices, we store workout progress in Cloud Firestore under your account, including:</p>
+    <ul>
+      <li>Workout run records (such as completed workouts, scores, and related progress state);</li>
+      <li>Your selected class/program and related progression state;</li>
+      <li>Basic technical fields tied to those records (timestamps).</li>
+    </ul>
+    <p>This data is associated with your account identifier so it can be synced back to you.</p>
+
+    <h2>5. Subscriptions and purchases</h2>
+    <p>CardioSurf offers optional paid subscriptions and a one-time lifetime purchase. Purchases are processed by <strong>Apple</strong> through the App Store, and subscription/entitlement status is managed via <strong>RevenueCat</strong>. We do <strong>not</strong> receive or store your full payment card details; those are handled by Apple. RevenueCat associates your purchase/entitlement status with an app user identifier so premium access can be unlocked and restored.</p>
+
+    <h2>6. Support messages</h2>
+    <p>If you contact us through the in-app <strong>Help &amp; Support</strong> feature, we store the message you send in Cloud Firestore so we can read and respond. That record may include the message text, the category you selected, your account identifier, email, and display name (when available), your platform (iOS/Android), and the app version.</p>
+
+    <h2>7. Third-party services</h2>
+    <p>We use a small number of service providers to run core functionality:</p>
+    <ul>
+      <li><strong>Firebase / Google</strong> — authentication, database (Cloud Firestore), and, where applicable, Sign in with Google.</li>
+      <li><strong>Apple</strong> — Sign in with Apple, App Store purchases, and on-device Vision pose detection.</li>
+      <li><strong>RevenueCat</strong> — subscription and entitlement management.</li>
+    </ul>
+    <p>These providers process data on our behalf to deliver the App's features. We do not use third-party advertising SDKs, and the App contains no ad or web tracking scripts.</p>
+
+    <h2>8. How we use information</h2>
+    <ul>
+      <li>To create and secure your account and sign you in;</li>
+      <li>To run gameplay and recognize your movements on-device;</li>
+      <li>To save and sync your workout progress;</li>
+      <li>To provide, restore, and manage subscriptions;</li>
+      <li>To respond to your support requests;</li>
+      <li>To maintain, troubleshoot, and improve the App.</li>
+    </ul>
+    <p>We do not sell your personal information.</p>
+
+    <h2>9. Data retention and deletion</h2>
+    <p>We keep account and progress data for as long as your account exists. You can delete your account at any time from within the App (<strong>Profile &rarr; Delete Account</strong>). Deleting your account removes your workout run records, progress state, and profile document, and deletes your authentication record. Support messages you previously submitted and purchase records held by Apple/RevenueCat may be retained as needed for legal, accounting, and fraud-prevention purposes.</p>
+
+    <h2>10. Children's privacy</h2>
+    <p>CardioSurf is not directed to children under 13 (or the minimum age required in your country), and we do not knowingly collect personal information from them. If you believe a child has provided us personal information, please contact us so we can remove it.</p>
+
+    <h2>11. Security</h2>
+    <p>We rely on established providers (Firebase/Google, Apple, RevenueCat) and their security controls, and we restrict access to account data using per-user security rules. No method of transmission or storage is completely secure, but we take reasonable measures to protect your information.</p>
+
+    <h2>12. Changes to this policy</h2>
+    <p>We may update this Privacy Policy from time to time. When we do, we will revise the "Last updated" date above. Material changes will be reflected in the App or on this page.</p>
+
+    <h2 id="contact">13. Contact</h2>
+    <p>For privacy questions or requests, use the in-app <strong>Help &amp; Support</strong> feature, or email us at <a href="mailto:support@cardiosurf.app">support@cardiosurf.app</a>.</p>
+
+    <footer>
+      <p><a href="./terms.html">Terms of Use</a> &middot; <a href="./privacy.html">Privacy Policy</a></p>
+      <p>&copy; 2026 CardioSurf. All rights reserved.</p>
+    </footer>
+  </div>
+</body>
+</html>
