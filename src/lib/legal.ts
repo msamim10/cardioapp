@@ -11,8 +11,8 @@ import { Alert, Linking } from 'react-native';
  * The same URLs must ALSO be configured on the RevenueCat dashboard (Paywall
  * footer) so the hosted paywall shows compliant Terms + Privacy links.
  */
-export const PRIVACY_POLICY_URL = 'https://msamim10.github.io/cardioapp/privacy.html';
-export const TERMS_URL = 'https://msamim10.github.io/cardioapp/terms.html';
+export const PRIVACY_POLICY_URL = 'https://cardiosurf.github.io/privacy.html';
+export const TERMS_URL = 'https://cardiosurf.github.io/terms.html';
 
 /** Opens a legal URL with a graceful fallback alert if it can't be opened. */
 export async function openLegalUrl(url: string): Promise<void> {
