@@ -3,28 +3,169 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CardioSurf — Legal</title>
-  <style>
-    :root { --bg:#0f1524; --card:#161d30; --text:#e7ecf5; --muted:#a4afc4; --accent:#4aa8ff; --border:#26304a; }
-    * { box-sizing: border-box; }
-    body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; line-height:1.6; }
-    .wrap { max-width:640px; margin:0 auto; padding:64px 20px; }
-    h1 { font-size:1.8rem; margin:0 0 8px; letter-spacing:-0.02em; }
-    p.muted { color:var(--muted); margin:0 0 28px; }
-    a.card { display:block; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px 20px; margin:12px 0; color:var(--text); text-decoration:none; }
-    a.card:hover { border-color:var(--accent); }
-    a.card strong { color:var(--accent); }
-    footer { color:var(--muted); font-size:0.9rem; margin-top:32px; }
-    @media (prefers-color-scheme: light) { :root { --bg:#f6f8fc; --card:#fff; --text:#141a26; --muted:#556077; --accent:#0a66d0; --border:#e2e8f2; } }
-  </style>
+  <meta name="robots" content="index,follow" />
+  <meta name="theme-color" content="#0A0A0F" />
+  <title>CardioSurf — Your body is the controller</title>
+  <meta name="description" content="CardioSurf is a camera-based cardio game for iPhone. Jump, duck, and dodge with your whole body to power an endless runner. On-device motion tracking, real sweat, real fun." />
+  <meta property="og:title" content="CardioSurf — Your body is the controller" />
+  <meta property="og:description" content="Move to play. A camera-based endless-runner cardio game where your body is the controller." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://cardiosurf.github.io/" />
+  <link rel="icon" type="image/png" href="./assets/fox-avatar.png" />
+  <link rel="apple-touch-icon" href="./assets/fox-avatar.png" />
+  <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <div class="wrap">
-    <h1>CardioSurf</h1>
-    <p class="muted">Legal documents</p>
-    <a class="card" href="./privacy.html"><strong>Privacy Policy &rarr;</strong></a>
-    <a class="card" href="./terms.html"><strong>Terms of Use (EULA) &rarr;</strong></a>
-    <footer>&copy; 2026 CardioSurf.</footer>
-  </div>
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="./index.html">
+        <img src="./assets/fox-avatar.png" alt="CardioSurf fox mascot" />
+        <span>Cardio<span class="accent">Surf</span></span>
+      </a>
+      <nav>
+        <ul class="nav-links">
+          <li><a href="./index.html" class="active">Home</a></li>
+          <li><a href="./support.html">Support</a></li>
+          <li><a href="./privacy.html">Privacy</a></li>
+          <li><a href="./terms.html">Terms</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <span class="eyebrow">🦊 Camera-based cardio game</span>
+          <h1>Your body is the <span class="grad">controller.</span></h1>
+          <p class="lead">Move to play. Jump, duck, and dodge your way through an endless runner powered entirely by your own movement — no gamepad, no treadmill, just you.</p>
+          <div class="hero-cta">
+            <a class="btn btn-appstore" href="#" aria-label="Download CardioSurf on the App Store">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.365 1.43c0 1.14-.417 2.2-1.11 2.99-.79.9-2.09 1.6-3.14 1.51-.13-1.1.42-2.25 1.09-2.98.77-.86 2.14-1.51 3.16-1.52zM20.9 17.09c-.55 1.27-.82 1.83-1.53 2.95-.99 1.56-2.39 3.5-4.12 3.51-1.54.02-1.94-1-4.03-.99-2.09.01-2.53 1.01-4.07.99-1.73-.01-3.05-1.76-4.04-3.32C.36 16.4-.05 11.4 1.6 8.75c1.16-1.88 3-2.98 4.72-2.98 1.76 0 2.86 1 4.31 1 1.41 0 2.27-1 4.3-1 1.54 0 3.17.84 4.33 2.29-3.8 2.08-3.18 7.5.64 9.03z"/></svg>
+              Download on the App Store
+            </a>
+            <a class="btn btn-ghost" href="./support.html">How it works</a>
+          </div>
+          <p class="hero-note">Coming to iPhone · Front camera required · No video ever leaves your device.</p>
+        </div>
+        <div class="hero-art">
+          <img class="glow" src="./assets/glow-lime.png" alt="" aria-hidden="true" />
+          <img class="fox" src="./assets/fox.png" alt="CardioSurf fox mascot mid-run" />
+        </div>
+      </div>
+    </section>
+
+    <!-- What it is -->
+    <section class="section" id="what">
+      <div class="container">
+        <div class="section-head">
+          <h2>An endless runner you play with your whole body</h2>
+          <p>CardioSurf turns your iPhone's front camera into a motion controller. Stand in front of it, start a level, and the game reads your real movements — leaning, jumping, ducking, stepping side to side — to steer your character down the track. It's a cardio workout that never feels like one.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="section" id="features" style="padding-top:0;">
+      <div class="container">
+        <div class="card-grid">
+          <article class="card">
+            <div class="icon lime">🏃</div>
+            <h3>Move to play</h3>
+            <p>Jump to leap gaps, duck under obstacles, and step left or right to dodge. Every input is a real movement — the game only advances when you do.</p>
+          </article>
+          <article class="card">
+            <div class="icon violet">🔒</div>
+            <h3>Private by design</h3>
+            <p>Pose tracking runs entirely on-device using Apple's Vision framework. Camera video is never recorded, saved, or uploaded — not to us, not to anyone.</p>
+          </article>
+          <article class="card">
+            <div class="icon cyan">🎮</div>
+            <h3>Levels &amp; modes</h3>
+            <p>Progress through themed campaigns and game modes that ramp up the intensity as you get fitter, so there's always a new challenge waiting.</p>
+          </article>
+          <article class="card">
+            <div class="icon pink">📈</div>
+            <h3>Track your progress</h3>
+            <p>Your runs, streaks, and scores sync to your account so you can pick up where you left off and watch your fitness climb over time.</p>
+          </article>
+          <article class="card">
+            <div class="icon orange">🔥</div>
+            <h3>Real sweat, real fun</h3>
+            <p>A full-body cardio session disguised as a game. Short sessions, high energy — the kind of workout you actually look forward to.</p>
+          </article>
+          <article class="card">
+            <div class="icon lime">🦊</div>
+            <h3>Your hype-fox</h3>
+            <p>Your fox mascot runs right alongside you, cheering every jump and celebrating every finish line. You're never grinding alone.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="section" id="how">
+      <div class="container">
+        <div class="section-head">
+          <h2>How it works</h2>
+          <p>Up and running in under a minute.</p>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <div class="num">1</div>
+            <h3>Prop up your phone</h3>
+            <p>Stand back a few steps so the front camera can see your whole body, with clear space around you to move safely.</p>
+          </div>
+          <div class="step">
+            <div class="num">2</div>
+            <h3>Pick a level</h3>
+            <p>Choose a campaign or game mode. The app calibrates to you on-device — no sign-up dance, no wearables needed.</p>
+          </div>
+          <div class="step">
+            <div class="num">3</div>
+            <h3>Move to win</h3>
+            <p>Jump, duck, and dodge to keep your runner alive. Chase high scores, build streaks, and break a real sweat.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA band -->
+    <section class="section-tight">
+      <div class="container">
+        <div class="cta-band">
+          <h2>Ready to move?</h2>
+          <p>Turn your living room into a cardio playground.</p>
+          <div class="hero-cta">
+            <a class="btn btn-appstore" href="#" aria-label="Download CardioSurf on the App Store">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.365 1.43c0 1.14-.417 2.2-1.11 2.99-.79.9-2.09 1.6-3.14 1.51-.13-1.1.42-2.25 1.09-2.98.77-.86 2.14-1.51 3.16-1.52zM20.9 17.09c-.55 1.27-.82 1.83-1.53 2.95-.99 1.56-2.39 3.5-4.12 3.51-1.54.02-1.94-1-4.03-.99-2.09.01-2.53 1.01-4.07.99-1.73-.01-3.05-1.76-4.04-3.32C.36 16.4-.05 11.4 1.6 8.75c1.16-1.88 3-2.98 4.72-2.98 1.76 0 2.86 1 4.31 1 1.41 0 2.27-1 4.3-1 1.54 0 3.17.84 4.33 2.29-3.8 2.08-3.18 7.5.64 9.03z"/></svg>
+              Download on the App Store
+            </a>
+            <a class="btn btn-ghost" href="./support.html">Get support</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <a class="footer-brand brand" href="./index.html">
+          <img src="./assets/fox-avatar.png" alt="CardioSurf fox mascot" />
+          <span>Cardio<span class="accent">Surf</span></span>
+        </a>
+        <ul class="footer-links">
+          <li><a href="./index.html">Home</a></li>
+          <li><a href="./support.html">Support</a></li>
+          <li><a href="./privacy.html">Privacy</a></li>
+          <li><a href="./terms.html">Terms</a></li>
+        </ul>
+      </div>
+      <p class="footer-legal">&copy; 2026 CardioSurf. All rights reserved. Not medical advice — consult a physician before starting any exercise program.</p>
+    </div>
+  </footer>
 </body>
 </html>

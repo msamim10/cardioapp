@@ -35,7 +35,7 @@ Level → game-level mapping lives in `src/lib/videoSources.ts`.
 | Firebase / GCP project | `cardiosurf-mvp` |
 | Public media bucket | `gs://cardiosurf-mvp-media` (allUsers: Storage Object Viewer) |
 | App base URL | `https://storage.googleapis.com/cardiosurf-mvp-media` (in `.env`) |
-| Auth for CLI | `gcloud auth login` as `mansoorsamim10@gmail.com` |
+| Auth for CLI | `gcloud auth login` as the project owner account |
 
 Console: <https://console.firebase.google.com/project/cardiosurf-mvp/overview>
 

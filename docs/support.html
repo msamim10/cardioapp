@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="index,follow" />
+  <meta name="theme-color" content="#0A0A0F" />
+  <title>Support &amp; Contact — CardioSurf</title>
+  <meta name="description" content="Get help with CardioSurf. FAQs on camera privacy, subscriptions, restoring purchases, and deleting your account — plus a contact form to reach the team." />
+  <link rel="icon" type="image/png" href="./assets/fox-avatar.png" />
+  <link rel="apple-touch-icon" href="./assets/fox-avatar.png" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="./index.html">
+        <img src="./assets/fox-avatar.png" alt="CardioSurf fox mascot" />
+        <span>Cardio<span class="accent">Surf</span></span>
+      </a>
+      <nav>
+        <ul class="nav-links">
+          <li><a href="./index.html">Home</a></li>
+          <li><a href="./support.html" class="active">Support</a></li>
+          <li><a href="./privacy.html">Privacy</a></li>
+          <li><a href="./terms.html">Terms</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-hero">
+      <div class="container">
+        <div class="section-head left">
+          <h2>Support &amp; contact</h2>
+          <p>We're a small team and we read every message. Check the FAQ below for quick answers, or drop us a note using the form — we'll get back to you as soon as we can.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="section" style="padding-top:40px;">
+      <div class="container">
+        <div class="faq">
+          <details open>
+            <summary>How do I play CardioSurf?</summary>
+            <div class="answer">
+              <p>Prop your iPhone up so the front camera can see your whole body, and give yourself clear, obstacle-free space to move. Start a level and control your character with real movement: <strong>jump</strong> to leap, <strong>duck</strong> to slide under obstacles, and <strong>step left or right</strong> to dodge. The game reads your body position on-device and reacts in real time.</p>
+            </div>
+          </details>
+
+          <details>
+            <summary>Is my camera footage private?</summary>
+            <div class="answer">
+              <p>Yes. Movement detection runs <strong>entirely on your device</strong> using Apple's on-device Vision body-pose technology. CardioSurf only derives body-position keypoints (roughly where your shoulders, hips, knees, and ankles are on screen) to recognize moves.</p>
+              <p>Camera video and images are processed in real time and are <strong>never recorded, saved to your device, or uploaded</strong> to us or any third party. The camera runs only while you're on a workout screen and stops when you leave it. See our <a href="./privacy.html">Privacy Policy</a> for full details.</p>
+            </div>
+          </details>
+
+          <details>
+            <summary>How do I manage or cancel my subscription?</summary>
+            <div class="answer">
+              <p>Subscriptions are billed through your Apple ID, so you manage them in your device's <strong>App Store account settings</strong>:</p>
+              <p>Open the <strong>Settings</strong> app → tap your name at the top → <strong>Subscriptions</strong> → select <strong>CardioSurf</strong> → choose <strong>Cancel Subscription</strong> (or change your plan). Turning off auto-renew stops future charges; your current period stays active until it expires.</p>
+            </div>
+          </details>
+
+          <details>
+            <summary>How do I restore a purchase?</summary>
+            <div class="answer">
+              <p>If you reinstalled the app or switched devices, open CardioSurf, go to the subscription or paywall screen, and tap <strong>Restore Purchases</strong>. Make sure you're signed in with the same Apple ID you used to buy. Your premium access and lifetime purchase will be re-applied automatically.</p>
+            </div>
+          </details>
+
+          <details>
+            <summary>How do I delete my account?</summary>
+            <div class="answer">
+              <p>You can delete your account any time from inside the app: go to <strong>Profile → Delete Account</strong>. This removes your workout run records, progress state, and profile, and deletes your authentication record. Some support messages and purchase records held by Apple/RevenueCat may be retained where required for legal or accounting reasons.</p>
+            </div>
+          </details>
+
+          <details>
+            <summary>What do I need to play?</summary>
+            <div class="answer">
+              <p>An iPhone with a working front camera, a bit of open floor space, and enough room to jump, duck, and step in every direction safely. Wear comfortable clothes and shoes with good grip. CardioSurf is exercise — if you have any health concerns, please consult a physician before starting.</p>
+            </div>
+          </details>
+
+          <details>
+            <summary>Movement isn't being detected well — what can I help?</summary>
+            <div class="answer">
+              <p>Try improving your lighting (a well-lit room helps a lot), stepping back so your full body is in frame, and clearing clutter from the background. Make sure nothing is blocking the front camera. If it still isn't working, send us a message below with your device model and iOS version and we'll help.</p>
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- Contact form -->
+    <section class="section" style="padding-top:0;">
+      <div class="container">
+        <div class="section-head">
+          <h2>Send us a message</h2>
+          <p>Bug report, feature idea, or just saying hi — we'd love to hear from you.</p>
+        </div>
+
+        <!--
+          CONTACT FORM ACTIVATION (one step, ~1 minute):
+          This form posts to Web3Forms, which keeps the destination email OFF this page.
+          To turn it on: go to https://web3forms.com , enter the destination email once on
+          their site to receive a free Access Key (a UUID), then replace the placeholder
+          value "WEB3FORMS_ACCESS_KEY_PLACEHOLDER" in the access_key input below with that key.
+          The destination email is never written into this file — Web3Forms maps the key to it
+          on their servers. No account email appears anywhere in this site's source.
+        -->
+        <div class="contact-wrap">
+          <form id="contact-form" action="https://api.web3forms.com/submit" method="POST">
+            <input type="hidden" name="access_key" value="cd39cb95-c0cd-4a97-bd26-e00b7d492b9f" />
+            <input type="hidden" name="subject" value="New CardioSurf support message" />
+            <input type="hidden" name="from_name" value="CardioSurf Website" />
+
+            <!-- Honeypot spam trap: bots fill this, humans never see it -->
+            <input type="checkbox" name="botcheck" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true" />
+
+            <div class="form-row">
+              <div class="field">
+                <label for="name">Name</label>
+                <input type="text" id="name" name="name" placeholder="Your name" required autocomplete="name" />
+              </div>
+              <div class="field">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" placeholder="you@example.com" required autocomplete="email" />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="topic">Subject</label>
+              <input type="text" id="topic" name="topic" placeholder="What's this about?" required />
+            </div>
+
+            <div class="field">
+              <label for="message">Message</label>
+              <textarea id="message" name="message" placeholder="Tell us what's going on…" required></textarea>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="submit-btn">Send message</button>
+
+            <div class="form-status" id="form-status" role="status" aria-live="polite"></div>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <a class="footer-brand brand" href="./index.html">
+          <img src="./assets/fox-avatar.png" alt="CardioSurf fox mascot" />
+          <span>Cardio<span class="accent">Surf</span></span>
+        </a>
+        <ul class="footer-links">
+          <li><a href="./index.html">Home</a></li>
+          <li><a href="./support.html">Support</a></li>
+          <li><a href="./privacy.html">Privacy</a></li>
+          <li><a href="./terms.html">Terms</a></li>
+        </ul>
+      </div>
+      <p class="footer-legal">&copy; 2026 CardioSurf. All rights reserved. Not medical advice — consult a physician before starting any exercise program.</p>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var form = document.getElementById('contact-form');
+      var statusEl = document.getElementById('form-status');
+      var submitBtn = document.getElementById('submit-btn');
+
+      function setStatus(kind, text) {
+        statusEl.textContent = text;
+        statusEl.className = 'form-status show ' + kind;
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        var accessKey = form.querySelector('input[name="access_key"]').value;
+        if (accessKey.indexOf('PLACEHOLDER') !== -1) {
+          setStatus('error', 'The contact form isn\u2019t connected yet. Please try again later.');
+          return;
+        }
+
+        submitBtn.disabled = true;
+        var originalLabel = submitBtn.textContent;
+        submitBtn.textContent = 'Sending\u2026';
+
+        var payload = Object.fromEntries(new FormData(form).entries());
+
+        fetch('https://api.web3forms.com/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(payload)
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            if (data.success) {
+              setStatus('success', 'Thanks, your message was sent! We\u2019ll get back to you soon.');
+              form.reset();
+            } else {
+              setStatus('error', (data.message || 'Something went wrong.') + ' Please try again.');
+            }
+          })
+          .catch(function () {
+            setStatus('error', 'Network error \u2014 please check your connection and try again.');
+          })
+          .finally(function () {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalLabel;
+          });
+      });
+    })();
+  </script>
+</body>
+</html>
