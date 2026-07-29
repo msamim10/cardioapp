@@ -89,7 +89,8 @@ This one 6.9" set auto-scales to all smaller iPhones. (App is iPhone-only — no
 - Identifiers → User ID (Firebase UID / RevenueCat app user ID)
 - Purchases → Purchase History (subscription status via RevenueCat)
 - Health & Fitness → Fitness (workout runs, calories, streaks)
-- User Content → Other / Usage Data → Product Interaction (progress/level completion)
+- User Content → Customer Support (in-app Help & Support message form)
+- Usage Data → Product Interaction (progress/level completion)
 
 **Data NOT collected:**
 - Camera / Photos / Video — motion tracking runs 100% on-device (Apple Vision, keypoints only); no image/video is stored or transmitted.

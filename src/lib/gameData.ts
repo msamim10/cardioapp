@@ -1,12 +1,12 @@
+import type { Ionicons } from '@expo/vector-icons';
 import type { AccentKey } from '@/theme';
 
-export type Difficulty = 'Beginner' | 'Normal' | 'Hard';
+export type IconName = keyof typeof Ionicons.glyphMap;
 
 export type Level = {
   id: string;
   name: string;
   durationMin: number;
-  emoji: string;
 };
 
 export type Mode = {
@@ -14,173 +14,138 @@ export type Mode = {
   name: string;
   tagline: string;
   accent: AccentKey;
-  emoji: string;
-  locked: boolean;
+  icon: IconName;
   levels: Level[];
 };
 
-export type Challenge = {
-  id: string;
-  title: string;
-  reward: string;
-  progress: number; // 0..1
-  done: boolean;
-};
-
-export const user = {
-  name: 'Riley',
-  handle: '@riley',
-  coins: 1240,
-  xp: 3820,
-  xpToNext: 5000,
-  level: 12,
-  streak: 4,
-  runsThisWeek: 3,
-  caloriesThisWeek: 640,
-};
-
-/** One world per full-length video (12 total). Titles match the ordered source set. */
+/**
+ * One world per full-length video (13 total). Stable IDs map to the immutable
+ * storage folders in videoSources.ts; display titles intentionally follow the
+ * supplied cover/video order.
+ * Accent keys cycle through the theme palette for visual variety, and each
+ * world carries an Ionicons glyph so the UI stays icon-based (no emoji).
+ *
+ * These are the static content definitions only. Whether a world is locked or
+ * completed is derived at runtime from persisted progress (see ProgressContext
+ * + progression.ts) rather than baked in here.
+ */
 export const modes: Mode[] = [
   {
-    id: 'jurassic-escape',
-    name: 'Jurassic Escape Edition',
+    id: 'wild-city',
+    name: 'Wild City',
     tagline: 'Outrun what\u2019s behind you',
     accent: 'lime',
-    emoji: '🦖',
-    locked: false,
-    levels: [{ id: 'jurassic-escape', name: 'Jurassic Escape Edition', durationMin: 5, emoji: '🦖' }],
+    icon: 'paw',
+    levels: [{ id: 'wild-city', name: 'Wild City', durationMin: 5 }],
   },
   {
-    id: 'godzilla-kong',
-    name: 'Godzilla vs. Kong New Map Run',
+    id: 'pixel-kingdom',
+    name: 'Pixel Kingdom',
     tagline: 'Titans, chaos, and speed',
-    accent: 'orange',
-    emoji: '🦍',
-    locked: false,
-    levels: [{ id: 'godzilla-kong', name: 'Godzilla vs. Kong New Map Run', durationMin: 7, emoji: '🦍' }],
+    accent: 'violet',
+    icon: 'shield',
+    levels: [{ id: 'pixel-kingdom', name: 'Pixel Kingdom', durationMin: 7 }],
   },
   {
-    id: 'kpop-demon',
-    name: 'K-Pop Demon Hunters 3 New Map',
+    id: 'neon-beat-hunters',
+    name: 'Neon Beat Hunters',
     tagline: 'Beat drops and dodge cues',
     accent: 'pink',
-    emoji: '🎤',
-    locked: false,
-    levels: [{ id: 'kpop-demon', name: 'K-Pop Demon Hunters 3 New Map', durationMin: 6, emoji: '🎤' }],
+    icon: 'musical-notes',
+    levels: [{ id: 'neon-beat-hunters', name: 'Neon Beat Hunters', durationMin: 6 }],
   },
   {
-    id: 'subway-surfers',
-    name: 'Subway Surfers New Map',
+    id: 'dino-escape',
+    name: 'Dino Escape',
     tagline: 'Classic runner energy',
     accent: 'cyan',
-    emoji: '🚇',
-    locked: false,
-    levels: [{ id: 'subway-surfers', name: 'Subway Surfers New Map', durationMin: 7, emoji: '🚇' }],
+    icon: 'train',
+    levels: [{ id: 'dino-escape', name: 'Dino Escape', durationMin: 7 }],
   },
   {
-    id: 'digital-circus',
-    name: 'Digital Circus Escape',
+    id: 'wild-city-rush',
+    name: 'Wild City Rush',
     tagline: 'Glitchy obstacles, big energy',
-    accent: 'violet',
-    emoji: '🎪',
-    locked: true,
-    levels: [{ id: 'digital-circus', name: 'Digital Circus Escape', durationMin: 6, emoji: '🎪' }],
+    accent: 'orange',
+    icon: 'sparkles',
+    levels: [{ id: 'wild-city-rush', name: 'Wild City Rush', durationMin: 6 }],
   },
   {
-    id: 'frozen-escape',
-    name: 'Frozen Escape',
+    id: 'red-light-rush',
+    name: 'Red Light Rush',
     tagline: 'Ice, speed, and survival',
-    accent: 'cyan',
-    emoji: '❄️',
-    locked: true,
-    levels: [{ id: 'frozen-escape', name: 'Frozen Escape', durationMin: 7, emoji: '❄️' }],
+    accent: 'lime',
+    icon: 'snow',
+    levels: [{ id: 'red-light-rush', name: 'Red Light Rush', durationMin: 7 }],
   },
   {
-    id: 'minecraft-nether',
-    name: 'Minecraft Nether Escape',
+    id: 'critter-chase',
+    name: 'Critter Chase',
     tagline: 'Heat, lava, and lanes',
-    accent: 'orange',
-    emoji: '🔥',
-    locked: true,
-    levels: [{ id: 'minecraft-nether', name: 'Minecraft Nether Escape', durationMin: 7, emoji: '🔥' }],
+    accent: 'violet',
+    icon: 'flame',
+    levels: [{ id: 'critter-chase', name: 'Critter Chase', durationMin: 7 }],
   },
   {
-    id: 'toy-story',
-    name: 'Toy Story Escape',
+    id: 'red-light-rush-2',
+    name: 'Red Light Rush 2',
     tagline: 'Playtime turned workout',
-    accent: 'lime',
-    emoji: '🤠',
-    locked: true,
-    levels: [{ id: 'toy-story', name: 'Toy Story Escape', durationMin: 7, emoji: '🤠' }],
-  },
-  {
-    id: 'zootopia',
-    name: 'Zootopia 3 Escape Edition',
-    tagline: 'City chase cardio',
     accent: 'pink',
-    emoji: '🦊',
-    locked: true,
-    levels: [{ id: 'zootopia', name: 'Zootopia 3 Escape Edition', durationMin: 5, emoji: '🦊' }],
+    icon: 'rocket',
+    levels: [{ id: 'red-light-rush-2', name: 'Red Light Rush 2', durationMin: 7 }],
   },
   {
-    id: 'minecraft-subway',
-    name: 'Minecraft Subway Edition',
+    id: 'metro-zombie-escape',
+    name: 'Metro Zombie Escape',
+    tagline: 'City chase cardio',
+    accent: 'cyan',
+    icon: 'navigate',
+    levels: [{ id: 'metro-zombie-escape', name: 'Metro Zombie Escape', durationMin: 5 }],
+  },
+  {
+    id: 'drumline-dash',
+    name: 'Drumline Dash',
     tagline: 'Blocks, rails, and speed',
-    accent: 'violet',
-    emoji: '⛏️',
-    locked: false,
-    levels: [{ id: 'minecraft-subway', name: 'Minecraft Subway Edition', durationMin: 6, emoji: '⛏️' }],
-  },
-  {
-    id: 'mario-world',
-    name: 'Mario World Escape',
-    tagline: 'Jump, duck, and dash',
     accent: 'orange',
-    emoji: '🍄',
-    locked: false,
-    levels: [{ id: 'mario-world', name: 'Mario World Escape', durationMin: 5, emoji: '🍄' }],
+    icon: 'cube',
+    levels: [{ id: 'drumline-dash', name: 'Drumline Dash', durationMin: 6 }],
   },
   {
-    id: 'stranger-things',
-    name: 'Stranger Things Edition',
-    tagline: 'Upside-down cardio run',
-    accent: 'violet',
-    emoji: '🔦',
-    locked: false,
-    levels: [{ id: 'stranger-things', name: 'Stranger Things Edition', durationMin: 6, emoji: '🔦' }],
-  },
-  {
-    id: '4k-test',
-    name: '4K Quality Test',
-    tagline: 'High-res sample run',
+    id: 'block-world-dash',
+    name: 'Block World Dash',
+    tagline: 'Jump, duck, and dash',
     accent: 'lime',
-    emoji: '🎬',
-    locked: false,
-    levels: [{ id: '4k-test', name: '4K Quality Test', durationMin: 2, emoji: '🎬' }],
+    icon: 'game-controller',
+    levels: [{ id: 'block-world-dash', name: 'Block World Dash', durationMin: 5 }],
   },
-];
-
-export const featured = {
-  modeId: 'jurassic-escape',
-  levelId: 'jurassic-escape',
-  title: 'Jurassic Escape Edition',
-  subtitle: 'Full-length run · ~5 min',
-  accent: 'lime' as AccentKey,
-  emoji: '🦖',
-};
-
-export const dailyChallenges: Challenge[] = [
-  { id: 'c1', title: 'Complete one Jurassic Escape run', reward: '+120 coins', progress: 0, done: false },
-  { id: 'c2', title: 'Finish a run without pausing', reward: '+300 XP', progress: 0.5, done: false },
-  { id: 'c3', title: 'Earn 200 coins', reward: 'Jump Master badge', progress: 0.3, done: false },
-];
-
-export const difficulties: { key: Difficulty; multiplier: string; note: string }[] = [
-  { key: 'Beginner', multiplier: '1.0x', note: 'Chill pace, learn the cues' },
-  { key: 'Normal', multiplier: '1.25x', note: 'Balanced score boost' },
-  { key: 'Hard', multiplier: '1.5x', note: 'Tougher goals, best rewards' },
+  {
+    id: 'neon-rails',
+    name: 'Neon Rails',
+    tagline: 'Dash the rails and dodge fast',
+    accent: 'cyan',
+    icon: 'speedometer',
+    levels: [{ id: 'neon-rails', name: 'Neon Rails', durationMin: 2 }],
+  },
+  {
+    id: 'prison-escape-run',
+    name: 'Prison Escape Run',
+    tagline: 'Break free and outrun pursuit',
+    accent: 'orange',
+    icon: 'warning',
+    levels: [{ id: 'prison-escape-run', name: 'Prison Escape Run', durationMin: 3 }],
+  },
 ];
 
 export function getMode(id: string | undefined): Mode | undefined {
   return modes.find((m) => m.id === id);
+}
+
+/** Flat lookup of every level across all worlds (one level per world today). */
+export function getLevel(id: string | undefined): Level | undefined {
+  if (!id) return undefined;
+  for (const mode of modes) {
+    const level = mode.levels.find((l) => l.id === id);
+    if (level) return level;
+  }
+  return undefined;
 }

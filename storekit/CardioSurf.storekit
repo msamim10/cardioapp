@@ -1,0 +1,119 @@
+{
+  "identifier" : "CARDIOSURFPRO01",
+  "nonRenewingSubscriptions" : [],
+  "products" : [],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 0,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21500001",
+      "localizations" : [],
+      "name" : "CardioSurf Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "CS0PROMON",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited CardioSurf Pro access, billed monthly.",
+              "displayName" : "CardioSurf Pro Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "cardiosurf_pro_monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "CardioSurf Pro Monthly",
+          "subscriptionGroupID" : "21500001",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : []
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "69.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "CS0PROYRL",
+          "introductoryOffer" : {
+            "internalID" : "CS0PROYRLTRIAL",
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P3D"
+          },
+          "localizations" : [
+            {
+              "description" : "Unlimited CardioSurf Pro access, billed yearly. Includes a 3-day free trial.",
+              "displayName" : "CardioSurf Pro Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "cardiosurf_pro_yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "CardioSurf Pro Yearly",
+          "subscriptionGroupID" : "21500001",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : []
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

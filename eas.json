@@ -1,0 +1,57 @@
+{
+  "cli": {
+    "version": ">= 16.13.3",
+    "appVersionSource": "remote",
+    "promptToConfigurePushNotifications": false
+  },
+  "build": {
+    "base": {
+      "env": {
+        "EXPO_PUBLIC_MEDIA_BASE_URL": "https://storage.googleapis.com/cardiosurf-mvp-media",
+        "EXPO_PUBLIC_REVENUECAT_ENTITLEMENT": "cardioapp_pro",
+        "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "appl_tAiCBXLyztecTsRTLDLtpzkulLu",
+        "EXPO_PUBLIC_REVENUECAT_KEY": "test_nMpVsFVOdXqXHcuqlNGVTHrQMBg",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "41005114333-dcgqjkpkt8sqeh4t2o7il6bch9ceabc7.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "41005114333-ioq5d0bijpd1vgfn13411sdtqnglkn09.apps.googleusercontent.com",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyA3ouss9cHFHdnVM14bVpypF6U-WFKMkPA",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "cardiosurf-mvp.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "cardiosurf-mvp",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "cardiosurf-mvp.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "41005114333",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:41005114333:web:2be1456b5213d89bc70c34"
+      }
+    },
+    "development": {
+      "extends": "base",
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "resourceClass": "m-medium"
+      }
+    },
+    "development-simulator": {
+      "extends": "development",
+      "ios": {
+        "simulator": true,
+        "resourceClass": "m-medium"
+      }
+    },
+    "preview": {
+      "extends": "base",
+      "distribution": "internal",
+      "ios": {
+        "resourceClass": "m-medium"
+      }
+    },
+    "production": {
+      "extends": "base",
+      "autoIncrement": true,
+      "ios": {
+        "resourceClass": "m-medium"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

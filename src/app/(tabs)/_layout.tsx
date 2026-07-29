@@ -7,6 +7,7 @@ import { colors, font, radius } from '@/theme';
 const TABS: { name: string; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { name: 'index', label: 'Home', icon: 'home' },
   { name: 'levels', label: 'Levels', icon: 'grid' },
+  { name: 'progress', label: 'Progress', icon: 'stats-chart' },
   { name: 'profile', label: 'Profile', icon: 'person' },
 ];
 
@@ -24,6 +25,9 @@ export default function TabsLayout() {
               <Pressable
                 key={tab.name}
                 style={styles.tab}
+                accessibilityRole="tab"
+                accessibilityLabel={tab.label}
+                accessibilityState={{ selected: focused }}
                 onPress={() => navigation.navigate(tab.name)}
               >
                 <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
@@ -42,6 +46,7 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="index" />
       <Tabs.Screen name="levels" />
+      <Tabs.Screen name="progress" />
       <Tabs.Screen name="profile" />
     </Tabs>
   );

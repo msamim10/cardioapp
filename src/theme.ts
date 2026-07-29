@@ -66,6 +66,13 @@ export const radius = {
   pill: 999,
 } as const;
 
+export const cardSurface = {
+  borderRadius: radius.lg,
+  backgroundColor: colors.surface,
+  borderWidth: 1,
+  borderColor: colors.border,
+} as const;
+
 export const font = {
   black: '800' as const,
   bold: '700' as const,

@@ -1,217 +1,504 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { VideoAirPlayButton } from 'expo-video';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GradientButton, SectionHeader } from '@/components/ui';
-import { difficulties, getMode, type Difficulty } from '@/lib/gameData';
-import { accentColor, accentGradient, colors, font, radius, spacing } from '@/theme';
+import { OptionCard, SectionHeader } from '@/components/ui';
+import { discoveryClassForMode } from '@/lib/dailyRecommendations';
+import { getMode, modes } from '@/lib/gameData';
+import { getModeCover } from '@/lib/modeCovers';
+import { useProgress } from '@/lib/ProgressContext';
+import {
+  caloriesForRun,
+  CLASS_META,
+  parseOptionalClassKeyParam,
+} from '@/lib/progression';
+import { useSubscription } from '@/lib/SubscriptionContext';
+import { canStartRun, requestSubscriptionAccess } from '@/lib/subscriptionAccess';
+import { colors, font, radius, spacing } from '@/theme';
+
+const PREP_ITEMS: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  detail: string;
+}[] = [
+  { icon: 'resize-outline', title: 'Clear space', detail: 'Make room to move safely.' },
+  { icon: 'volume-high-outline', title: 'Sound on', detail: 'Listen for movement cues.' },
+  { icon: 'phone-portrait-outline', title: 'Position screen', detail: 'Keep your phone or TV easy to see.' },
+  { icon: 'body-outline', title: 'Stay in frame', detail: 'Secure your shoes and stay visible.' },
+];
+
+type PlaybackDestination = 'phone' | 'tv';
 
 export default function LevelDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id: idParam, classKey: classKeyParam } = useLocalSearchParams<{
+    id: string | string[];
+    classKey?: string | string[];
+  }>();
+  const id = Array.isArray(idParam) ? idParam[0] : idParam;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const mode = getMode(id);
-
-  const [levelIdx, setLevelIdx] = useState(0);
-  const [difficulty, setDifficulty] = useState<Difficulty>('Normal');
+  const { classData } = useProgress();
+  const { hydrated: subscriptionHydrated, isPremium, presentPaywall } = useSubscription();
+  const [playbackDestination, setPlaybackDestination] = useState<PlaybackDestination>('phone');
+  const [starting, setStarting] = useState(false);
+  const campaignClass = parseOptionalClassKeyParam(classKeyParam);
+  const displayClass =
+    campaignClass ?? (id ? discoveryClassForMode(id, modes) : 'beginner');
+  const inCampaignRoster = Boolean(
+    campaignClass && id && classData(campaignClass).roster.includes(id)
+  );
 
   if (!mode) {
     return (
       <View style={[styles.root, styles.center]}>
-        <Text style={styles.missing}>World not found</Text>
+        <Text style={styles.missing}>Map not found</Text>
+        <Pressable
+          onPress={() =>
+            router.canGoBack() ? router.back() : router.replace('/(tabs)/levels')
+          }
+          style={styles.missingBack}
+        >
+          <Text style={styles.missingBackText}>Go back</Text>
+        </Pressable>
       </View>
     );
   }
 
-  const accent = mode.accent;
-  const level = mode.levels[levelIdx];
+  const level = mode.levels[0];
+  const cover = getModeCover(mode.id);
+  const classMeta = CLASS_META[displayClass];
+  const calories = caloriesForRun(level.durationMin, displayClass);
+
+  const preflightParams: Record<string, string> = {
+    level: level.id,
+    name: level.name,
+    speed: String(classMeta.speedFactor),
+    duration: String(level.durationMin),
+    ...(campaignClass ? { classKey: campaignClass } : {}),
+  };
+
+  const goPreflight = () => {
+    router.push({
+      pathname: '/preflight',
+      params: preflightParams,
+    });
+  };
+
+  const onStart = async () => {
+    if (!subscriptionHydrated || starting) return;
+
+    if (canStartRun(isPremium)) {
+      goPreflight();
+      return;
+    }
+
+    setStarting(true);
+    try {
+      const outcome = await requestSubscriptionAccess(presentPaywall, router, {
+        ifNeeded: false,
+        preflightParams,
+      });
+      if (outcome === 'granted') {
+        goPreflight();
+      }
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const onBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    if (campaignClass && inCampaignRoster) {
+      router.replace({
+        pathname: '/modes',
+        params: { classKey: campaignClass },
+      });
+      return;
+    }
+    router.replace('/(tabs)/levels');
+  };
+
+  const continueLabel = 'CONTINUE';
 
   return (
     <View style={styles.root}>
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.sm, paddingBottom: 160 }]}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingTop: insets.top + spacing.sm,
+            paddingBottom: insets.bottom + 108,
+          },
+        ]}
         showsVerticalScrollIndicator={false}
       >
-        <Pressable style={styles.back} onPress={() => router.back()} hitSlop={10}>
-          <Ionicons name="chevron-back" size={26} color={colors.text} />
-        </Pressable>
+        <View style={styles.header}>
+          <Pressable
+            onPress={onBack}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={10}
+            style={({ pressed }) => [styles.back, pressed && styles.pressed]}
+          >
+            <Ionicons name="chevron-back" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={styles.headerTitle}>Run recap</Text>
+          <View style={styles.headerSpacer} />
+        </View>
 
-        {/* Hero */}
-        <LinearGradient
-          colors={accentGradient[accent]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.hero}
-        >
-          <Text style={styles.heroEmoji}>{mode.emoji}</Text>
-          <Text style={styles.heroName}>{mode.name}</Text>
-          <Text style={styles.heroTag}>{mode.tagline}</Text>
-        </LinearGradient>
+        <View style={styles.hero}>
+          {cover ? <Image source={cover} contentFit="cover" style={StyleSheet.absoluteFill} /> : null}
+          <LinearGradient
+            colors={[
+              'rgba(6,6,10,0.04)',
+              'rgba(6,6,10,0.22)',
+              'rgba(6,6,10,0.78)',
+              'rgba(6,6,10,0.98)',
+            ]}
+            locations={[0.08, 0.42, 0.7, 1]}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={styles.heroText}>
+            <Text style={styles.heroTitle}>{mode.name}</Text>
+            <Text style={styles.heroSubtitle}>{mode.tagline}</Text>
+            <View
+              style={styles.heroSummaryRow}
+              accessible
+              accessibilityLabel={`${classMeta.label}, ${level.durationMin} minutes, approximately ${calories} calories, ${classMeta.speedFactor.toFixed(1)} times intensity`}
+            >
+              <HeroSummaryItem icon={classMeta.icon} value={classMeta.label} />
+              <HeroSummaryItem icon="time-outline" value={`${level.durationMin} min`} />
+              <HeroSummaryItem icon="flame-outline" value={`~${calories} kcal`} />
+              <HeroSummaryItem
+                icon="speedometer-outline"
+                value={`${classMeta.speedFactor.toFixed(1)}x`}
+              />
+            </View>
+          </View>
+        </View>
 
-        {/* Levels */}
         <View style={styles.section}>
-          <SectionHeader title="Level" />
-          {mode.levels.map((lv, i) => {
-            const selected = i === levelIdx;
-            return (
-              <Pressable
-                key={lv.id}
-                onPress={() => setLevelIdx(i)}
-                style={[styles.row, selected && { borderColor: accentColor[accent] }]}
+          <SectionHeader title="Get ready" />
+          <View
+            style={styles.prepRow}
+            accessibilityRole="list"
+            accessibilityLabel="Get ready reminders"
+          >
+            {PREP_ITEMS.map((item) => (
+              <View
+                key={item.title}
+                style={styles.prepCard}
+                accessible
+                accessibilityRole="summary"
+                accessibilityLabel={`${item.title}. ${item.detail}`}
               >
-                <Text style={styles.rowEmoji}>{lv.emoji}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.rowTitle}>{lv.name}</Text>
-                  <Text style={styles.rowSub}>{lv.durationMin} min run</Text>
-                </View>
-                <Ionicons
-                  name={selected ? 'radio-button-on' : 'radio-button-off'}
-                  size={22}
-                  color={selected ? accentColor[accent] : colors.textFaint}
-                />
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {/* Difficulty */}
-        <View style={styles.section}>
-          <SectionHeader title="Difficulty" />
-          <View style={styles.diffRow}>
-            {difficulties.map((d) => {
-              const selected = d.key === difficulty;
-              return (
-                <Pressable
-                  key={d.key}
-                  onPress={() => setDifficulty(d.key)}
-                  style={[styles.diff, selected && { borderColor: accentColor[accent], backgroundColor: colors.surface2 }]}
+                <Ionicons name={item.icon} size={21} color={colors.lime} />
+                <Text
+                  style={styles.prepTitle}
+                  numberOfLines={2}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                  maxFontSizeMultiplier={1.2}
                 >
-                  <Text style={[styles.diffLabel, selected && { color: colors.text }]}>{d.key}</Text>
-                  <Text style={[styles.diffMult, selected && { color: accentColor[accent] }]}>{d.multiplier}</Text>
-                </Pressable>
-              );
-            })}
+                  {item.title}
+                </Text>
+                <Text
+                  style={styles.prepDetail}
+                  numberOfLines={3}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                  maxFontSizeMultiplier={1.1}
+                >
+                  {item.detail}
+                </Text>
+              </View>
+            ))}
           </View>
-          <Text style={styles.diffNote}>{difficulties.find((d) => d.key === difficulty)?.note}</Text>
         </View>
 
-        {/* Rewards preview */}
-        <View style={styles.section}>
-          <SectionHeader title="Rewards" />
-          <View style={styles.rewardRow}>
-            <RewardPill icon="logo-bitcoin" label="Coins" value="up to 140" accent="lime" />
-            <RewardPill icon="star" label="XP" value="+320" accent="violet" />
-            <RewardPill icon="flame" label="Streak" value="+1 day" accent="orange" />
+        {Platform.OS === 'ios' ? (
+          <View style={styles.playDestinationGroup}>
+            <SectionHeader title="Where do you want to play?" />
+            <View style={styles.playDestinationOptions}>
+              <OptionCard
+                title="Phone"
+                desc="Play on this device"
+                icon="phone-portrait-outline"
+                selected={playbackDestination === 'phone'}
+                onPress={() => setPlaybackDestination('phone')}
+              />
+              <View
+                style={styles.tvAirplayCardWrap}
+                pointerEvents="box-none"
+                accessibilityRole="radio"
+                accessibilityLabel="TV or AirPlay"
+                accessibilityHint="Opens the AirPlay picker to choose your display"
+                accessibilityState={{ selected: playbackDestination === 'tv' }}
+              >
+                {/* Visual-only card — touches pass through to the native picker overlay. */}
+                <View pointerEvents="none">
+                  <OptionCard
+                    title="TV / AirPlay"
+                    desc="Stream to Apple TV or AirPlay display"
+                    icon="tv-outline"
+                    selected={playbackDestination === 'tv'}
+                  />
+                </View>
+                {/* Invisible native route picker — transparent tint keeps icon hidden while opacity stays 1 for hit-testing. */}
+                <VideoAirPlayButton
+                  style={styles.tvAirplayOverlay}
+                  tint="#00000000"
+                  activeTint="#00000000"
+                  prioritizeVideoDevices
+                  onBeginPresentingRoutes={() => setPlaybackDestination('tv')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Choose an AirPlay display"
+                  accessibilityHint="Opens the system AirPlay route picker"
+                />
+              </View>
+            </View>
           </View>
-        </View>
+        ) : null}
       </ScrollView>
 
-      {/* Sticky start */}
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
-        <GradientButton
-          label={`START · ${level.durationMin} MIN`}
-          icon="play"
-          accent={accent}
-          onPress={() =>
-            router.push({ pathname: '/workout', params: { level: level.id, name: level.name } })
-          }
-        />
+      <View
+        style={[
+          styles.footer,
+          { paddingBottom: Math.max(insets.bottom, spacing.md) + spacing.sm },
+        ]}
+      >
+        <View
+          accessible
+          accessibilityRole="text"
+          accessibilityLabel="Next: quick camera setup and calibration"
+          style={styles.setupHeadsUp}
+        >
+          <Ionicons name="camera-outline" size={15} color={colors.lime} />
+          <Text style={styles.setupHeadsUpText}>Next: quick camera setup and calibration</Text>
+        </View>
+        <Pressable
+          onPress={onStart}
+          disabled={!subscriptionHydrated || starting}
+          accessibilityRole="button"
+          accessibilityLabel={`Continue to camera setup for ${mode.name}`}
+          accessibilityState={{ disabled: !subscriptionHydrated || starting, busy: starting }}
+          style={({ pressed }) => [
+            styles.beginButton,
+            (!subscriptionHydrated || starting) && styles.beginDisabled,
+            pressed && styles.beginPressed,
+          ]}
+        >
+          {!subscriptionHydrated || starting ? (
+            <ActivityIndicator color={colors.black} />
+          ) : (
+            <Ionicons name="play" size={20} color={colors.black} />
+          )}
+          <Text style={styles.beginButtonText}>{continueLabel}</Text>
+        </Pressable>
       </View>
+
     </View>
   );
 }
 
-function RewardPill({
+function HeroSummaryItem({
   icon,
-  label,
   value,
-  accent,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
-  label: string;
   value: string;
-  accent: 'lime' | 'violet' | 'orange';
 }) {
   return (
-    <View style={styles.rewardPill}>
-      <Ionicons name={icon} size={20} color={accentColor[accent]} />
-      <Text style={styles.rewardValue}>{value}</Text>
-      <Text style={styles.rewardLabel}>{label}</Text>
+    <View style={styles.heroSummaryItem}>
+      <Ionicons name={icon} size={15} color={colors.lime} />
+      <Text style={styles.heroSummaryValue} maxFontSizeMultiplier={1.2}>
+        {value}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  center: { alignItems: 'center', justifyContent: 'center' },
-  missing: { color: colors.textDim, fontSize: 16 },
+  center: { alignItems: 'center', justifyContent: 'center', gap: spacing.md },
+  missing: { color: colors.text, fontSize: 18, fontWeight: font.bold },
+  missingBack: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+  },
+  missingBackText: { color: colors.lime, fontSize: 14, fontWeight: font.bold },
   content: { paddingHorizontal: spacing.lg, gap: spacing.lg },
+  header: { minHeight: 44, flexDirection: 'row', alignItems: 'center' },
   back: {
     width: 42,
     height: 42,
     borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  hero: { borderRadius: radius.xl, padding: spacing.xl, alignItems: 'flex-start' },
-  heroEmoji: { fontSize: 60 },
-  heroName: { color: colors.black, fontSize: 30, fontWeight: font.black, letterSpacing: -0.6, marginTop: spacing.sm },
-  heroTag: { color: 'rgba(0,0,0,0.65)', fontSize: 15, fontWeight: font.semibold, marginTop: 2 },
-  section: { gap: spacing.sm },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-  },
-  rowEmoji: { fontSize: 28 },
-  rowTitle: { color: colors.text, fontSize: 16, fontWeight: font.bold },
-  rowSub: { color: colors.textDim, fontSize: 13, fontWeight: font.medium, marginTop: 1 },
-  diffRow: { flexDirection: 'row', gap: spacing.sm },
-  diff: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    gap: 4,
-  },
-  diffLabel: { color: colors.textDim, fontSize: 14, fontWeight: font.bold },
-  diffMult: { color: colors.textFaint, fontSize: 13, fontWeight: font.bold },
-  diffNote: { color: colors.textDim, fontSize: 13, fontWeight: font.medium, marginTop: 4 },
-  rewardRow: { flexDirection: 'row', gap: spacing.sm },
-  rewardPill: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: spacing.lg,
-    borderRadius: radius.md,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  rewardValue: { color: colors.text, fontSize: 15, fontWeight: font.black },
-  rewardLabel: { color: colors.textDim, fontSize: 12, fontWeight: font.semibold },
+  headerTitle: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: font.bold,
+    textAlign: 'center',
+  },
+  headerSpacer: { width: 42 },
+  hero: {
+    minHeight: 292,
+    borderRadius: radius.xl,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  heroText: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xxl + spacing.xl,
+    paddingBottom: spacing.md,
+  },
+  heroTitle: {
+    color: colors.white,
+    fontSize: 29,
+    lineHeight: 33,
+    fontWeight: font.black,
+    letterSpacing: -0.5,
+  },
+  heroSubtitle: {
+    color: 'rgba(255,255,255,0.74)',
+    fontSize: 14,
+    fontWeight: font.medium,
+    marginTop: 3,
+  },
+  heroSummaryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  heroSummaryItem: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(6,6,10,0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  heroSummaryValue: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: font.bold,
+  },
+  section: { gap: spacing.sm },
+  prepRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'stretch',
+    gap: 6,
+  },
+  prepCard: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 116,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 4,
+    paddingVertical: 7,
+    borderRadius: radius.md,
+    backgroundColor: colors.bgElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  prepTitle: {
+    color: colors.text,
+    fontSize: 11,
+    lineHeight: 13,
+    fontWeight: font.semibold,
+    textAlign: 'center',
+  },
+  prepDetail: {
+    color: colors.textDim,
+    fontSize: 9,
+    lineHeight: 11,
+    fontWeight: font.medium,
+    textAlign: 'center',
+  },
+  playDestinationGroup: { gap: spacing.sm },
+  playDestinationOptions: { gap: spacing.sm },
+  tvAirplayCardWrap: {
+    position: 'relative',
+  },
+  tvAirplayOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+  },
   footer: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
+    paddingTop: spacing.sm,
     backgroundColor: colors.bg,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
+  setupHeadsUp: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: spacing.sm,
+  },
+  setupHeadsUpText: {
+    color: colors.textDim,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: font.semibold,
+  },
+  beginButton: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderRadius: radius.pill,
+    backgroundColor: colors.lime,
+  },
+  beginButtonText: {
+    color: colors.black,
+    fontSize: 16,
+    fontWeight: font.black,
+    letterSpacing: 0.5,
+  },
+  beginDisabled: { opacity: 0.82 },
+  beginPressed: { opacity: 0.84, transform: [{ scale: 0.99 }] },
+  pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
 });

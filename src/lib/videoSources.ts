@@ -9,8 +9,11 @@
 
 export type Orientation = 'vertical' | 'horizontal';
 
-const BASE_URL = (process.env.EXPO_PUBLIC_MEDIA_BASE_URL ?? '').replace(/\/$/, '');
-const HLS_PREFIX = 'hls';
+// This bucket is intentionally public. Keep a production default so an
+// unavailable local .env file cannot disable every migrated level at runtime.
+const DEFAULT_MEDIA_BASE_URL = 'https://storage.googleapis.com/cardiosurf-mvp-media';
+const BASE_URL = (process.env.EXPO_PUBLIC_MEDIA_BASE_URL || DEFAULT_MEDIA_BASE_URL).replace(/\/$/, '');
+const HLS_PREFIX = 'hls-v2';
 
 type MediaEntry = {
   slug: string;
@@ -25,27 +28,21 @@ type MediaEntry = {
   missing?: Orientation[];
 };
 
-/** Maps game level ids to storage folders level1..level12 (ordered source set). */
+/** Maps the 13 game level ids to their immutable storage folders. */
 const LEVEL_MEDIA: Record<string, MediaEntry> = {
-  'jurassic-escape': { slug: 'level1' },
-  'godzilla-kong': { slug: 'level2' },
-  'kpop-demon': { slug: 'level3' },
-  'subway-surfers': { slug: 'level4' },
-  // Digital Circus: vertical source corrupt/unavailable -> serve horizontal.
-  'digital-circus': { slug: 'level5', missing: ['vertical'] },
-  // Frozen Escape: no usable source yet.
-  'frozen-escape': { slug: 'level6', missing: ['vertical', 'horizontal'] },
-  // Minecraft Nether: no usable source yet.
-  'minecraft-nether': { slug: 'level7', missing: ['vertical', 'horizontal'] },
-  // Toy Story: no usable source yet.
-  'toy-story': { slug: 'level8', missing: ['vertical', 'horizontal'] },
-  // Zootopia: horizontal source missing -> serve vertical.
-  zootopia: { slug: 'level9', missing: ['horizontal'] },
-  'minecraft-subway': { slug: 'level10' },
-  'mario-world': { slug: 'level11' },
-  'stranger-things': { slug: 'level12' },
-  // 4K quality test source (2160p ladder).
-  '4k-test': { slug: 'level13' },
+  'wild-city': { slug: 'level1' },
+  'pixel-kingdom': { slug: 'level2' },
+  'neon-beat-hunters': { slug: 'level3' },
+  'dino-escape': { slug: 'level4' },
+  'wild-city-rush': { slug: 'level5' },
+  'red-light-rush': { slug: 'level6' },
+  'critter-chase': { slug: 'level7' },
+  'red-light-rush-2': { slug: 'level8' },
+  'metro-zombie-escape': { slug: 'level9' },
+  'drumline-dash': { slug: 'level10' },
+  'block-world-dash': { slug: 'level11' },
+  'neon-rails': { slug: 'level13' },
+  'prison-escape-run': { slug: 'level14' },
 };
 
 function masterUrl(slug: string, orientation: Orientation): string {
