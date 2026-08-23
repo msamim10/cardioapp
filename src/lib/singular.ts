@@ -32,6 +32,36 @@ function isReal(value: string | undefined | null): value is string {
   return v.length > 0 && !/placeholder/i.test(v);
 }
 
+/** A usable native string argument: present, a string, and non-empty. */
+function isUsableString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/** A number the native side can marshal — NaN/Infinity are not. */
+function isUsableNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * Strip anything the native bridge can't marshal. The Singular SDK serializes
+ * event args with NSJSONSerialization, which raises an Objective-C exception
+ * (an uncatchable hard crash) on NaN/Infinity, and the TurboModule layer aborts
+ * on values that don't match the generated spec. Only finite numbers, strings
+ * and booleans survive; everything else — including null and undefined — is
+ * dropped rather than forwarded.
+ */
+function sanitizeArgs(args: SerializableArgs | undefined): SerializableArgs | null {
+  if (!args || typeof args !== 'object') return null;
+  const clean: SerializableArgs = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (!isUsableString(key)) continue;
+    if (typeof value === 'boolean' || isUsableString(value) || isUsableNumber(value)) {
+      clean[key] = value;
+    }
+  }
+  return Object.keys(clean).length > 0 ? clean : null;
+}
+
 /** True when both the SDK Key and SDK Secret are real (non-placeholder) values. */
 export const isSingularConfigured =
   isReal(singularConfig.sdkKey) && isReal(singularConfig.sdkSecret);
@@ -73,17 +103,29 @@ export function initSingular(opts: {
   if (!mod) return false;
   try {
     const { Singular, SingularConfig } = mod;
+    const attTimeout = isUsableNumber(opts.attTimeoutSeconds)
+      ? Math.max(0, Math.round(opts.attTimeoutSeconds))
+      : 300;
     const config = new SingularConfig(singularConfig.sdkKey, singularConfig.sdkSecret)
       .withSkAdNetworkEnabled(true)
       // Hold the install/session until ATT is resolved (Phase 2 requirement).
-      .withWaitForTrackingAuthorizationWithTimeoutInterval(opts.attTimeoutSeconds ?? 300);
+      .withWaitForTrackingAuthorizationWithTimeoutInterval(attTimeout);
     if (isManualSkanConversion) {
       // Opt out of Singular's automatic (dashboard-managed) conversion model so
       // our local schema drives skanUpdateConversionValue (see conversionValue.ts).
       config.withManualSkanConversionManagement();
     }
-    if (opts.onConversionValueUpdated) {
-      config.withConversionValueUpdatedHandler(opts.onConversionValueUpdated);
+    const onConversionValueUpdated = opts.onConversionValueUpdated;
+    if (onConversionValueUpdated) {
+      // Invoked from the native event emitter, where a throw would surface as an
+      // unhandled JS exception rather than a rejected promise.
+      config.withConversionValueUpdatedHandler((value: number) => {
+        try {
+          onConversionValueUpdated(value);
+        } catch (e) {
+          console.warn('[singular] conversionValueUpdated handler failed:', e);
+        }
+      });
     }
     if (__DEV__) config.withLoggingEnabled();
     Singular.init(config);
@@ -101,6 +143,7 @@ export function isSingularReady(): boolean {
 }
 
 export function singularSetCustomUserId(customUserId: string): void {
+  if (!isUsableString(customUserId)) return;
   if (!isSingularReady()) return;
   try {
     getModule()!.Singular.setCustomUserId(customUserId);
@@ -119,10 +162,12 @@ export function singularUnsetCustomUserId(): void {
 }
 
 export function singularEvent(eventName: string, args?: SerializableArgs): void {
+  if (!isUsableString(eventName)) return;
   if (!isSingularReady()) return;
   try {
     const { Singular } = getModule()!;
-    if (args && Object.keys(args).length > 0) Singular.eventWithArgs(eventName, args);
+    const clean = sanitizeArgs(args);
+    if (clean) Singular.eventWithArgs(eventName, clean);
     else Singular.event(eventName);
   } catch (e) {
     console.warn('[singular] event failed:', e);
@@ -140,11 +185,15 @@ export function singularCustomRevenue(
   amount: number,
   args?: SerializableArgs,
 ): void {
+  if (!isUsableString(eventName) || !isUsableString(currency) || !isUsableNumber(amount)) {
+    return;
+  }
   if (!isSingularReady()) return;
   try {
     const { Singular } = getModule()!;
-    if (args && Object.keys(args).length > 0) {
-      Singular.customRevenueWithArgs(eventName, currency, amount, args);
+    const clean = sanitizeArgs(args);
+    if (clean) {
+      Singular.customRevenueWithArgs(eventName, currency, amount, clean);
     } else {
       Singular.customRevenue(eventName, currency, amount);
     }
@@ -159,8 +208,12 @@ export function singularCustomRevenue(
  */
 export function singularSkanUpdateConversionValue(conversionValue: number): boolean {
   if (!isSingularReady() || Platform.OS !== 'ios') return false;
+  // A fine conversion value is 6 bits; StoreKit raises on anything outside 0–63.
+  if (!isUsableNumber(conversionValue)) return false;
+  const value = Math.round(conversionValue);
+  if (value < 0 || value > 63) return false;
   try {
-    return getModule()!.Singular.skanUpdateConversionValue(conversionValue) === true;
+    return getModule()!.Singular.skanUpdateConversionValue(value) === true;
   } catch (e) {
     console.warn('[singular] skanUpdateConversionValue failed:', e);
     return false;

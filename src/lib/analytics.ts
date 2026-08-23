@@ -25,7 +25,8 @@
  * the SKAN ladder moving without double-counting server-side conversions.
  */
 
-import { Platform } from 'react-native';
+import Constants from 'expo-constants';
+import { AppState, Platform } from 'react-native';
 import { bumpConversionValue, bumpConversionValueForRunCount } from './conversionValue';
 import {
   claimAttRequest,
@@ -64,6 +65,44 @@ export const EVENTS = {
 
 let initialized = false;
 
+/** How long Singular holds the install/session waiting for the ATT answer. */
+const ATT_WAIT_TIMEOUT_SECONDS = 300;
+
+const isThenable = (value: unknown): value is PromiseLike<unknown> =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as PromiseLike<unknown>).then === 'function';
+
+/**
+ * Run an analytics side effect in total isolation. Every exported log function
+ * goes through this, so neither a synchronous throw nor a rejected promise can
+ * reach the caller: these fire from user-visible paths (run completion,
+ * checkout, sign-up) that must survive a broken or missing SDK.
+ */
+function safely(label: string, run: () => unknown): void {
+  try {
+    const result = run();
+    if (isThenable(result)) {
+      Promise.resolve(result).catch((error) => report(label, error));
+    }
+  } catch (error) {
+    report(label, error);
+  }
+}
+
+function report(label: string, error: unknown): void {
+  if (__DEV__) console.warn(`[analytics] ${label} failed:`, error);
+}
+
+/** Coerce to a number the native bridge can marshal (never NaN/Infinity). */
+const finiteOr = (value: number, fallback: number): number =>
+  typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+
+const roundTo = (value: number, digits: number): number => {
+  const factor = 10 ** digits;
+  return finiteOr(Math.round(finiteOr(value, 0) * factor) / factor, 0);
+};
+
 /**
  * Initialize analytics at app launch. Idempotent. Records the app-open (for
  * install + retention), inits Singular (which holds the install event until ATT
@@ -72,16 +111,18 @@ let initialized = false;
 export function initAnalytics(): void {
   if (initialized) return;
   initialized = true;
-  void markAppOpen();
-  initSingular({
-    attTimeoutSeconds: 300,
-    // Surface Singular's automatic (dashboard-managed) conversion values into
-    // the local funnel so the debug screen can show them.
-    onConversionValueUpdated: (value) => {
-      void recordReportedConversionValue(value);
-    },
+  safely('markAppOpen', () => markAppOpen());
+  safely('initAnalytics', () => {
+    initSingular({
+      attTimeoutSeconds: ATT_WAIT_TIMEOUT_SECONDS,
+      // Surface Singular's automatic (dashboard-managed) conversion values into
+      // the local funnel so the debug screen can show them.
+      onConversionValueUpdated: (value) => {
+        safely('recordReportedConversionValue', () => recordReportedConversionValue(value));
+      },
+    });
+    return bumpConversionValue('install');
   });
-  void bumpConversionValue('install');
 }
 
 /**
@@ -90,44 +131,54 @@ export function initAnalytics(): void {
  * signed out / anonymous). Keeps cross-device attribution joined to billing.
  */
 export function syncAnalyticsIdentity(appUserId: string | null): void {
-  if (appUserId) singularSetCustomUserId(appUserId);
-  else singularUnsetCustomUserId();
+  safely('syncAnalyticsIdentity', () => {
+    if (typeof appUserId === 'string' && appUserId.length > 0) {
+      singularSetCustomUserId(appUserId);
+    } else {
+      singularUnsetCustomUserId();
+    }
+  });
 }
 
 // --- Funnel events --------------------------------------------------------
 
 /** First entry into the onboarding flow (welcome screen). */
 export function logOnboardingStart(): void {
-  void markOnboardingStart();
-  // Separates "opened the app" from an install that never got past the icon.
-  void bumpConversionValue('opened_no_calibration');
+  safely('logOnboardingStart', async () => {
+    await markOnboardingStart();
+    // Separates "opened the app" from an install that never got past the icon.
+    await bumpConversionValue('opened_no_calibration');
+  });
 }
 
 /** Account created (Firebase). `method` is the sign-up provider. */
 export function logCompleteRegistration(method?: 'google' | 'apple' | 'email'): void {
-  singularEvent(EVENTS.completeRegistration, method ? { method } : undefined);
-  void markOnboardingComplete();
-  // "Opened, engaged, not yet calibrated" rung of the SKAN ladder.
-  void bumpConversionValue('opened_no_calibration');
+  safely('logCompleteRegistration', async () => {
+    singularEvent(EVENTS.completeRegistration, method ? { method } : undefined);
+    await markOnboardingComplete();
+    // "Opened, engaged, not yet calibrated" rung of the SKAN ladder.
+    await bumpConversionValue('opened_no_calibration');
+  });
 }
 
 /** A calibration attempt began (preflight camera calibration started). */
 export function logCalibrationAttempt(): void {
-  void markCalibrationAttempt();
+  safely('logCalibrationAttempt', () => markCalibrationAttempt());
 }
 
 /** Calibration reached a usable baseline (preflight countdown). Fires the
  *  `onboarding_complete` Singular event once, on the first ever success. */
 export function logCalibrationSuccess(): void {
-  void markCalibrationSuccess().then((wasFirst) => {
+  safely('logCalibrationSuccess', async () => {
+    const wasFirst = await markCalibrationSuccess();
     if (wasFirst) singularEvent(EVENTS.onboardingComplete);
+    await bumpConversionValue('calibration_complete');
   });
-  void bumpConversionValue('calibration_complete');
 }
 
 /** Calibration failed / timed out, with the detected reason (Phase 4). */
 export function logCalibrationFailure(reason: CalibrationFailureReason): void {
-  void markCalibrationFailure(reason);
+  safely('logCalibrationFailure', () => markCalibrationFailure(reason));
 }
 
 /**
@@ -138,21 +189,24 @@ export function logCalibrationFailure(reason: CalibrationFailureReason): void {
  * trial-gated paywall means every run already happened inside a trial.
  */
 export function logRunComplete(attrs: { durationMin: number; score: number }): void {
-  singularEvent(EVENTS.runComplete, {
-    duration_min: Math.round(attrs.durationMin * 100) / 100,
-    score: Math.round(attrs.score),
-  });
-  void markRunComplete().then((count) => {
+  safely('logRunComplete', async () => {
+    singularEvent(EVENTS.runComplete, {
+      duration_min: roundTo(attrs?.durationMin, 2),
+      score: Math.round(finiteOr(attrs?.score, 0)),
+    });
+    const count = await markRunComplete();
     if (count === 1) singularEvent(EVENTS.firstRunComplete);
-    void bumpConversionValueForRunCount(count);
+    await bumpConversionValueForRunCount(count);
   });
 }
 
 /** The paywall was shown (hosted RevenueCat UI OR the custom fallback). */
 export function logPaywallViewed(source: 'hosted' | 'custom'): void {
-  singularEvent(EVENTS.paywallViewed, { source });
-  void markPaywallViewed();
-  void bumpConversionValue('paywall_viewed');
+  safely('logPaywallViewed', async () => {
+    singularEvent(EVENTS.paywallViewed, { source });
+    await markPaywallViewed();
+    await bumpConversionValue('paywall_viewed');
+  });
 }
 
 /**
@@ -165,13 +219,15 @@ export function logStartTrial(attrs: {
   price?: number;
   currency?: string;
 }): void {
-  singularEvent(EVENTS.clientTrialStarted, {
-    product_id: attrs.productId,
-    ...(typeof attrs.price === 'number' ? { price: attrs.price } : {}),
-    ...(attrs.currency ? { currency: attrs.currency } : {}),
+  safely('logStartTrial', async () => {
+    singularEvent(EVENTS.clientTrialStarted, {
+      product_id: attrs?.productId,
+      ...(Number.isFinite(attrs?.price) ? { price: attrs.price as number } : {}),
+      ...(attrs?.currency ? { currency: attrs.currency } : {}),
+    });
+    await markTrialStarted();
+    await bumpConversionValue('trial_started');
   });
-  void markTrialStarted();
-  void bumpConversionValue('trial_started');
 }
 
 /**
@@ -184,18 +240,25 @@ export function logSubscribe(attrs: {
   price: number;
   currency: string;
 }): void {
-  singularEvent(EVENTS.clientSubscribe, {
-    product_id: attrs.productId,
-    price: attrs.price,
-    currency: attrs.currency,
+  safely('logSubscribe', async () => {
+    singularEvent(EVENTS.clientSubscribe, {
+      product_id: attrs?.productId,
+      ...(Number.isFinite(attrs?.price) ? { price: attrs.price } : {}),
+      ...(attrs?.currency ? { currency: attrs.currency } : {}),
+    });
+    await markPaidConversion();
+    await bumpConversionValue('paid_conversion');
   });
-  void markPaidConversion();
-  void bumpConversionValue('paid_conversion');
 }
 
 // --- App Tracking Transparency -------------------------------------------
 
 type TrackingTransparencyModule = typeof import('expo-tracking-transparency');
+
+/** Give a backgrounded app this long to come back before abandoning the ask. */
+const ATT_FOREGROUND_TIMEOUT_MS = 15_000;
+
+let attRequestInFlight = false;
 
 function getTrackingModule(): TrackingTransparencyModule | null {
   if (Platform.OS !== 'ios') return null;
@@ -208,23 +271,90 @@ function getTrackingModule(): TrackingTransparencyModule | null {
 }
 
 /**
+ * `expo-tracking-transparency` calls EXFatal — an uncatchable native abort that
+ * kills the process — when NSUserTrackingUsageDescription is missing from the
+ * bundle, and it does so from BOTH the get and request calls. No JS try/catch
+ * can contain that, so the only defence is to not call it unless the config
+ * that writes the key is in place.
+ *
+ * The key reaches Info.plist via the `expo-tracking-transparency` config plugin
+ * (or an explicit ios.infoPlist entry), so check for those rather than for the
+ * plist value itself, which prebuild-time mods never write back to the
+ * manifest. An unreadable config resolves to "configured" so a manifest quirk
+ * can't silently switch attribution off in a correctly built app.
+ */
+function isTrackingUsageDescriptionConfigured(): boolean {
+  try {
+    const config = Constants.expoConfig;
+    if (!config) return true;
+    const declared = config.ios?.infoPlist?.NSUserTrackingUsageDescription;
+    if (typeof declared === 'string' && declared.trim().length > 0) return true;
+    const plugins = config.plugins;
+    if (!Array.isArray(plugins)) return true;
+    for (const entry of plugins) {
+      const [name, options] = Array.isArray(entry) ? entry : [entry, undefined];
+      if (name !== 'expo-tracking-transparency') continue;
+      // Only an explicit `false` tells the plugin to strip the key; when no
+      // value is given the plugin substitutes its own default string.
+      const permission = (options as { userTrackingPermission?: unknown } | undefined)
+        ?.userTrackingPermission;
+      return permission !== false;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Resolve true once the app is foreground-active. iOS refuses to present the
+ * ATT sheet unless the app is active, and the request can then hang unanswered
+ * — which would burn the one-shot prompt for nothing.
+ */
+function waitUntilActive(timeoutMs: number): Promise<boolean> {
+  if (AppState.currentState === 'active') return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (active: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      subscription.remove();
+      resolve(active);
+    };
+    const timer = setTimeout(() => settle(false), timeoutMs);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') settle(true);
+    });
+  });
+}
+
+/**
  * Show the App Tracking Transparency prompt — but only AFTER the user's first
  * completed run, and at most once ever. Singular's init waits for this response
  * (waitForTrackingAuthorizationWithTimeoutInterval) before sending the install,
- * so the IDFA is attached when available. Safe no-op off-iOS / in Expo Go.
+ * so the IDFA is attached when available. Safe no-op off-iOS / in Expo Go, and
+ * it never throws or rejects: the caller may fire and forget.
  */
 export async function requestTrackingAfterFirstRun(): Promise<void> {
-  const mod = getTrackingModule();
-  if (!mod) return;
-  // Claim the one-time slot first so remounts / duplicate calls don't re-prompt.
-  if (!(await claimAttRequest())) return;
+  if (attRequestInFlight) return;
+  attRequestInFlight = true;
   try {
+    const mod = getTrackingModule();
+    if (!mod) return;
+    if (!isTrackingUsageDescriptionConfigured()) return;
+    if (!(await waitUntilActive(ATT_FOREGROUND_TIMEOUT_MS))) return;
+    // Claim the one-time slot only once we can actually prompt, so remounts and
+    // duplicate calls can't re-prompt and a backgrounded run doesn't spend it.
+    if (!(await claimAttRequest())) return;
     const current = await mod.getTrackingPermissionsAsync();
     // Only the OS "undetermined" state can still present the system prompt.
-    if (current.status === 'undetermined') {
-      await mod.requestTrackingPermissionsAsync();
-    }
-  } catch {
+    if (current.status !== 'undetermined') return;
+    await mod.requestTrackingPermissionsAsync();
+  } catch (error) {
     // ignore — attribution still works without IDFA (SKAN / probabilistic)
+    report('requestTrackingAfterFirstRun', error);
+  } finally {
+    attRequestInFlight = false;
   }
 }
