@@ -27,6 +27,7 @@ import {
   revenueCatApiKey,
 } from './config';
 import { logStartTrial, logSubscribe } from './analytics';
+import { collectPurchasesDeviceIdentifiers } from './purchasesDeviceIdentifiers';
 import {
   createRevenueCatIdentityState,
   synchronizeRevenueCatIdentity,
@@ -110,6 +111,10 @@ export function configurePurchases(): Promise<boolean> {
       }
       Purchases.configure({ apiKey: revenueCatApiKey });
       sharedState.configured = true;
+      // `$idfa`/`$idfv` are required by RevenueCat's Singular integration, which
+      // forwards nothing without them. Deferred and fire-and-forget, so it can
+      // neither delay configure nor fail it (see purchasesDeviceIdentifiers.ts).
+      collectPurchasesDeviceIdentifiers();
       return true;
     } catch (e) {
       console.warn('[purchases] configure failed:', e);

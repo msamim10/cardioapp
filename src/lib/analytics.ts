@@ -43,6 +43,7 @@ import {
   recordReportedConversionValue,
   type CalibrationFailureReason,
 } from './funnelStore';
+import { collectPurchasesDeviceIdentifiers } from './purchasesDeviceIdentifiers';
 import {
   initSingular,
   singularEvent,
@@ -335,10 +336,16 @@ function waitUntilActive(timeoutMs: number): Promise<boolean> {
  * (waitForTrackingAuthorizationWithTimeoutInterval) before sending the install,
  * so the IDFA is attached when available. Safe no-op off-iOS / in Expo Go, and
  * it never throws or rejects: the caller may fire and forget.
+ *
+ * Once the answer is on file this also re-collects RevenueCat's `$idfa`/`$idfv`,
+ * which is what makes RevenueCat's Singular integration forward events at all.
  */
 export async function requestTrackingAfterFirstRun(): Promise<void> {
   if (attRequestInFlight) return;
   attRequestInFlight = true;
+  // Set at each point where the ATT answer is known to exist, so the `finally`
+  // below refreshes the RevenueCat identifiers exactly once.
+  let trackingResolved = false;
   try {
     const mod = getTrackingModule();
     if (!mod) return;
@@ -346,15 +353,29 @@ export async function requestTrackingAfterFirstRun(): Promise<void> {
     if (!(await waitUntilActive(ATT_FOREGROUND_TIMEOUT_MS))) return;
     // Claim the one-time slot only once we can actually prompt, so remounts and
     // duplicate calls can't re-prompt and a backgrounded run doesn't spend it.
-    if (!(await claimAttRequest())) return;
+    if (!(await claimAttRequest())) {
+      // An earlier session already spent the slot, so the answer is on file.
+      trackingResolved = true;
+      return;
+    }
     const current = await mod.getTrackingPermissionsAsync();
     // Only the OS "undetermined" state can still present the system prompt.
-    if (current.status !== 'undetermined') return;
+    if (current.status !== 'undetermined') {
+      trackingResolved = true;
+      return;
+    }
     await mod.requestTrackingPermissionsAsync();
+    trackingResolved = true;
   } catch (error) {
     // ignore — attribution still works without IDFA (SKAN / probabilistic)
     report('requestTrackingAfterFirstRun', error);
   } finally {
     attRequestInFlight = false;
+    // Allowed or denied, re-collect: the launch-time collection ran before the
+    // answer existed, so `$idfa` was captured as all zeros. Denied still needs
+    // this so `$idfv` is current rather than paired with a stale `$idfa`.
+    if (trackingResolved) {
+      safely('collectPurchasesDeviceIdentifiers', () => collectPurchasesDeviceIdentifiers());
+    }
   }
 }
