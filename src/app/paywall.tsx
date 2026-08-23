@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GradientButton } from '@/components/ui';
+import { logPaywallViewed } from '@/lib/analytics';
 import { useSubscription } from '@/lib/SubscriptionContext';
 import {
   describeIntroTrial,
@@ -26,33 +27,19 @@ import { colors, font, gradients, radius, spacing } from '@/theme';
 type Plan = {
   id: PlanKey;
   title: string;
-  defaultPrice: string;
   cadence: string;
-  defaultSub: string;
-  badge?: string;
-  anchor?: string;
 };
 
+// Prices, per-week sub-copy, savings badge, and trial length are ALL derived
+// from the live RevenueCat Offering at runtime. We deliberately do NOT hardcode
+// dollar amounts here: the App Store prices changed (e.g. yearly is now $69.99),
+// and flashing a stale number is worse than briefly showing a loading state.
 const PLANS: Plan[] = [
-  {
-    id: 'yearly',
-    title: 'Yearly',
-    defaultPrice: '$39.99',
-    cadence: 'per year',
-    defaultSub: '$0.77 / week',
-    badge: 'SAVE 66%',
-    anchor: '$119.88',
-  },
-  {
-    id: 'monthly',
-    title: 'Monthly',
-    defaultPrice: '$9.99',
-    cadence: 'per month',
-    defaultSub: '$2.49 / week',
-  },
+  { id: 'yearly', title: 'Yearly', cadence: 'per year' },
+  { id: 'monthly', title: 'Monthly', cadence: 'per month' },
 ];
 
-type LivePrice = { price: string; sub?: string; trial?: string };
+type LivePrice = { price: string; sub?: string; trial?: string; amount?: number };
 
 // Fallback trial length when the live RevenueCat intro offer isn't loaded yet.
 // Must match the intro offer configured in App Store Connect (currently 3 days).
@@ -84,6 +71,14 @@ export default function PaywallScreen() {
   const [selected, setSelected] = useState<PlanKey>('yearly');
   const [busy, setBusy] = useState(false);
   const [livePrices, setLivePrices] = useState<Partial<Record<PlanKey, LivePrice>>>({});
+  // Distinguishes "still loading offering" (show skeletons) from "loaded but no
+  // live prices available" (RevenueCat unconfigured / Expo Go → generic copy).
+  const [pricesResolved, setPricesResolved] = useState(false);
+
+  // The custom fallback paywall is being shown → record the funnel view once.
+  useEffect(() => {
+    logPaywallViewed('custom');
+  }, []);
 
   const param = (key: keyof typeof params) => {
     const value = params[key];
@@ -113,36 +108,65 @@ export default function PaywallScreen() {
   };
 
   useEffect(() => {
-    if (!isConfigured) return;
+    // Without a configured RevenueCat SDK there is no live price to fetch, so
+    // resolve immediately into the "generic copy" state rather than waiting.
+    if (!isConfigured) {
+      setPricesResolved(true);
+      return;
+    }
     let active = true;
     (async () => {
       const offering = await getCurrentOffering();
-      if (!active || !offering) return;
+      if (!active) return;
       const next: Partial<Record<PlanKey, LivePrice>> = {};
-      for (const plan of PLANS) {
-        const pkg = resolvePlanPackage(offering, plan.id);
-        if (pkg) {
-          next[plan.id] = {
-            price: pkg.product.priceString,
-            sub: pkg.product.pricePerWeekString
-              ? `${pkg.product.pricePerWeekString} / week`
-              : undefined,
-            trial: describeIntroTrial(pkg) ?? undefined,
-          };
+      if (offering) {
+        for (const plan of PLANS) {
+          const pkg = resolvePlanPackage(offering, plan.id);
+          if (pkg) {
+            next[plan.id] = {
+              price: pkg.product.priceString,
+              amount: pkg.product.price,
+              sub: pkg.product.pricePerWeekString
+                ? `${pkg.product.pricePerWeekString} / week`
+                : undefined,
+              trial: describeIntroTrial(pkg) ?? undefined,
+            };
+          }
         }
       }
-      if (active && Object.keys(next).length > 0) setLivePrices(next);
+      if (active) {
+        if (Object.keys(next).length > 0) setLivePrices(next);
+        setPricesResolved(true);
+      }
     })();
     return () => {
       active = false;
     };
   }, [isConfigured]);
 
-  const priceFor = (plan: Plan) => livePrices[plan.id]?.price ?? plan.defaultPrice;
-  const subFor = (plan: Plan) => livePrices[plan.id]?.sub ?? plan.defaultSub;
+  // Live-only price. Returns null until the real Offering price resolves so the
+  // UI can render a skeleton instead of a stale/incorrect hardcoded amount.
+  const priceFor = (plan: Plan): string | null => livePrices[plan.id]?.price ?? null;
+  const subFor = (plan: Plan): string | null => livePrices[plan.id]?.sub ?? null;
   const selectedPlan = PLANS.find((p) => p.id === selected);
+  // Trial length is read from the live intro offer; fall back to the ASC-configured
+  // length only for wording (this is not a price, so it can't flash a wrong amount).
   const trialLabel =
     (selectedPlan ? livePrices[selectedPlan.id]?.trial : undefined) ?? DEFAULT_TRIAL_LABEL;
+
+  // Accurate savings badge computed from live amounts (yearly vs 12× monthly).
+  // Hidden until both live prices are known so we never assert a fabricated %.
+  const yearlyAmount = livePrices.yearly?.amount;
+  const monthlyAmount = livePrices.monthly?.amount;
+  const savingsPercent =
+    typeof yearlyAmount === 'number' &&
+    typeof monthlyAmount === 'number' &&
+    monthlyAmount > 0 &&
+    yearlyAmount < monthlyAmount * 12
+      ? Math.round((1 - yearlyAmount / (monthlyAmount * 12)) * 100)
+      : null;
+  const badgeFor = (plan: Plan): string | null =>
+    plan.id === 'yearly' && savingsPercent && savingsPercent > 0 ? `SAVE ${savingsPercent}%` : null;
 
   const handlePurchase = async () => {
     if (busy || !selectedPlan) return;
@@ -217,6 +241,9 @@ export default function PaywallScreen() {
         <View style={styles.plans}>
           {PLANS.map((plan) => {
             const active = selected === plan.id;
+            const price = priceFor(plan);
+            const sub = subFor(plan);
+            const badge = badgeFor(plan);
             return (
               <Pressable
                 key={plan.id}
@@ -227,9 +254,9 @@ export default function PaywallScreen() {
                   pressed && styles.pressed,
                 ]}
               >
-                {plan.badge ? (
+                {badge ? (
                   <View style={styles.planBadge}>
-                    <Text style={styles.planBadgeText}>{plan.badge}</Text>
+                    <Text style={styles.planBadgeText}>{badge}</Text>
                   </View>
                 ) : null}
                 <View style={styles.planLeft}>
@@ -239,14 +266,25 @@ export default function PaywallScreen() {
                   <View>
                     <Text style={styles.planTitle}>{plan.title}</Text>
                     <View style={styles.priceRow}>
-                      {plan.anchor ? <Text style={styles.anchor}>{plan.anchor}</Text> : null}
-                      <Text style={styles.planPrice}>
-                        {priceFor(plan)} <Text style={styles.planCadence}>{plan.cadence}</Text>
-                      </Text>
+                      {price ? (
+                        <Text style={styles.planPrice}>
+                          {price} <Text style={styles.planCadence}>{plan.cadence}</Text>
+                        </Text>
+                      ) : pricesResolved ? (
+                        // Loaded, but no live price (RevenueCat unavailable): show
+                        // the cadence only — never a fabricated dollar amount.
+                        <Text style={styles.planCadence}>{plan.cadence}</Text>
+                      ) : (
+                        <View style={styles.priceSkeleton} />
+                      )}
                     </View>
                   </View>
                 </View>
-                <Text style={styles.perWeek}>{subFor(plan)}</Text>
+                {sub ? (
+                  <Text style={styles.perWeek}>{sub}</Text>
+                ) : !pricesResolved ? (
+                  <View style={styles.subSkeleton} />
+                ) : null}
               </Pressable>
             );
           })}
@@ -260,7 +298,14 @@ export default function PaywallScreen() {
         <View style={styles.trialRow}>
           <Ionicons name="lock-open" size={14} color={colors.textDim} />
           <Text style={styles.trialText}>
-            {`${trialLabel} free trial, then ${selectedPlan ? priceFor(selectedPlan) : ''}`}
+            {(() => {
+              const selectedPrice = selectedPlan ? priceFor(selectedPlan) : null;
+              // Only assert "then <price>" once the live price is known; otherwise
+              // show just the trial line so we never render a stale amount.
+              return selectedPrice
+                ? `${trialLabel} free trial, then ${selectedPrice}`
+                : `${trialLabel} free trial`;
+            })()}
           </Text>
         </View>
         <GradientButton
@@ -348,8 +393,19 @@ const styles = StyleSheet.create({
   },
   radioActive: { backgroundColor: colors.lime, borderColor: colors.lime },
   planTitle: { color: colors.text, fontSize: 17, fontWeight: font.black },
-  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
-  anchor: { color: colors.textFaint, fontSize: 13, fontWeight: font.medium, textDecorationLine: 'line-through' },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, minHeight: 18 },
+  priceSkeleton: {
+    width: 96,
+    height: 12,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface2,
+  },
+  subSkeleton: {
+    width: 64,
+    height: 12,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface2,
+  },
   planPrice: { color: colors.text, fontSize: 14, fontWeight: font.bold },
   planCadence: { color: colors.textDim, fontSize: 13, fontWeight: font.medium },
   perWeek: { color: colors.textDim, fontSize: 13, fontWeight: font.bold, flexShrink: 1, textAlign: 'right' },
