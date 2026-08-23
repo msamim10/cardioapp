@@ -114,7 +114,7 @@ export function initAnalytics(): void {
   initialized = true;
   safely('markAppOpen', () => markAppOpen());
   safely('initAnalytics', () => {
-    initSingular({
+    const started = initSingular({
       attTimeoutSeconds: ATT_WAIT_TIMEOUT_SECONDS,
       // Surface Singular's automatic (dashboard-managed) conversion values into
       // the local funnel so the debug screen can show them.
@@ -122,6 +122,13 @@ export function initAnalytics(): void {
         safely('recordReportedConversionValue', () => recordReportedConversionValue(value));
       },
     });
+    // Ungated, unlike report(): if attribution never starts in a release build
+    // there is otherwise no crash, no log and no missing-data signal anywhere,
+    // and Singular's own SDK logging cannot surface it on iOS (see singular.ts).
+    // Expected off-iOS/Android and in Expo Go, where there is no native module.
+    if (!started) {
+      console.warn('[analytics] Singular did not initialize — no attribution this session');
+    }
     return bumpConversionValue('install');
   });
 }
@@ -331,16 +338,17 @@ function waitUntilActive(timeoutMs: number): Promise<boolean> {
 }
 
 /**
- * Show the App Tracking Transparency prompt — but only AFTER the user's first
- * completed run, and at most once ever. Singular's init waits for this response
- * (waitForTrackingAuthorizationWithTimeoutInterval) before sending the install,
- * so the IDFA is attached when available. Safe no-op off-iOS / in Expo Go, and
- * it never throws or rejects: the caller may fire and forget.
+ * Show the App Tracking Transparency prompt, at most once ever. Singular's init
+ * holds the install/session for ATT_WAIT_TIMEOUT_SECONDS waiting on this answer
+ * (waitForTrackingAuthorizationWithTimeoutInterval) before sending it, and the
+ * IDFA it resolves to is baked into that device's attribution permanently — so
+ * the caller must invoke this well inside that window. Safe no-op off-iOS / in
+ * Expo Go, and it never throws or rejects: the caller may fire and forget.
  *
  * Once the answer is on file this also re-collects RevenueCat's `$idfa`/`$idfv`,
  * which is what makes RevenueCat's Singular integration forward events at all.
  */
-export async function requestTrackingAfterFirstRun(): Promise<void> {
+export async function requestTrackingAuthorization(): Promise<void> {
   if (attRequestInFlight) return;
   attRequestInFlight = true;
   // Set at each point where the ATT answer is known to exist, so the `finally`
@@ -368,7 +376,7 @@ export async function requestTrackingAfterFirstRun(): Promise<void> {
     trackingResolved = true;
   } catch (error) {
     // ignore — attribution still works without IDFA (SKAN / probabilistic)
-    report('requestTrackingAfterFirstRun', error);
+    report('requestTrackingAuthorization', error);
   } finally {
     attRequestInFlight = false;
     // Allowed or denied, re-collect: the launch-time collection ran before the

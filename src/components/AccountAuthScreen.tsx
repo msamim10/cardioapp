@@ -1,10 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  InteractionManager,
   KeyboardAvoidingView,
   LayoutAnimation,
   Platform,
@@ -18,6 +19,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Mascot } from '@/components/ui';
+import { requestTrackingAuthorization } from '@/lib/analytics';
 import { authErrorMessage, useAuth, type SignInResult } from '@/lib/AuthContext';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import { PRIVACY_POLICY_URL, TERMS_URL, openLegalUrl } from '@/lib/legal';
@@ -28,6 +30,9 @@ type Busy = 'google' | 'apple' | 'email' | 'reset' | null;
 
 const GOOGLE_G = require('../../assets/brand/google-g.svg');
 const GOOGLE_TEXT = '#3C4043';
+
+/** Beat after the screen settles before the ATT sheet, so the ask has context. */
+const ATT_PROMPT_DELAY_MS = 800;
 
 if (
   Platform.OS === 'android' &&
@@ -48,6 +53,33 @@ export function AccountAuthScreen({ mode }: { mode: Mode }) {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+
+  // Ask for App Tracking Transparency here, at the end of onboarding. Singular
+  // holds the install/session for only ATT_WAIT_TIMEOUT_SECONDS and bakes the
+  // resulting IDFA into that device's attribution permanently, so the ask has to
+  // land inside that window — a first workout does not. This screen is the one
+  // mandatory step every path takes before the tabs (and therefore before any
+  // workout), so it is the last point that is both guaranteed and still early.
+  // The request is one-time-only across the app's lifetime and no-ops once the
+  // OS has an answer on file, so re-entering the screen cannot re-prompt.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Present after the push animation commits, then hold a beat so the screen
+    // is readable behind the sheet; drop it all if the screen goes away first.
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
+      timer = setTimeout(() => {
+        if (cancelled) return;
+        void requestTrackingAuthorization();
+      }, ATT_PROMPT_DELAY_MS);
+    });
+    return () => {
+      cancelled = true;
+      interaction.cancel();
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, []);
 
   const expand = () => {
     if (expanded) return;

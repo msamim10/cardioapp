@@ -19,8 +19,8 @@ import { colors } from '@/theme';
 
 export default function RootLayout() {
   // Initialize attribution + analytics once at launch. Singular holds the
-  // install/session event until the ATT prompt is answered (shown after the
-  // first run), so this is safe to call before ATT.
+  // install/session event until the ATT prompt is answered (shown at the end of
+  // onboarding, in AccountAuthScreen), so this is safe to call before ATT.
   useEffect(() => {
     initAnalytics();
   }, []);

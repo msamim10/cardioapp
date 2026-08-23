@@ -1,10 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { InteractionManager, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GhostButton, GradientButton } from '@/components/ui';
-import { requestTrackingAfterFirstRun } from '@/lib/analytics';
 import { getMode } from '@/lib/gameData';
 import {
   normalizeActionCounts,
@@ -24,9 +23,6 @@ const MOVE_LABEL: Record<TrackedAction, string> = {
   Left: 'Left',
   Right: 'Right',
 };
-
-/** Beat between the recap settling and the ATT sheet, so the ask has context. */
-const ATT_PROMPT_DELAY_MS = 800;
 
 const MOVE_ICON: Record<TrackedAction, keyof typeof Ionicons.glyphMap> = {
   Jump: 'arrow-up',
@@ -89,29 +85,6 @@ export default function SummaryScreen() {
     params.runId,
     recordRun,
   ]);
-
-  // Ask for App Tracking Transparency AFTER the user's first completed run
-  // (requestTrackingAfterFirstRun is one-time-only across the app's lifetime).
-  // Wait for the workout -> recap transition to finish before presenting a
-  // system modal, then delay a beat so the recap is visible behind it, and drop
-  // the whole thing if the screen goes away first.
-  useEffect(() => {
-    if (!recordedRun) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const interaction = InteractionManager.runAfterInteractions(() => {
-      if (cancelled) return;
-      timer = setTimeout(() => {
-        if (cancelled) return;
-        void requestTrackingAfterFirstRun();
-      }, ATT_PROMPT_DELAY_MS);
-    });
-    return () => {
-      cancelled = true;
-      interaction.cancel();
-      if (timer !== undefined) clearTimeout(timer);
-    };
-  }, [recordedRun]);
 
   // Prefer the just-recorded run; on remount (e.g. Strict Mode) fall back to the
   // persisted record matched by runId so the recap and unlock CTA stay correct.

@@ -43,6 +43,15 @@ import { singularConfig } from './singularConfig';
 type SingularModule = typeof import('singular-react-native');
 type SerializableArgs = Record<string, string | number | boolean | null>;
 
+/**
+ * Singular's session timeout, in seconds. Must be set explicitly: SingularConfig
+ * defaults `sessionTimeout` to -1 ("use the SDK default"), and while the old iOS
+ * bridge screens that out (`if ([sessionTimeout intValue] >= 0)`), the new-arch
+ * bridge forwards it unguarded, so `[Singular setSessionTimeout:-1]` runs on
+ * every launch under the New Architecture. 60s is the SDK's own default.
+ */
+const SESSION_TIMEOUT_SECONDS = 60;
+
 /** A value is "real" only if present and not a PLACEHOLDER. */
 function isReal(value: string | undefined | null): value is string {
   if (!value) return false;
@@ -181,9 +190,20 @@ export function initSingular(opts: {
   onConversionValueUpdated?: (value: number) => void;
 } = {}): boolean {
   if (inited) return true;
-  if (!isSingularConfigured) return false;
+  // Both warnings are deliberately UNGATED. A release build whose attribution
+  // never started looks exactly like one that started fine — no crash, no log,
+  // no events — and Singular's own SDK logging cannot fill the gap on iOS (see
+  // the note on withLoggingEnabled below). These two lines are the only signal
+  // a TestFlight/App Store build gives that the SDK is not running at all.
+  if (!isSingularConfigured) {
+    console.warn('[singular] not configured — placeholder key/secret');
+    return false;
+  }
   const mod = getModule();
-  if (!mod) return false;
+  if (!mod) {
+    console.warn('[singular] native module unavailable');
+    return false;
+  }
   try {
     const { Singular, SingularConfig } = mod;
     const attTimeout = isUsableNumber(opts.attTimeoutSeconds)
@@ -191,6 +211,7 @@ export function initSingular(opts: {
       : 300;
     const config = new SingularConfig(singularConfig.sdkKey, singularConfig.sdkSecret)
       .withSkAdNetworkEnabled(true)
+      .withSessionTimeoutInSec(SESSION_TIMEOUT_SECONDS)
       // Hold the install/session until ATT is resolved (Phase 2 requirement).
       .withWaitForTrackingAuthorizationWithTimeoutInterval(attTimeout);
     if (isManualSkanConversion) {
@@ -210,6 +231,12 @@ export function initSingular(opts: {
         }
       });
     }
+    // ANDROID ONLY, and there is no JS-side fix. singular-react-native@4.2.0
+    // never applies `enableLogging`/`logLevel` to the native iOS SingularConfig:
+    // SingularBridgeNewArch.mm's `init:` sets fourteen other fields and skips
+    // both, and SingularBridgeOldArch.m does the same. Raising the log level or
+    // dropping this __DEV__ gate cannot produce iOS output — the console.warn
+    // calls above and in analytics.ts are the only iOS diagnostics available.
     if (__DEV__) config.withLoggingEnabled();
     // Queued like every other native call, which also keeps init strictly
     // ordered ahead of the events queued behind it.
