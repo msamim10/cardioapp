@@ -16,13 +16,22 @@
  * first_run_complete / run_complete / paywall_viewed). See singular-react-
  * native's Events.js for the standard set.
  *
- * The revenue conversions are deliberately NOT sent under Singular's standard
- * `sng_start_trial` / `sng_subscribe` names: the RevenueCat → Singular
- * server-side integration owns those, and it also owns revenue amounts (net of
- * store commission) plus the renewal/cancellation lifecycle the client can't
- * observe. The client emits `client_trial_started` / `client_subscribe` instead
- * — non-standard, non-revenue diagnostic events that keep the local funnel and
- * the SKAN ladder moving without double-counting server-side conversions.
+ * WHO REPORTS REVENUE. Singular's standard `sng_start_trial` / `sng_subscribe`
+ * events may only ever have one source, or Singular counts each purchase twice.
+ * `singularConfig.revenueSource` picks that source, and the two modes are
+ * mutually exclusive by construction — each conversion emits exactly one event,
+ * under a different name in each mode:
+ *
+ *   'client' (default) → `sng_start_trial` / `sng_subscribe`, with revenue.
+ *   'revenuecat'       → `client_trial_started` / `client_subscribe`, no
+ *                        revenue, leaving RevenueCat's server-side events as
+ *                        the only ones Singular counts.
+ *
+ * The default is 'client' because RevenueCat cannot deliver to Singular
+ * accounts created on or after 2026-07-15: those require Singular's Event API
+ * v2 and the Singular Device ID, which RevenueCat's integration does not yet
+ * support. RevenueCat's own docs otherwise tell you to remove client-side
+ * purchase tracking, and in 'revenuecat' mode we do exactly that.
  */
 
 import Constants from 'expo-constants';
@@ -46,8 +55,11 @@ import {
 import { collectPurchasesDeviceIdentifiers } from './purchasesDeviceIdentifiers';
 import {
   initSingular,
+  singularCustomRevenue,
   singularEvent,
+  singularRevenueSource,
   singularSetCustomUserId,
+  singularTrialStartRevenue,
   singularUnsetCustomUserId,
 } from './singular';
 
@@ -58,8 +70,11 @@ export const EVENTS = {
   firstRunComplete: 'first_run_complete',
   runComplete: 'run_complete',
   paywallViewed: 'paywall_viewed',
-  // Client-only diagnostics; the RevenueCat server integration owns the
-  // canonical `sng_start_trial` / `sng_subscribe` revenue events.
+  // Singular's canonical conversion events (Events.js sngStartTrial /
+  // sngSubscribe), sent only when this client owns revenue reporting.
+  startTrial: 'sng_start_trial',
+  subscribe: 'sng_subscribe',
+  // Their non-revenue stand-ins, sent instead when RevenueCat owns revenue.
   clientTrialStarted: 'client_trial_started',
   clientSubscribe: 'client_subscribe',
 } as const;
@@ -217,31 +232,60 @@ export function logPaywallViewed(source: 'hosted' | 'custom'): void {
   });
 }
 
+type ConversionAttrs = { productId: string; price?: number; currency?: string };
+
 /**
- * A free trial started. Advances the local funnel + SKAN ladder and emits the
- * client-only `client_trial_started` diagnostic — the canonical
- * `sng_start_trial` comes from the RevenueCat server integration.
+ * Emit the single Singular event for one conversion.
+ *
+ * `singularRevenueSource` selects the name, so the canonical `sng_*` event and
+ * its `client_*` stand-in can never both fire for the same purchase. The
+ * amount is attached only when this client owns revenue AND a real price is
+ * known: Singular reads any event carrying an amount as revenue, so a zero
+ * would register a revenue event worth nothing instead of a plain event.
  */
-export function logStartTrial(attrs: {
-  productId: string;
-  price?: number;
-  currency?: string;
-}): void {
+function logConversion(
+  attrs: ConversionAttrs,
+  names: { standard: string; diagnostic: string },
+  withRevenue: boolean,
+): void {
+  const price = Number.isFinite(attrs?.price) ? (attrs.price as number) : undefined;
+  const currency = attrs?.currency;
+  const args = {
+    product_id: attrs?.productId,
+    ...(price !== undefined ? { price } : {}),
+    ...(currency ? { currency } : {}),
+  };
+  if (singularRevenueSource !== 'client') {
+    singularEvent(names.diagnostic, args);
+  } else if (withRevenue && currency && price !== undefined && price > 0) {
+    singularCustomRevenue(names.standard, currency, price, args);
+  } else {
+    singularEvent(names.standard, args);
+  }
+}
+
+/**
+ * A free trial started. Advances the local funnel + SKAN ladder and emits
+ * `sng_start_trial` — as a plain event by default, since no money has moved
+ * yet, or as revenue worth the full price when `trialStartRevenue` says so.
+ */
+export function logStartTrial(attrs: ConversionAttrs): void {
   safely('logStartTrial', async () => {
-    singularEvent(EVENTS.clientTrialStarted, {
-      product_id: attrs?.productId,
-      ...(Number.isFinite(attrs?.price) ? { price: attrs.price as number } : {}),
-      ...(attrs?.currency ? { currency: attrs.currency } : {}),
-    });
+    logConversion(
+      attrs,
+      { standard: EVENTS.startTrial, diagnostic: EVENTS.clientTrialStarted },
+      singularTrialStartRevenue === 'price',
+    );
     await markTrialStarted();
     await bumpConversionValue('trial_started');
   });
 }
 
 /**
- * A paid subscription conversion. Price/currency ride along as plain attributes
- * rather than a Singular revenue event, so Singular's revenue reporting counts
- * only RevenueCat's server-side `sng_subscribe` (net of store commission).
+ * A paid subscription conversion. Emits `sng_subscribe` carrying the price the
+ * customer actually paid — gross of the store's commission, since that is the
+ * only figure the client can see (RevenueCat's server integration is the only
+ * source that can report net proceeds).
  */
 export function logSubscribe(attrs: {
   productId: string;
@@ -249,11 +293,7 @@ export function logSubscribe(attrs: {
   currency: string;
 }): void {
   safely('logSubscribe', async () => {
-    singularEvent(EVENTS.clientSubscribe, {
-      product_id: attrs?.productId,
-      ...(Number.isFinite(attrs?.price) ? { price: attrs.price } : {}),
-      ...(attrs?.currency ? { currency: attrs.currency } : {}),
-    });
+    logConversion(attrs, { standard: EVENTS.subscribe, diagnostic: EVENTS.clientSubscribe }, true);
     await markPaidConversion();
     await bumpConversionValue('paid_conversion');
   });

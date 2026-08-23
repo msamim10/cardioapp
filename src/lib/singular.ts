@@ -96,6 +96,23 @@ export const isSingularConfigured =
 /** True when this app is configured to update SKAN conversion values in code. */
 export const isManualSkanConversion = singularConfig.manualSkanConversion === true;
 
+/**
+ * Which source owns the canonical `sng_start_trial` / `sng_subscribe` events.
+ * Read through a widened type and defaulted here rather than in the config,
+ * because `singularConfig.ts` is gitignored: a clone made before these keys
+ * existed simply gets the default instead of `undefined` leaking downstream.
+ */
+export const singularRevenueSource: 'client' | 'revenuecat' =
+  (singularConfig as { revenueSource?: string }).revenueSource === 'revenuecat'
+    ? 'revenuecat'
+    : 'client';
+
+/** Whether a trial start is reported as a revenue event worth the full price. */
+export const singularTrialStartRevenue: 'none' | 'price' =
+  (singularConfig as { trialStartRevenue?: string }).trialStartRevenue === 'price'
+    ? 'price'
+    : 'none';
+
 let cachedModule: SingularModule | null | undefined;
 let inited = false;
 
@@ -284,9 +301,12 @@ export function singularEvent(eventName: string, args?: SerializableArgs): void 
 }
 
 /**
- * Log a currency-aware revenue event. Currently unused: subscription revenue is
- * reported by the RevenueCat → Singular server integration, so sending revenue
- * from the client too would double-count it (see `analytics.ts`).
+ * Log a currency-aware revenue event. Singular classifies any event carrying an
+ * amount as revenue, so callers must send this only for money that actually
+ * changed hands, and only from whichever source owns revenue reporting
+ * (`singularRevenueSource` — see `analytics.ts`).
+ *
+ * Both underlying methods are void, hence queued like every other native call.
  */
 export function singularCustomRevenue(
   eventName: string,

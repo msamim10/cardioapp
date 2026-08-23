@@ -133,9 +133,9 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       if (result === 'purchased' || result === 'restored') {
         await refresh();
       }
-      // Local funnel + SKAN ladder for hosted-UI purchases (the custom path
-      // records inline in purchaseByPlan); restores aren't new conversions.
-      // RevenueCat's server integration owns the canonical Singular revenue events.
+      // Local funnel + SKAN ladder + Singular conversion event for hosted-UI
+      // purchases (the custom path records inline in purchaseByPlan). Restores
+      // are deliberately excluded: they are not new revenue.
       if (result === 'purchased') {
         void reportConversionAfterPurchase();
       }

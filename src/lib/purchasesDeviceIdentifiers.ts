@@ -3,12 +3,12 @@
  *
  * RevenueCat's Singular integration only forwards events when the `$idfa` and
  * `$idfv` subscriber attributes are set — both are documented as required on
- * iOS. Nothing else in the app sets them, and the client deliberately emits
- * `client_trial_started` / `client_subscribe` rather than the canonical
- * `sng_start_trial` / `sng_subscribe` (see `analytics.ts`) so the server-side
- * integration owns those. Without the identifiers RevenueCat forwards nothing,
- * the renamed client events aren't counted as conversions, and Singular sees no
- * trial, no purchase and no revenue at all.
+ * iOS — and nothing else in the app sets them. This is a precondition for that
+ * integration ever working, so it stays regardless of which source currently
+ * owns the Singular revenue events (`singularConfig.revenueSource`): it is what
+ * makes switching back to 'revenuecat' a config change rather than a code
+ * change. It is also useful on its own, since the identifiers are what let
+ * RevenueCat join a subscriber to the device an ad network attributed.
  *
  * This lives in its own module so both `purchases.ts` (right after configure)
  * and `analytics.ts` (once the ATT answer exists) can call it without importing

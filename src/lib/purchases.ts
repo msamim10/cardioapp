@@ -279,8 +279,8 @@ export async function purchaseByPlan(plan: PlanKey): Promise<PurchaseOutcome> {
     const pkg = resolvePlanPackage(offering, plan);
     if (!pkg) return { status: 'unavailable' };
     const { customerInfo } = await Purchases.purchasePackage(pkg);
-    // Local funnel + SKAN ladder only (dedup'd); RevenueCat's server integration
-    // owns the canonical Singular revenue events.
+    // Local funnel + SKAN ladder + the Singular conversion event (dedup'd).
+    // The package is passed so price/currency resolve without a network fetch.
     void reportConversion(customerInfo, pkg);
     return { status: 'purchased', premium: hasPremium(customerInfo) };
   } catch (e) {
@@ -407,13 +407,15 @@ async function resolveConversionProduct(
 
 /**
  * After a successful purchase, emit exactly one analytics conversion event.
- * A TRIAL entitlement period → `client_trial_started`; a paid period →
- * `client_subscribe`. Deduplicated by product + period + purchase date so
- * listener churn / relaunches never double-fire.
+ * A TRIAL entitlement period → `logStartTrial`; a paid period → `logSubscribe`.
+ * Deduplicated by product + period + purchase date so listener churn or
+ * relaunches never double-fire, which also means a converting trial reports
+ * once as a trial and once (later) as a subscription.
  *
- * These are client-only diagnostics that drive the local funnel and the SKAN
- * conversion-value ladder; the RevenueCat → Singular server integration owns the
- * canonical `sng_start_trial` / `sng_subscribe` revenue events.
+ * Both drive the local funnel and the SKAN conversion-value ladder, and — when
+ * this client owns revenue reporting — carry the Singular revenue amount too
+ * (see `analytics.ts`). Called only from the two genuine purchase paths, never
+ * from restores, since a restore is not new revenue.
  */
 async function reportConversion(
   customerInfo: CustomerInfo,
@@ -436,7 +438,8 @@ async function reportConversion(
       logSubscribe({ productId: product.productId, price: product.price, currency: product.currency });
     } else {
       // No price resolvable (hosted purchase w/o matching offering): still record
-      // the subscribe event so the funnel isn't missing a conversion.
+      // the subscribe event so the funnel isn't missing a conversion. The zero
+      // price makes it a plain Singular event rather than revenue worth nothing.
       logSubscribe({ productId: product.productId, price: 0, currency: product.currency ?? 'USD' });
     }
 
