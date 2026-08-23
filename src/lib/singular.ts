@@ -17,9 +17,27 @@
  *   SingularConfig.withWaitForTrackingAuthorizationWithTimeoutInterval(sec)
  *   SingularConfig.withManualSkanConversionManagement()
  *   SingularConfig.withConversionValueUpdatedHandler(handler)
+ *
+ * IMPORTANT — why every native call below is queued rather than called inline:
+ * on React Native 0.81 (New Architecture) an NSException raised inside a *void*
+ * TurboModule method aborts the process and CANNOT be caught from JS.
+ * RCTTurboModule.mm's performVoidMethodInvocation runs the call on an async
+ * dispatch queue and, on NSException, does
+ * `throw convertNSExceptionToJSError(...)` — a C++ throw on a queue with no
+ * handler above it, so it unwinds to std::terminate/abort(). By then the JS
+ * call has long since returned, so a try/catch around the call site catches
+ * nothing. Upstream fixed this in 0.85 (facebook/react-native#56265) by logging
+ * instead of rethrowing; 0.81 has no such protection.
+ *
+ * Every Singular method we use is a void method, so the only lever we have is
+ * WHEN we call them. facebook/react-native#55390 identifies the common trigger
+ * as native modules being torn down while async void methods are in flight,
+ * and names analytics modules specifically. So calls are deferred off the
+ * current frame, serialized, and only made while the app is foreground-active.
  */
 
-import { Platform } from 'react-native';
+import { AppState, InteractionManager, Platform } from 'react-native';
+import type { NativeEventSubscription } from 'react-native';
 import { singularConfig } from './singularConfig';
 
 type SingularModule = typeof import('singular-react-native');
@@ -71,6 +89,71 @@ export const isManualSkanConversion = singularConfig.manualSkanConversion === tr
 
 let cachedModule: SingularModule | null | undefined;
 let inited = false;
+
+/** Drop the oldest queued calls rather than grow without bound if the app never
+ *  returns to the foreground. Analytics is expendable; memory is not. */
+const MAX_PENDING_CALLS = 50;
+
+type PendingCall = { run: () => void; essential: boolean };
+
+let pendingCalls: PendingCall[] = [];
+let flushScheduled = false;
+let foregroundSubscription: NativeEventSubscription | null = null;
+
+function waitForForeground(): void {
+  if (foregroundSubscription) return;
+  foregroundSubscription = AppState.addEventListener('change', (state) => {
+    if (state !== 'active') return;
+    foregroundSubscription?.remove();
+    foregroundSubscription = null;
+    scheduleFlush();
+  });
+}
+
+function flushPendingCalls(): void {
+  flushScheduled = false;
+  // Never invoke the bridge while backgrounded: that's precisely when the
+  // module can be torn down mid-invocation, which is the documented trigger for
+  // the uncatchable void-method abort. Leave the work queued instead.
+  if (AppState.currentState !== 'active') {
+    waitForForeground();
+    return;
+  }
+  const calls = pendingCalls;
+  pendingCalls = [];
+  for (const call of calls) {
+    // Catches JS-side failures only; a native NSException from a void method
+    // cannot reach here (see the file header).
+    try {
+      call.run();
+    } catch (e) {
+      console.warn('[singular] native call failed:', e);
+    }
+  }
+}
+
+function scheduleFlush(): void {
+  if (flushScheduled) return;
+  flushScheduled = true;
+  // runAfterInteractions keeps the call out of navigation/animation commits;
+  // the extra timeout hop guarantees it never runs inside the frame (or the
+  // unmount) that requested it.
+  InteractionManager.runAfterInteractions(() => {
+    setTimeout(flushPendingCalls, 0);
+  });
+}
+
+/** Queue a native Singular call for deferred, serialized, foreground-only execution. */
+function enqueueNativeCall(call: () => void, essential = false): void {
+  pendingCalls.push({ run: call, essential });
+  if (pendingCalls.length > MAX_PENDING_CALLS) {
+    // Shed the oldest expendable call. `init` must survive, or everything
+    // behind it would run against an SDK that was never started.
+    const expendable = pendingCalls.findIndex((entry) => !entry.essential);
+    pendingCalls.splice(expendable >= 0 ? expendable : 0, 1);
+  }
+  scheduleFlush();
+}
 
 function getModule(): SingularModule | null {
   if (cachedModule !== undefined) return cachedModule;
@@ -128,7 +211,9 @@ export function initSingular(opts: {
       });
     }
     if (__DEV__) config.withLoggingEnabled();
-    Singular.init(config);
+    // Queued like every other native call, which also keeps init strictly
+    // ordered ahead of the events queued behind it.
+    enqueueNativeCall(() => Singular.init(config), true);
     inited = true;
     return true;
   } catch (e) {
@@ -145,33 +230,30 @@ export function isSingularReady(): boolean {
 export function singularSetCustomUserId(customUserId: string): void {
   if (!isUsableString(customUserId)) return;
   if (!isSingularReady()) return;
-  try {
-    getModule()!.Singular.setCustomUserId(customUserId);
-  } catch (e) {
-    console.warn('[singular] setCustomUserId failed:', e);
-  }
+  enqueueNativeCall(() => {
+    getModule()?.Singular.setCustomUserId(customUserId);
+  });
 }
 
 export function singularUnsetCustomUserId(): void {
   if (!isSingularReady()) return;
-  try {
-    getModule()!.Singular.unsetCustomUserId();
-  } catch (e) {
-    console.warn('[singular] unsetCustomUserId failed:', e);
-  }
+  enqueueNativeCall(() => {
+    getModule()?.Singular.unsetCustomUserId();
+  });
 }
 
 export function singularEvent(eventName: string, args?: SerializableArgs): void {
   if (!isUsableString(eventName)) return;
   if (!isSingularReady()) return;
-  try {
-    const { Singular } = getModule()!;
-    const clean = sanitizeArgs(args);
-    if (clean) Singular.eventWithArgs(eventName, clean);
-    else Singular.event(eventName);
-  } catch (e) {
-    console.warn('[singular] event failed:', e);
-  }
+  // Sanitize now, while we still have the caller's values, then hand the bridge
+  // only primitives it is guaranteed to be able to marshal.
+  const clean = sanitizeArgs(args);
+  enqueueNativeCall(() => {
+    const mod = getModule();
+    if (!mod) return;
+    if (clean) mod.Singular.eventWithArgs(eventName, clean);
+    else mod.Singular.event(eventName);
+  });
 }
 
 /**
@@ -189,17 +271,16 @@ export function singularCustomRevenue(
     return;
   }
   if (!isSingularReady()) return;
-  try {
-    const { Singular } = getModule()!;
-    const clean = sanitizeArgs(args);
+  const clean = sanitizeArgs(args);
+  enqueueNativeCall(() => {
+    const mod = getModule();
+    if (!mod) return;
     if (clean) {
-      Singular.customRevenueWithArgs(eventName, currency, amount, clean);
+      mod.Singular.customRevenueWithArgs(eventName, currency, amount, clean);
     } else {
-      Singular.customRevenue(eventName, currency, amount);
+      mod.Singular.customRevenue(eventName, currency, amount);
     }
-  } catch (e) {
-    console.warn('[singular] customRevenue failed:', e);
-  }
+  });
 }
 
 /**
@@ -212,6 +293,10 @@ export function singularSkanUpdateConversionValue(conversionValue: number): bool
   if (!isUsableNumber(conversionValue)) return false;
   const value = Math.round(conversionValue);
   if (value < 0 || value > 63) return false;
+  // Unlike the void methods above, this one returns a value, so RN routes it
+  // through performMethodInvocation, which converts an NSException into a
+  // catchable JSError on the JS thread. A try/catch here is therefore real
+  // protection, and the call does not need deferring.
   try {
     return getModule()!.Singular.skanUpdateConversionValue(value) === true;
   } catch (e) {
