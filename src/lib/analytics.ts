@@ -26,7 +26,7 @@
  */
 
 import { Platform } from 'react-native';
-import { bumpConversionValue } from './conversionValue';
+import { bumpConversionValue, bumpConversionValueForRunCount } from './conversionValue';
 import {
   claimAttRequest,
   markAppOpen,
@@ -96,9 +96,11 @@ export function syncAnalyticsIdentity(appUserId: string | null): void {
 
 // --- Funnel events --------------------------------------------------------
 
-/** First entry into the onboarding flow (welcome screen). Local funnel only. */
+/** First entry into the onboarding flow (welcome screen). */
 export function logOnboardingStart(): void {
   void markOnboardingStart();
+  // Separates "opened the app" from an install that never got past the icon.
+  void bumpConversionValue('opened_no_calibration');
 }
 
 /** Account created (Firebase). `method` is the sign-up provider. */
@@ -128,20 +130,21 @@ export function logCalibrationFailure(reason: CalibrationFailureReason): void {
   void markCalibrationFailure(reason);
 }
 
-/** A workout session finished. Fires `run_complete` always and
- *  `first_run_complete` once. Advances the SKAN ladder (one / two+ runs). */
+/**
+ * A workout session finished. Fires `run_complete` always and
+ * `first_run_complete` once. Advances the SKAN ladder using the persisted
+ * lifetime run count, so the first run lands on `one_run` and every later run on
+ * `two_plus_runs` — the two highest pre-purchase rungs of the ladder, since the
+ * trial-gated paywall means every run already happened inside a trial.
+ */
 export function logRunComplete(attrs: { durationMin: number; score: number }): void {
   singularEvent(EVENTS.runComplete, {
     duration_min: Math.round(attrs.durationMin * 100) / 100,
     score: Math.round(attrs.score),
   });
   void markRunComplete().then((count) => {
-    if (count === 1) {
-      singularEvent(EVENTS.firstRunComplete);
-      void bumpConversionValue('one_run');
-    } else if (count >= 2) {
-      void bumpConversionValue('two_plus_runs');
-    }
+    if (count === 1) singularEvent(EVENTS.firstRunComplete);
+    void bumpConversionValueForRunCount(count);
   });
 }
 

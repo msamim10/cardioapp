@@ -3,6 +3,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CONVERSION_LADDER, describeConversionValue } from '@/lib/conversionValue';
 import {
   CALIBRATION_FAILURE_REASONS,
   getFunnelSnapshot,
@@ -176,11 +177,25 @@ export default function DebugFunnelScreen() {
           </Section>
 
           <Section title="SKAdNetwork conversion value">
-            <Row label="Committed max (0–63)" value={String(snapshot.conversionValue.committedMax)} />
+            <Row
+              label="Committed max (0–63)"
+              value={`${snapshot.conversionValue.committedMax} · ${describeConversionValue(
+                snapshot.conversionValue.committedMax,
+              )}`}
+            />
             <Row
               label="Last reported by Singular"
               value={snapshot.conversionValue.lastReported?.toString() ?? '—'}
             />
+            <View style={styles.divider} />
+            <Text style={styles.subhead}>Ladder (monotonic — never decreases)</Text>
+            {CONVERSION_LADDER.map((rung) => (
+              <Row
+                key={rung.value}
+                label={`${rung.value} · ${rung.label}`}
+                value={rung.value <= snapshot.conversionValue.committedMax ? 'Yes' : '—'}
+              />
+            ))}
           </Section>
 
           <Pressable onPress={onReset} style={styles.resetButton}>
