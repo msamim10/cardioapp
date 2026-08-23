@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { logRunComplete } from '@/lib/analytics';
 import { useAuth } from '@/lib/AuthContext';
 import { readCloudProgress, syncCloudProgress } from '@/lib/firestoreSync';
 import { useOnboarding } from '@/lib/OnboardingContext';
@@ -557,6 +558,9 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       setActiveRun(null);
       setStateUpdatedAt(updatedAt);
       persist(snapshot({ runs: nextRuns, activeRun: null, stateUpdatedAt: updatedAt }));
+      // Fire the run_complete / first_run_complete analytics from the single
+      // authoritative completion gate (attributes: duration + score).
+      logRunComplete({ durationMin: record.durationMin, score: record.poseScore });
       return record;
     },
     [persist, snapshot]

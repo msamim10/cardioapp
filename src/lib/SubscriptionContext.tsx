@@ -18,12 +18,14 @@ import {
   presentCustomerCenterUI,
   presentPaywallUI,
   purchaseByPlan,
+  reportConversionAfterPurchase,
   restorePremium,
   synchronizePurchasesIdentity,
   type PaywallUIResult,
   type PlanKey,
   type PurchaseOutcome,
 } from './purchases';
+import { syncAnalyticsIdentity } from './analytics';
 import type { PurchasesOffering } from 'react-native-purchases';
 
 /**
@@ -99,6 +101,14 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     };
   }, [authHydrated, user?.id]);
 
+  // Mirror the SAME identifier passed to RevenueCat's appUserID onto Singular's
+  // Custom User ID, so attribution joins to billing. Not gated on RevenueCat
+  // config — Singular identity should track auth regardless.
+  useEffect(() => {
+    if (!authHydrated) return;
+    syncAnalyticsIdentity(user?.id ?? null);
+  }, [authHydrated, user?.id]);
+
   const refresh = useCallback<SubscriptionContextValue['refresh']>(async () => {
     const info = await getCustomerInfoSafe();
     if (info !== null) setIsPremium(hasPremium(info));
@@ -122,6 +132,12 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       // The listener updates isPremium, but refresh immediately for snappiness.
       if (result === 'purchased' || result === 'restored') {
         await refresh();
+      }
+      // Local funnel + SKAN ladder for hosted-UI purchases (the custom path
+      // records inline in purchaseByPlan); restores aren't new conversions.
+      // RevenueCat's server integration owns the canonical Singular revenue events.
+      if (result === 'purchased') {
+        void reportConversionAfterPurchase();
       }
       return result;
     },

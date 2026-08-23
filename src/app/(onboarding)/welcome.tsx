@@ -1,13 +1,20 @@
 import { useRouter } from 'expo-router';
+import { useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WelcomeWalkingHero } from '@/components/WelcomeWalkingHero';
 import { GradientButton } from '@/components/ui';
+import { logOnboardingStart } from '@/lib/analytics';
 import { colors, font, spacing } from '@/theme';
 
 export default function WelcomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
+  // Top of the acquisition funnel: entering the welcome screen = onboarding start.
+  useEffect(() => {
+    logOnboardingStart();
+  }, []);
   const { height } = useWindowDimensions();
   const usableHeight = height - insets.top - insets.bottom;
   const heroHeight = Math.min(320, Math.max(220, Math.round(usableHeight * 0.34)));

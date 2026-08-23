@@ -18,6 +18,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import {
+  logCalibrationAttempt,
+  logCalibrationFailure,
+  logCalibrationSuccess,
+} from '@/lib/analytics';
+import type { CalibrationFailureReason } from '@/lib/funnelStore';
+import {
   INITIAL_POSE_FEEDBACK,
   INITIAL_POSE_SCORE,
   PoseAnalyzer,
@@ -39,6 +45,28 @@ import {
 import { colors, font, radius, spacing } from '@/theme';
 
 const TRACKING_TIMEOUT_MS = 25_000;
+
+/**
+ * Best-effort classification of WHY a calibration failed, from the last pose
+ * frame's keypoints (coords are normalized 0..1). Used for local funnel drop-off
+ * analysis — no person is the most common, followed by framing (too close/far)
+ * and low-confidence keypoints (a good proxy for poor lighting).
+ */
+function deriveCalibrationFailureReason(frame: PoseFrame | null): CalibrationFailureReason {
+  if (!frame || frame.keypoints.length === 0) return 'no_person';
+  const confidences = frame.keypoints.map((k) => k.confidence);
+  const avgConfidence =
+    confidences.reduce((sum, c) => sum + c, 0) / confidences.length;
+  if (avgConfidence < 0.35) return 'insufficient_lighting';
+  const xs = frame.keypoints.map((k) => k.x);
+  const ys = frame.keypoints.map((k) => k.y);
+  const height = Math.max(...ys) - Math.min(...ys);
+  const width = Math.max(...xs) - Math.min(...xs);
+  // Body fills the frame → user is too close; body is tiny → too far.
+  if (height > 0.9 || width > 0.72) return 'too_close';
+  if (height < 0.32) return 'too_far';
+  return 'unknown';
+}
 
 export default function PreflightScreen() {
   const params = useLocalSearchParams<{
@@ -65,6 +93,14 @@ export default function PreflightScreen() {
   const timeoutStartedRef = useRef(Date.now());
   const runIdRef = useRef(createTrackingRunId(params.level));
   stateRef.current = state;
+
+  // Latest frame kept in a ref so the calibration-outcome effect (keyed on phase)
+  // can classify a failure without re-subscribing on every frame.
+  const latestFrameRef = useRef<PoseFrame | null>(null);
+  latestFrameRef.current = poseFrame;
+  // True while a calibration cycle is in progress; gates attempt/outcome events
+  // so a purely "unavailable" (no detector / permission denied) isn't a failure.
+  const calibrationCycleRef = useRef(false);
 
   const detectorAvailable =
     Platform.OS === 'ios' && Device.isDevice && isCardioSurfPoseAvailable;
@@ -179,6 +215,34 @@ export default function PreflightScreen() {
       launchWorkout('calibrated');
     }
   }, [launchWorkout, state.countdown, state.phase]);
+
+  // Calibration funnel instrumentation (Phase 4): one attempt per cycle, then a
+  // success (reached the countdown) or a failure with a detected reason.
+  useEffect(() => {
+    const phase = state.phase;
+    const calibrating =
+      phase === 'preparing' || phase === 'calibrating' || phase === 'stabilizing';
+    if (calibrating) {
+      if (!calibrationCycleRef.current) {
+        calibrationCycleRef.current = true;
+        logCalibrationAttempt();
+      }
+      return;
+    }
+    if (phase === 'countdown') {
+      if (calibrationCycleRef.current) {
+        calibrationCycleRef.current = false;
+        logCalibrationSuccess();
+      }
+      return;
+    }
+    if (phase === 'timed-out' || phase === 'unavailable') {
+      if (calibrationCycleRef.current) {
+        calibrationCycleRef.current = false;
+        logCalibrationFailure(deriveCalibrationFailureReason(latestFrameRef.current));
+      }
+    }
+  }, [state.phase]);
 
   const onPoseFrame = useCallback(
     (frame: PoseFrame) => {

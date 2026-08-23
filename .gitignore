@@ -60,6 +60,10 @@ example
 *serviceaccount*.json
 *-admin.json
 
+# Singular SDK keys — local, gitignored. Copy singularConfig.example.ts →
+# singularConfig.ts and fill in real keys (or use EXPO_PUBLIC_SINGULAR_* env).
+src/lib/singularConfig.ts
+
 # editors / IDEs
 .vscode/
 .idea/
@@ -67,6 +71,10 @@ example
 *.swo
 *.sublime-project
 *.sublime-workspace
+
+# Python bytecode from the asset-slicing scripts in scripts/
+__pycache__/
+*.pyc
 
 # OS junk
 Thumbs.db

@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { OnboardingProvider, useOnboarding } from '@/lib/OnboardingContext';
 import { ProgressProvider, useProgress } from '@/lib/ProgressContext';
 import { SubscriptionProvider } from '@/lib/SubscriptionContext';
+import { initAnalytics } from '@/lib/analytics';
 import { decideAuthGate } from '@/lib/authGate';
 import {
   cancelAllReminders,
@@ -17,6 +18,13 @@ import {
 import { colors } from '@/theme';
 
 export default function RootLayout() {
+  // Initialize attribution + analytics once at launch. Singular holds the
+  // install/session event until the ATT prompt is answered (shown after the
+  // first run), so this is safe to call before ATT.
+  useEffect(() => {
+    initAnalytics();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
@@ -133,6 +141,9 @@ function RootNavigator() {
       />
       <Stack.Screen name="workout" options={{ animation: 'fade', gestureEnabled: false }} />
       <Stack.Screen name="summary" options={{ animation: 'fade', gestureEnabled: false }} />
+      {__DEV__ ? (
+        <Stack.Screen name="debug-funnel" options={{ presentation: 'card' }} />
+      ) : null}
     </Stack>
   );
 }

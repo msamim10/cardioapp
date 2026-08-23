@@ -12,7 +12,13 @@
       "bundleIdentifier": "com.cardiosurf.app",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "SKAdNetworkItems": [
+          { "SKAdNetworkIdentifier": "v9wttpbfk9.skadnetwork" },
+          { "SKAdNetworkIdentifier": "n38lu8286q.skadnetwork" },
+          { "SKAdNetworkIdentifier": "238da6jt44.skadnetwork" },
+          { "SKAdNetworkIdentifier": "22mmun2rn5.skadnetwork" }
+        ]
       }
     },
     "android": {
@@ -77,6 +83,13 @@
           "ios": {
             "useFrameworks": "static"
           }
+        }
+      ],
+      "singular-react-native",
+      [
+        "expo-tracking-transparency",
+        {
+          "userTrackingPermission": "CardioSurf uses this to measure ad performance and connect you to the campaign that brought you here. Your data is never sold."
         }
       ],
       "./plugins/withNoApsEnvironment",

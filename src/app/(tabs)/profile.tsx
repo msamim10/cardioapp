@@ -162,6 +162,15 @@ export default function ProfileScreen() {
           <Text style={styles.settingText}>Help & support</Text>
           <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
         </Pressable>
+        {__DEV__ ? (
+          <Pressable
+            onPress={() => router.push('/debug-funnel')}
+            style={({ pressed }) => [styles.settingRow, pressed && { opacity: 0.85 }]}
+          >
+            <Text style={styles.settingText}>Analytics funnel (debug)</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+          </Pressable>
+        ) : null}
       </View>
 
       {/* Legal */}

@@ -13,6 +13,7 @@
  * Entitlement gating uses `premiumEntitlementId` (env-driven, e.g. `cardioapp_pro`).
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {
   CustomerInfo,
   CustomerInfoUpdateListener,
@@ -25,6 +26,7 @@ import {
   premiumEntitlementId,
   revenueCatApiKey,
 } from './config';
+import { logStartTrial, logSubscribe } from './analytics';
 import {
   createRevenueCatIdentityState,
   synchronizeRevenueCatIdentity,
@@ -272,6 +274,9 @@ export async function purchaseByPlan(plan: PlanKey): Promise<PurchaseOutcome> {
     const pkg = resolvePlanPackage(offering, plan);
     if (!pkg) return { status: 'unavailable' };
     const { customerInfo } = await Purchases.purchasePackage(pkg);
+    // Local funnel + SKAN ladder only (dedup'd); RevenueCat's server integration
+    // owns the canonical Singular revenue events.
+    void reportConversion(customerInfo, pkg);
     return { status: 'purchased', premium: hasPremium(customerInfo) };
   } catch (e) {
     if (isUserCancelled(e)) return { status: 'cancelled' };
@@ -341,6 +346,110 @@ export async function synchronizePurchasesIdentity(
     console.warn('[purchases] identity sync failed:', e);
     return null;
   }
+}
+
+// --- Conversion analytics (trial start / paid subscribe) ------------------
+
+/** Persisted set of already-reported conversions, so we never double-count. */
+const CONVERSION_DEDUP_KEY = 'cardiosurf.analytics.conversions.v1';
+
+async function loadReportedConversions(): Promise<Set<string>> {
+  try {
+    const raw = await AsyncStorage.getItem(CONVERSION_DEDUP_KEY);
+    const arr = raw ? (JSON.parse(raw) as unknown) : [];
+    return new Set(Array.isArray(arr) ? (arr as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+async function persistReportedConversions(set: Set<string>): Promise<void> {
+  try {
+    await AsyncStorage.setItem(CONVERSION_DEDUP_KEY, JSON.stringify([...set]));
+  } catch {
+    // best-effort
+  }
+}
+
+type ConversionProduct = { productId: string; price?: number; currency?: string };
+
+/** Resolve product price/currency: prefer the known package, else the offering. */
+async function resolveConversionProduct(
+  productIdentifier: string,
+  knownPackage?: PurchasesPackage | null,
+): Promise<ConversionProduct> {
+  const fromPackage = knownPackage?.product;
+  if (fromPackage) {
+    return {
+      productId: fromPackage.identifier,
+      price: fromPackage.price,
+      currency: fromPackage.currencyCode,
+    };
+  }
+  const offering = await getCurrentOffering();
+  const match = offering?.availablePackages.find(
+    (p) => p.product.identifier === productIdentifier,
+  );
+  if (match?.product) {
+    return {
+      productId: match.product.identifier,
+      price: match.product.price,
+      currency: match.product.currencyCode,
+    };
+  }
+  return { productId: productIdentifier };
+}
+
+/**
+ * After a successful purchase, emit exactly one analytics conversion event.
+ * A TRIAL entitlement period → `client_trial_started`; a paid period →
+ * `client_subscribe`. Deduplicated by product + period + purchase date so
+ * listener churn / relaunches never double-fire.
+ *
+ * These are client-only diagnostics that drive the local funnel and the SKAN
+ * conversion-value ladder; the RevenueCat → Singular server integration owns the
+ * canonical `sng_start_trial` / `sng_subscribe` revenue events.
+ */
+async function reportConversion(
+  customerInfo: CustomerInfo,
+  knownPackage?: PurchasesPackage | null,
+): Promise<void> {
+  try {
+    const entitlement = customerInfo.entitlements.active[premiumEntitlementId];
+    if (!entitlement) return;
+    const productIdentifier = entitlement.productIdentifier;
+    const period = String(entitlement.periodType).toUpperCase(); // NORMAL | INTRO | TRIAL
+    const dedupKey = `${productIdentifier}|${period}|${entitlement.latestPurchaseDate ?? ''}`;
+
+    const reported = await loadReportedConversions();
+    if (reported.has(dedupKey)) return;
+
+    const product = await resolveConversionProduct(productIdentifier, knownPackage);
+    if (period === 'TRIAL') {
+      logStartTrial(product);
+    } else if (typeof product.price === 'number' && product.currency) {
+      logSubscribe({ productId: product.productId, price: product.price, currency: product.currency });
+    } else {
+      // No price resolvable (hosted purchase w/o matching offering): still record
+      // the subscribe event so the funnel isn't missing a conversion.
+      logSubscribe({ productId: product.productId, price: 0, currency: product.currency ?? 'USD' });
+    }
+
+    reported.add(dedupKey);
+    await persistReportedConversions(reported);
+  } catch (e) {
+    console.warn('[purchases] reportConversion failed:', e);
+  }
+}
+
+/**
+ * Record a conversion for a purchase made through the hosted RevenueCat UI,
+ * where we don't have the purchased package in hand. Reads the latest
+ * CustomerInfo and reconstructs product details from the current offering.
+ */
+export async function reportConversionAfterPurchase(): Promise<void> {
+  const info = await getCustomerInfoSafe();
+  if (info) await reportConversion(info);
 }
 
 // --- Hosted RevenueCat UI (Paywall + Customer Center) ---------------------

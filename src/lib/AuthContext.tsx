@@ -7,6 +7,7 @@ import {
   createUserWithEmailAndPassword,
   deleteUser,
   EmailAuthProvider,
+  getAdditionalUserInfo,
   GoogleAuthProvider,
   linkWithCredential,
   OAuthProvider,
@@ -20,6 +21,7 @@ import {
   verifyBeforeUpdateEmail,
   type AuthCredential,
   type User,
+  type UserCredential,
 } from 'firebase/auth';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import {
@@ -53,6 +55,15 @@ import {
   randomNonceFromBytes,
   socialAuthErrorMessage,
 } from './authProviders';
+import { logCompleteRegistration } from './analytics';
+
+/** Fire the registration analytics event when a sign-in created a NEW account. */
+function reportRegistrationIfNew(
+  result: UserCredential,
+  provider: AuthProviderKind,
+): void {
+  if (getAdditionalUserInfo(result)?.isNewUser) logCompleteRegistration(provider);
+}
 
 export type AuthProviderKind = 'google' | 'apple' | 'email';
 
@@ -332,6 +343,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       googleCredential = credential;
       stage = 'firebase-sign-in';
       const result = await signInWithSocialCredential(auth, credential);
+      reportRegistrationIfNew(result, 'google');
       return finish(result.user);
     } catch (error) {
       const code = authErrorCode(error);
@@ -399,6 +411,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const credential = provider.credential(appleCredentialParams(apple.identityToken, rawNonce));
       stage = 'firebase-sign-in';
       const result = await signInWithSocialCredential(auth, credential);
+      reportRegistrationIfNew(result, 'apple');
       if (!result.user.displayName && apple.fullName?.givenName) {
         const displayName = [apple.fullName.givenName, apple.fullName.familyName]
           .filter(Boolean)
@@ -426,6 +439,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           password
         );
         if (name?.trim()) await updateProfile(result.user, { displayName: name.trim() });
+        logCompleteRegistration('email');
         return finish(result.user);
       } catch (error) {
         return { status: 'error', error, message: authErrorMessage(error) };

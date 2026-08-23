@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GhostButton, GradientButton } from '@/components/ui';
+import { requestTrackingAfterFirstRun } from '@/lib/analytics';
 import { getMode } from '@/lib/gameData';
 import {
   normalizeActionCounts,
@@ -76,7 +77,15 @@ export default function SummaryScreen() {
       poseScore: Number(params.poseScore) || 0,
       finishedToEnd: true,
     });
-    if (recorded) setRecordedRun(recorded);
+    if (recorded) {
+      setRecordedRun(recorded);
+      // Ask for App Tracking Transparency AFTER the user's first completed run
+      // (requestTrackingAfterFirstRun is one-time-only across the app's lifetime).
+      // Delay slightly so the recap is on screen behind the system dialog.
+      setTimeout(() => {
+        void requestTrackingAfterFirstRun();
+      }, 800);
+    }
   }, [
     params.actionCounts,
     params.completed,

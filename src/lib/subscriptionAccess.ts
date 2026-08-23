@@ -1,4 +1,5 @@
 import type { Router } from 'expo-router';
+import { logPaywallViewed } from './analytics';
 import { isRevenueCatConfigured } from './config';
 import type { PaywallUIResult } from './purchases';
 
@@ -41,6 +42,11 @@ export async function requestSubscriptionAccess(
   }
 ): Promise<PaywallFlowResult> {
   const result = await presentPaywall({ ifNeeded: opts?.ifNeeded ?? false });
+  // A purchased/restored/cancelled outcome means the hosted paywall WAS shown
+  // (not_presented = skipped because already entitled). Record the funnel view.
+  if (result === 'purchased' || result === 'restored' || result === 'cancelled') {
+    logPaywallViewed('hosted');
+  }
   switch (result) {
     case 'purchased':
     case 'restored':
@@ -50,6 +56,8 @@ export async function requestSubscriptionAccess(
       return 'dismissed';
     case 'unavailable':
     case 'error':
+      // Hosted UI unavailable → fall back to the custom paywall, which logs its
+      // own 'custom' paywall_viewed on mount (so we don't double-count here).
       router.push({
         pathname: '/paywall',
         params: { mode: 'gate', ...opts?.preflightParams },
