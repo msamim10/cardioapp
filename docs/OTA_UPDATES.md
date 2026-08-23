@@ -1,5 +1,23 @@
 # Over-the-air updates (EAS Update)
 
+> **Status: NOT enabled. Parked on 2026-08-23.**
+>
+> `expo-updates` was uninstalled and the `updates` / `runtimeVersion` blocks were
+> removed from `app.json`, along with the per-profile `channel` entries in
+> `eas.json`. This was done to keep the next iOS build as close to the previous
+> one natively as possible while a crash from a native dependency version
+> mismatch is being diagnosed — adding a native module would confound that.
+>
+> Nothing in this document works right now. `eas update` has nothing to publish
+> to, and no installed build contains the updates client.
+>
+> To re-enable: reinstall `expo-updates`, restore the `updates` and
+> `runtimeVersion` blocks in `app.json` and the `channel` entries in `eas.json`
+> (`git show 5abc1df` has the exact diff), restore
+> `scripts/check-native-fingerprint.mjs` and `.fingerprintignore` if you still
+> want the safety check, and then **ship a new native build**. OTA cannot reach
+> anyone until a binary containing `expo-updates` is installed.
+
 How to ship a JavaScript fix to people who already have CardioSurf installed,
 without waiting for App Store review.
 

@@ -3,15 +3,6 @@
     "name": "CardioSurf",
     "slug": "cardiosurf",
     "version": "1.0.1",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/e1c66d70-af99-43c3-8f96-60d1f1b90362",
-      "enabled": true,
-      "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 0
-    },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cardiosurf",
