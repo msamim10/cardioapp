@@ -39,44 +39,22 @@ type ShowcaseClip = {
   accessibilityLabel: string;
 };
 
-// Twelve distinct clips, twelve distinct people. The count is the only number
-// this screen claims, and it is literally what is on screen.
+/**
+ * Twelve clips. The count is the only number this screen claims, and it is
+ * literally what is on screen.
+ *
+ * The order is load-bearing, not arbitrary. INITIAL_INDEX opens the reel at
+ * position 5, so that slot is the most-viewed frame in onboarding and slots 4
+ * and 6 are the cards peeking either side of it. Those three hold the clearest
+ * adult sessions; clips featuring children are parked at the far ends of the
+ * reel, furthest from where the screen opens.
+ */
 const CLIPS: ShowcaseClip[] = [
   {
-    id: 'living-room-duo',
-    video: require('../../../assets/onboarding/living-room-duo.mp4'),
-    poster: require('../../../assets/onboarding/living-room-duo-poster.jpg'),
-    accessibilityLabel: 'Two players doing a full-body running workout in front of a living room TV.',
-  },
-  {
-    id: 'dodge',
-    video: require('../../../assets/onboarding/dodge-and-run.mp4'),
-    poster: require('../../../assets/onboarding/dodge-and-run-poster.jpg'),
-    accessibilityLabel: 'A player moving side to side while controlling a running game.',
-  },
-  {
-    id: 'overalls-subway-run',
-    video: require('../../../assets/onboarding/overalls-subway-run.mp4'),
-    poster: require('../../../assets/onboarding/overalls-subway-run-poster.jpg'),
-    accessibilityLabel: 'A player running in place to control a subway running game.',
-  },
-  {
-    id: 'jump',
-    video: require('../../../assets/onboarding/jump-and-reach.mp4'),
-    poster: require('../../../assets/onboarding/jump-and-reach-poster.jpg'),
-    accessibilityLabel: 'A player jumping and reaching while following the game on a TV.',
-  },
-  {
-    id: 'friends-cardio-duo',
-    video: require('../../../assets/onboarding/friends-cardio-duo.mp4'),
-    poster: require('../../../assets/onboarding/friends-cardio-duo-poster.jpg'),
-    accessibilityLabel: 'Two friends doing a cardio running game together in front of the TV.',
-  },
-  {
-    id: 'steer',
-    video: require('../../../assets/onboarding/move-and-steer.mp4'),
-    poster: require('../../../assets/onboarding/move-and-steer-poster.jpg'),
-    accessibilityLabel: 'A child moving their body to steer through a running game.',
+    id: 'dodge-and-sidestep',
+    video: require('../../../assets/onboarding/dodge-and-sidestep.mp4'),
+    poster: require('../../../assets/onboarding/dodge-and-sidestep-poster.jpg'),
+    accessibilityLabel: 'A player dodging and side-stepping to steer a subway running game.',
   },
   {
     id: 'ditch-the-treadmill',
@@ -85,22 +63,34 @@ const CLIPS: ShowcaseClip[] = [
     accessibilityLabel: 'A player pointing at the TV while playing a running game instead of using a treadmill.',
   },
   {
-    id: 'duck',
-    video: require('../../../assets/onboarding/duck-and-weave.mp4'),
-    poster: require('../../../assets/onboarding/duck-and-weave-poster.jpg'),
-    accessibilityLabel: 'A player crouching and ducking with their whole body to control a subway running game.',
-  },
-  {
-    id: 'dodge-and-sidestep',
-    video: require('../../../assets/onboarding/dodge-and-sidestep.mp4'),
-    poster: require('../../../assets/onboarding/dodge-and-sidestep-poster.jpg'),
-    accessibilityLabel: 'A player dodging and side-stepping to steer a subway running game.',
+    id: 'overalls-subway-run',
+    video: require('../../../assets/onboarding/overalls-subway-run.mp4'),
+    poster: require('../../../assets/onboarding/overalls-subway-run-poster.jpg'),
+    accessibilityLabel: 'A player running in place to control a subway running game.',
   },
   {
     id: 'high-jump-run',
     video: require('../../../assets/onboarding/high-jump-run.mp4'),
     poster: require('../../../assets/onboarding/high-jump-run-poster.jpg'),
     accessibilityLabel: 'A player jumping high in their living room to control a running game.',
+  },
+  {
+    id: 'friends-cardio-duo',
+    video: require('../../../assets/onboarding/friends-cardio-duo.mp4'),
+    poster: require('../../../assets/onboarding/friends-cardio-duo-poster.jpg'),
+    accessibilityLabel: 'Two friends doing a cardio running game together in front of the TV.',
+  },
+  {
+    id: 'dodge',
+    video: require('../../../assets/onboarding/dodge-and-run.mp4'),
+    poster: require('../../../assets/onboarding/dodge-and-run-poster.jpg'),
+    accessibilityLabel: 'A player moving side to side while controlling a running game.',
+  },
+  {
+    id: 'duck',
+    video: require('../../../assets/onboarding/duck-and-weave.mp4'),
+    poster: require('../../../assets/onboarding/duck-and-weave-poster.jpg'),
+    accessibilityLabel: 'A player crouching and ducking with their whole body to control a subway running game.',
   },
   {
     id: 'brother-subway-run',
@@ -114,7 +104,29 @@ const CLIPS: ShowcaseClip[] = [
     poster: require('../../../assets/onboarding/level-one-run-poster.jpg'),
     accessibilityLabel: 'A player following the run, jump, duck and dodge prompts of a level.',
   },
+  {
+    id: 'jump',
+    video: require('../../../assets/onboarding/jump-and-reach.mp4'),
+    poster: require('../../../assets/onboarding/jump-and-reach-poster.jpg'),
+    accessibilityLabel: 'A player jumping and reaching while following the game on a TV.',
+  },
+  {
+    id: 'living-room-duo',
+    video: require('../../../assets/onboarding/living-room-duo.mp4'),
+    poster: require('../../../assets/onboarding/living-room-duo-poster.jpg'),
+    accessibilityLabel: 'Two players doing a full-body running workout in front of a living room TV.',
+  },
+  {
+    id: 'steer',
+    video: require('../../../assets/onboarding/move-and-steer.mp4'),
+    poster: require('../../../assets/onboarding/move-and-steer-poster.jpg'),
+    accessibilityLabel: 'A child moving their body to steer through a running game.',
+  },
 ];
+
+// Open mid-reel so cards are already visible on both sides and swiping either
+// way is self-evident. Clamped in case the clip list is ever trimmed.
+const INITIAL_INDEX = Math.min(5, CLIPS.length - 1);
 
 // A card only holds a native player while it is the settled card or one of its
 // immediate neighbours, so at most three decoders are ever allocated. The tile
@@ -342,16 +354,20 @@ export default function GameplayShowcaseScreen() {
   const [railSize, setRailSize] = useState({ width: 0, height: 0 });
 
   // `active` drives the counter and the emphasis; `playing` is the playback gate
-  // and is allowed to briefly hold two cards while one slides out.
+  // and is allowed to briefly hold two cards while one slides out. Both seed at
+  // INITIAL_INDEX so the counter, the emphasis and the playing card are correct
+  // on the first frame rather than after the first viewability tick.
   const [focus, setFocus] = useState<{ active: number; playing: number[] }>({
-    active: 0,
-    playing: [0],
+    active: INITIAL_INDEX,
+    playing: [INITIAL_INDEX],
   });
   // The settled card. Deliberately lags `focus.active` until the scroll comes to
   // rest, so players are created and released between gestures, never during one.
-  const [settledIndex, setSettledIndex] = useState(0);
-  const activeRef = useRef(0);
+  const [settledIndex, setSettledIndex] = useState(INITIAL_INDEX);
+  const activeRef = useRef(INITIAL_INDEX);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listRef = useRef<FlatList<ShowcaseClip>>(null);
+  const appliedItemWidth = useRef(0);
 
   useEffect(() => {
     activeRef.current = focus.active;
@@ -428,6 +444,20 @@ export default function GameplayShowcaseScreen() {
     [layout.itemWidth],
   );
 
+  // `initialScrollIndex` only applies once, at mount. A later re-measure (late
+  // safe-area insets, rotation) changes the snap interval, which would leave the
+  // scroll position stranded between two cards, so re-centre on the current card.
+  useEffect(() => {
+    if (!layoutReady) return;
+    const previous = appliedItemWidth.current;
+    appliedItemWidth.current = layout.itemWidth;
+    if (previous === 0 || previous === layout.itemWidth) return;
+    listRef.current?.scrollToOffset({
+      offset: getCarouselItemOffset(activeRef.current, layout.itemWidth),
+      animated: false,
+    });
+  }, [layoutReady, layout.itemWidth]);
+
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<ShowcaseClip>) => (
       <View style={[styles.cell, { width: layout.itemWidth }]}>
@@ -482,10 +512,7 @@ export default function GameplayShowcaseScreen() {
       <OnboardingTopBar progress={onboardingProgress('gameplay-showcase')} topInset={insets.top} onBack={() => router.back()} />
 
       <View style={styles.header}>
-        <Text style={styles.title}>This is what a session looks like</Text>
-        <Text style={styles.subtitle}>
-          Real full-body cardio, no equipment, no treadmill required. Swipe through all {CLIPS.length}.
-        </Text>
+        <Text style={styles.title}>{'Everyone\u2019s already running'}</Text>
       </View>
 
       <View onLayout={handleRailLayout} style={styles.rail}>
@@ -499,6 +526,7 @@ export default function GameplayShowcaseScreen() {
             getItemLayout={getItemLayout}
             horizontal
             initialNumToRender={3}
+            initialScrollIndex={INITIAL_INDEX}
             keyExtractor={(clip) => clip.id}
             maxToRenderPerBatch={3}
             onMomentumScrollBegin={clearSettleTimer}
@@ -506,6 +534,7 @@ export default function GameplayShowcaseScreen() {
             onScrollBeginDrag={clearSettleTimer}
             onScrollEndDrag={settleSoon}
             onViewableItemsChanged={viewability.onViewableItemsChanged}
+            ref={listRef}
             removeClippedSubviews={false}
             renderItem={renderItem}
             scrollEventThrottle={16}
@@ -513,7 +542,11 @@ export default function GameplayShowcaseScreen() {
             snapToAlignment="start"
             snapToInterval={layout.itemWidth}
             viewabilityConfig={viewability.viewabilityConfig}
-            windowSize={5}
+            // Player allocation is gated separately, so an unrendered cell only
+            // saves a poster image. Keeping every cell resident settles the
+            // render window once and then leaves it alone, which matters more
+            // now that the reel is swiped in both directions.
+            windowSize={CLIPS.length}
           />
         ) : null}
       </View>
@@ -554,22 +587,14 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.xl,
   },
   title: {
     color: colors.text,
     fontSize: 29,
     fontWeight: font.black,
     letterSpacing: -0.6,
-    textAlign: 'center',
-  },
-  subtitle: {
-    color: colors.textDim,
-    fontSize: 14,
-    fontWeight: font.medium,
-    lineHeight: 20,
-    marginTop: spacing.sm,
-    maxWidth: 340,
+    lineHeight: 33,
     textAlign: 'center',
   },
   rail: {

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 // @ts-expect-error -- required by Node's type-stripping ESM resolver
 import { getCarouselItemOffset, getShowcaseCarouselLayout, isPreviewLoadCurrent, resolveActiveIndex, sameIndices, selectMountedIndices, selectPlayingIndices, shouldPreviewPlay, SHOWCASE_MEDIA_ASPECT_RATIO } from '../src/lib/showcaseMedia.ts';
 
@@ -6,6 +9,23 @@ const CLIP_COUNT = 12;
 const GUTTER = 12; // spacing.md
 const PRELOAD_RADIUS = 1;
 const MAX_PLAYING = 2;
+// The carousel opens mid-reel on the 6th card so both directions are visible.
+const INITIAL_INDEX = 5;
+
+const SCREEN_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'src',
+  'app',
+  '(onboarding)',
+  'gameplay-showcase.tsx',
+);
+// Clips whose footage features children. Slot INITIAL_INDEX is the most-viewed
+// frame in onboarding and its neighbours peek either side of it, so these have
+// to stay out of that neighbourhood. A toddler occupied the opening slot once
+// already; a casual reorder must not put one back.
+const CHILD_CLIP_IDS = new Set(['steer', 'living-room-duo']);
+const OPENING_CLIP_ID = 'dodge';
 // itemVisiblePercentThreshold, as a fraction.
 const VIEWABILITY_THRESHOLD = 0.6;
 const MIN_PEEK = 26;
@@ -95,6 +115,98 @@ function snapOffsetsCentreEveryCard() {
       `the last card must be reachable and centred at ${at}`,
     );
   }
+}
+
+function clipIdsInOrder(): string[] {
+  const source = readFileSync(SCREEN_PATH, 'utf8');
+  const start = source.indexOf('const CLIPS: ShowcaseClip[] = [');
+  assert.ok(start >= 0, 'the showcase screen must declare a CLIPS array');
+  const end = source.indexOf('\n];', start);
+  assert.ok(end > start, 'the CLIPS array must be terminated');
+  return Array.from(source.slice(start, end).matchAll(/^ {4}id: '([^']+)',$/gm), (match) => match[1]);
+}
+
+function theOpeningFrameAndItsNeighboursShowAdults() {
+  const ids = clipIdsInOrder();
+  assert.equal(ids.length, CLIP_COUNT, `the reel must hold ${CLIP_COUNT} clips`);
+  assert.equal(new Set(ids).size, ids.length, 'clip ids must be unique, they are the list keys');
+  assert.equal(
+    ids[INITIAL_INDEX],
+    OPENING_CLIP_ID,
+    `slot ${INITIAL_INDEX} is the frame every user sees first, immediately before the paywall, and must stay the reviewed adult clip`,
+  );
+  for (const slot of [INITIAL_INDEX - 1, INITIAL_INDEX, INITIAL_INDEX + 1]) {
+    assert.ok(
+      !CHILD_CLIP_IDS.has(ids[slot]),
+      `clip "${ids[slot]}" features children and must not sit at slot ${slot}, which is on screen the moment the carousel opens`,
+    );
+  }
+}
+
+function carouselOpensCentredOnTheSixthCard() {
+  for (const [width, height] of VIEWPORTS) {
+    const layout = getShowcaseCarouselLayout(width, height, GUTTER);
+    const at = `${width}x${height}`;
+    // `initialScrollIndex` positions the list using getItemLayout's offset, so
+    // the opening offset has to be the same value the snap math already proved.
+    const initialOffset = getCarouselItemOffset(INITIAL_INDEX, layout.itemWidth);
+    const cardLeft = layout.sidePadding + INITIAL_INDEX * layout.itemWidth + layout.gutter / 2;
+    assert.ok(
+      Math.abs(cardLeft + layout.cardWidth / 2 - initialOffset - width / 2) < 1e-6,
+      `the 6th card must open dead centre at ${at}`,
+    );
+    assert.equal(
+      initialOffset % layout.itemWidth,
+      0,
+      `the opening offset must itself be a snap point at ${at}, or the first swipe fights the snap`,
+    );
+    assert.ok(
+      visibleFraction(INITIAL_INDEX, initialOffset, layout, width) >= 0.999,
+      `the 6th card is fully visible on open at ${at}`,
+    );
+    // The whole point of opening mid-reel: cards on both sides, and room to
+    // scroll in both directions.
+    const contentWidth = 2 * layout.sidePadding + CLIP_COUNT * layout.itemWidth;
+    const maxOffset = contentWidth - width;
+    assert.ok(initialOffset > 0, `there must be reel to the left on open at ${at}`);
+    assert.ok(initialOffset < maxOffset, `there must be reel to the right on open at ${at}`);
+    for (const neighbour of [INITIAL_INDEX - 1, INITIAL_INDEX + 1]) {
+      const fraction = visibleFraction(neighbour, initialOffset, layout, width);
+      assert.ok(fraction > 0, `neighbour ${neighbour} must peek on open at ${at}`);
+      assert.ok(
+        fraction < VIEWABILITY_THRESHOLD,
+        `a peeking neighbour must not steal playback on open at ${at}`,
+      );
+    }
+  }
+}
+
+function openingStateSeedsTheSixthCardNotTheFirst() {
+  assert.equal(INITIAL_INDEX + 1, 6, 'the counter opens on 06 / 12');
+  assert.deepEqual(
+    selectMountedIndices(INITIAL_INDEX, CLIP_COUNT, PRELOAD_RADIUS),
+    [4, 5, 6],
+    'opening mid-reel preloads both neighbours, so the first swipe either way lands on a buffered card',
+  );
+  assert.deepEqual(
+    selectPlayingIndices([INITIAL_INDEX], INITIAL_INDEX, MAX_PLAYING),
+    [INITIAL_INDEX],
+    'the 6th card plays on open, not the 1st',
+  );
+  // The seeded active index has to agree with the first real viewability tick,
+  // otherwise the counter jumps from 06 to something else on mount.
+  assert.equal(
+    resolveActiveIndex([INITIAL_INDEX], INITIAL_INDEX),
+    INITIAL_INDEX,
+    'the first viewability tick confirms the seeded card rather than moving it',
+  );
+  // Scrolling all the way back to card 1 must stay reachable from the opening
+  // position, one card at a time.
+  let cursor = INITIAL_INDEX;
+  for (let step = 0; step < INITIAL_INDEX; step += 1) {
+    cursor = resolveActiveIndex([cursor - 1], cursor);
+  }
+  assert.equal(cursor, 0, 'swiping left from the opening position reaches card 1');
 }
 
 function viewabilityIsolatesTheSnappedCard() {
@@ -219,6 +331,9 @@ function unmountAndStaleLoadSafety() {
 cardsAlwaysFitAndNeighboursAlwaysPeek();
 unmeasuredCarouselIsSafe();
 snapOffsetsCentreEveryCard();
+theOpeningFrameAndItsNeighboursShowAdults();
+carouselOpensCentredOnTheSixthCard();
+openingStateSeedsTheSixthCardNotTheFirst();
 viewabilityIsolatesTheSnappedCard();
 noMoreThanTwoCardsCanEverBeVisible();
 preloadWindowCapsMountedDecoders();
@@ -228,5 +343,5 @@ redundantViewabilityTicksDoNotRerender();
 playbackRespectsLifecycleAndReadiness();
 unmountAndStaleLoadSafety();
 console.log(
-  'Showcase lifecycle replay passed: one 9:16 card centred per snap with guaranteed neighbour peek, snap offsets that centre every card including the ends, viewability that isolates the snapped card (never more than 2 visible at once), a 3-player preload window, visible-only playback with lifecycle gating, non-flickering active index, and unmount/stale-load safety',
+  'Showcase lifecycle replay passed: one 9:16 card centred per snap with guaranteed neighbour peek, snap offsets that centre every card including the ends, an opening position centred on card 6 with reel and buffered players on both sides, an adult clip in the opening slot and both peeking slots, viewability that isolates the snapped card (never more than 2 visible at once), a 3-player preload window, visible-only playback with lifecycle gating, non-flickering active index, and unmount/stale-load safety',
 );

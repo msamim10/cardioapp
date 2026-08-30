@@ -10,21 +10,17 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GameplayHero } from '@/components/GameplayHero';
+import { MascotHero } from '@/components/MascotHero';
 import { ModeCard } from '@/components/ModeCard';
-import { Card, Mascot, StatChip, WeekTracker } from '@/components/ui';
+import { Card, StatChip, WeekTracker } from '@/components/ui';
 import { getSimulatedRunnerCount } from '@/lib/communityActivity';
 import { getMode } from '@/lib/gameData';
-import { modeCovers } from '@/lib/modeCovers';
 import { calendarWeekStart } from '@/lib/progressAggregation';
 import { useProgress } from '@/lib/ProgressContext';
 import { nextLiveCompetitionDelay, type LeaderRow } from '@/lib/progression';
 import { colors, font, metric, radius, spacing, type } from '@/theme';
 
-const HERO_HEIGHT = Math.round(Dimensions.get('window').height * 0.3);
-// Deliberately not one of the three challenges listed below, so the banner
-// reads as the world rather than as a duplicate of a card on the same screen.
-const HERO_ART = modeCovers['red-light-rush-2'];
+const HERO_HEIGHT = Math.round(Dimensions.get('window').height * 0.4);
 const POPULAR_CHALLENGE_IDS = [
   'neon-rails',
   'prison-escape-run',
@@ -223,15 +219,11 @@ export default function HomeScreen() {
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
-      <GameplayHero
-        accessibilityLabel="A runner crossing lit platforms high above a neon city"
-        fadeTo={colors.bg}
-        height={HERO_HEIGHT}
-        source={HERO_ART}
-      >
+      {/* Animated mascot hero: fox ties its shoes then double-jumps over the trail. */}
+      <MascotHero height={HERO_HEIGHT}>
         <View style={[styles.heroOverlay, { paddingTop: insets.top + spacing.sm }]}>
           <View style={styles.usernameChip}>
-            <Mascot size={22} variant="avatar" />
+            <Ionicons name="person-circle" size={18} color={colors.lime} />
             <Text style={styles.usernameText}>@{username || 'runner'}</Text>
           </View>
           <View style={styles.heroChips}>
@@ -239,7 +231,7 @@ export default function HomeScreen() {
             <StatChip icon="diamond" label={`${coins}`} accent="lime" />
           </View>
         </View>
-      </GameplayHero>
+      </MascotHero>
 
       <View style={styles.body}>
         {/* This week's training load, then the weekly goal it feeds. */}
@@ -357,15 +349,14 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     paddingHorizontal: spacing.lg,
   },
-  // Opaque enough that the label clears AA over any frame of the hero art, not
-  // just the scrimmed top of it.
+  // MascotHero has no top scrim, so this fill is the only thing keeping the
+  // label above AA over the hero art's bright sky.
   usernameChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingVertical: 5,
-    paddingLeft: 7,
-    paddingRight: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
     borderRadius: radius.pill,
     backgroundColor: 'rgba(8,9,10,0.78)',
     borderWidth: 1,

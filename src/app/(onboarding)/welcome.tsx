@@ -2,15 +2,10 @@ import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GameplayHero } from '@/components/GameplayHero';
-import { GradientButton, Mascot } from '@/components/ui';
+import { GradientButton } from '@/components/ui';
+import { WelcomeWalkingHero } from '@/components/WelcomeWalkingHero';
 import { logOnboardingStart } from '@/lib/analytics';
-import { modeCovers } from '@/lib/modeCovers';
-import { colors, font, radius, spacing, type } from '@/theme';
-
-// The first frame of paid traffic is the world you run into, not the mascot:
-// a real athlete mid-sprint in a lit night scene.
-const HERO_ART = modeCovers['prison-escape-run'];
+import { colors, font, spacing, type } from '@/theme';
 
 export default function WelcomeScreen() {
   const router = useRouter();
@@ -23,6 +18,7 @@ export default function WelcomeScreen() {
   const { height } = useWindowDimensions();
   const usableHeight = height - insets.top - insets.bottom;
   const heroHeight = Math.min(320, Math.max(220, Math.round(usableHeight * 0.34)));
+  const foxVerticalOffset = Math.min(32, Math.max(24, Math.round(usableHeight * 0.038)));
   const copyTopSpacing = Math.min(30, Math.max(18, Math.round(usableHeight * 0.032)));
   const groupTopInset = Math.min(34, Math.max(18, Math.round(usableHeight * 0.038)));
 
@@ -37,25 +33,18 @@ export default function WelcomeScreen() {
       ]}
     >
       <View
-        accessible
         accessibilityLabel="CardioSurf"
         accessibilityRole="header"
         pointerEvents="none"
         style={styles.wordmark}
       >
-        <Mascot size={26} style={styles.wordmarkFox} variant="avatar" />
         <Text style={styles.wordmarkText}>CardioSurf</Text>
       </View>
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingTop: groupTopInset }]}
         showsVerticalScrollIndicator={false}
       >
-        <GameplayHero
-          accessibilityLabel="A runner sprinting through a floodlit night level"
-          height={heroHeight}
-          source={HERO_ART}
-          style={styles.hero}
-        />
+        <WelcomeWalkingHero height={heroHeight} verticalOffset={foxVerticalOffset} />
 
         <View style={styles.content}>
           <View style={[styles.copy, { paddingTop: copyTopSpacing }]}>
@@ -100,16 +89,9 @@ const styles = StyleSheet.create({
   },
   wordmark: {
     minHeight: 32,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
     paddingHorizontal: spacing.lg,
-  },
-  // The mascot rides the wordmark as a brand mark. At this size it reads as a
-  // logo glyph, which is the whole point of demoting it off the hero.
-  wordmarkFox: {
-    marginTop: -2,
   },
   wordmarkText: {
     color: colors.text,
@@ -120,12 +102,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-  },
-  hero: {
-    marginHorizontal: spacing.lg,
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
   },
   content: {
     flex: 1,
