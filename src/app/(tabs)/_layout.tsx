@@ -30,11 +30,12 @@ export default function TabsLayout() {
                 accessibilityState={{ selected: focused }}
                 onPress={() => navigation.navigate(tab.name)}
               >
-                <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
+                <View style={[styles.indicator, focused && styles.indicatorActive]} />
+                <View style={styles.iconWrap}>
                   <Ionicons
                     name={focused ? tab.icon : (`${tab.icon}-outline` as keyof typeof Ionicons.glyphMap)}
-                    size={22}
-                    color={focused ? colors.black : colors.textDim}
+                    size={23}
+                    color={focused ? colors.lime : colors.textDim}
                   />
                 </View>
                 <Text style={[styles.label, focused && styles.labelActive]}>{tab.label}</Text>
@@ -58,31 +59,41 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgElevated,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    paddingTop: 10,
+    paddingTop: 0,
     paddingHorizontal: 12,
   },
   tab: {
     flex: 1,
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
+  },
+  // A lit rule above the active tab reads as navigation; a filled shape behind
+  // the glyph reads as a badge.
+  indicator: {
+    alignSelf: 'stretch',
+    height: 2,
+    marginHorizontal: 10,
+    marginBottom: 9,
+    borderRadius: radius.xs,
+    backgroundColor: 'transparent',
+  },
+  indicatorActive: {
+    backgroundColor: colors.lime,
   },
   iconWrap: {
-    width: 46,
-    height: 34,
-    borderRadius: radius.pill,
+    height: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconWrapActive: {
-    backgroundColor: colors.lime,
-  },
   label: {
     color: colors.textDim,
-    fontSize: 11,
-    fontWeight: font.semibold,
+    fontSize: 10,
+    fontWeight: font.bold,
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
   },
   labelActive: {
     color: colors.text,
-    fontWeight: font.bold,
+    fontWeight: font.heavy,
   },
 });

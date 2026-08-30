@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   AppState,
   Dimensions,
@@ -10,16 +10,21 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MascotHero } from '@/components/MascotHero';
+import { GameplayHero } from '@/components/GameplayHero';
 import { ModeCard } from '@/components/ModeCard';
-import { Card, StatChip, WeekTracker } from '@/components/ui';
+import { Card, Mascot, StatChip, WeekTracker } from '@/components/ui';
 import { getSimulatedRunnerCount } from '@/lib/communityActivity';
 import { getMode } from '@/lib/gameData';
+import { modeCovers } from '@/lib/modeCovers';
+import { calendarWeekStart } from '@/lib/progressAggregation';
 import { useProgress } from '@/lib/ProgressContext';
 import { nextLiveCompetitionDelay, type LeaderRow } from '@/lib/progression';
-import { colors, font, radius, spacing } from '@/theme';
+import { colors, font, metric, radius, spacing, type } from '@/theme';
 
-const HERO_HEIGHT = Math.round(Dimensions.get('window').height * 0.4);
+const HERO_HEIGHT = Math.round(Dimensions.get('window').height * 0.3);
+// Deliberately not one of the three challenges listed below, so the banner
+// reads as the world rather than as a duplicate of a card on the same screen.
+const HERO_ART = modeCovers['red-light-rush-2'];
 const POPULAR_CHALLENGE_IDS = [
   'neon-rails',
   'prison-escape-run',
@@ -107,6 +112,31 @@ function CompetitionListCard({
   );
 }
 
+function WeekMetric({
+  icon,
+  tint,
+  value,
+  unit,
+  label,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  tint: string;
+  value: string;
+  unit: string;
+  label: string;
+}) {
+  return (
+    <View style={styles.weekMetric}>
+      <Ionicons name={icon} size={14} color={tint} />
+      <Text style={styles.weekMetricValue}>
+        {value}
+        <Text style={styles.weekMetricUnit}> {unit}</Text>
+      </Text>
+      <Text style={styles.weekMetricLabel}>{label}</Text>
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -115,6 +145,7 @@ export default function HomeScreen() {
     hydrated,
     streak,
     coins,
+    runs,
     runsThisWeek,
     weeklyGoal,
     username,
@@ -122,6 +153,20 @@ export default function HomeScreen() {
     advanceLiveCompetition,
     isLevelCompleted,
   } = useProgress();
+
+  // Training load for the current calendar week, on the same Monday boundary
+  // the weekly goal tracker uses.
+  const week = useMemo(() => {
+    const weekStart = calendarWeekStart(Date.now());
+    let minutes = 0;
+    let calories = 0;
+    for (const run of runs) {
+      if (run.at < weekStart) continue;
+      minutes += run.durationMin;
+      calories += run.calories;
+    }
+    return { minutes: Math.round(minutes), calories: Math.round(calories) };
+  }, [runs]);
 
   useFocusEffect(
     useCallback(() => {
@@ -178,38 +223,63 @@ export default function HomeScreen() {
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
-      {/* Animated mascot hero: fox ties its shoes then double-jumps over the trail. */}
-      <MascotHero height={HERO_HEIGHT}>
+      <GameplayHero
+        accessibilityLabel="A runner crossing lit platforms high above a neon city"
+        fadeTo={colors.bg}
+        height={HERO_HEIGHT}
+        source={HERO_ART}
+      >
         <View style={[styles.heroOverlay, { paddingTop: insets.top + spacing.sm }]}>
           <View style={styles.usernameChip}>
-            <Ionicons name="person-circle" size={18} color={colors.lime} />
+            <Mascot size={22} variant="avatar" />
             <Text style={styles.usernameText}>@{username || 'runner'}</Text>
           </View>
           <View style={styles.heroChips}>
             <StatChip icon="flame" label={`${streak}`} accent="orange" />
-            <StatChip icon="gift" label={`${coins}`} accent="lime" />
+            <StatChip icon="diamond" label={`${coins}`} accent="lime" />
           </View>
         </View>
-      </MascotHero>
+      </GameplayHero>
 
       <View style={styles.body}>
-        {/* Streak + weekly progress */}
+        {/* This week's training load, then the weekly goal it feeds. */}
         <Card style={styles.weekCard}>
           <View style={styles.weekTop}>
-            <View style={styles.weekStreak}>
-              <Ionicons name="flame" size={20} color={colors.orange} />
-              <Text style={styles.weekStreakValue}>{streak}</Text>
-              <Text style={styles.weekStreakLabel}>day streak</Text>
-            </View>
+            <Text style={styles.weekEyebrow}>This week</Text>
             <Text style={styles.weekCount}>
-              {runsThisWeek}/{weeklyGoal} this week
+              {runsThisWeek}/{weeklyGoal} sessions
             </Text>
+          </View>
+          <View style={styles.weekMetrics}>
+            <WeekMetric
+              icon="time"
+              tint={colors.pace}
+              value={`${week.minutes}`}
+              unit="min"
+              label="Moving"
+            />
+            <View style={styles.weekMetricRule} />
+            <WeekMetric
+              icon="flame"
+              tint={colors.heat}
+              value={week.calories.toLocaleString()}
+              unit="kcal"
+              label="Burned"
+            />
+            <View style={styles.weekMetricRule} />
+            <WeekMetric
+              icon="flash"
+              tint={colors.lime}
+              value={`${streak}`}
+              unit={streak === 1 ? 'day' : 'days'}
+              label="Streak"
+            />
           </View>
           <WeekTracker count={runsThisWeek} goal={weeklyGoal} accent="lime" />
           <Text style={styles.weekHint}>
             {runsThisWeek >= weeklyGoal
-              ? 'Weekly goal smashed. Keep the streak alive!'
-              : `${Math.max(0, weeklyGoal - runsThisWeek)} more to hit your weekly goal.`}
+              ? 'Weekly target hit. Keep the streak going.'
+              : `${Math.max(0, weeklyGoal - runsThisWeek)} more to hit your weekly target.`}
           </Text>
         </Card>
 
@@ -287,14 +357,17 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     paddingHorizontal: spacing.lg,
   },
+  // Opaque enough that the label clears AA over any frame of the hero art, not
+  // just the scrimmed top of it.
   usernameChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingVertical: 5,
+    paddingLeft: 7,
+    paddingRight: 12,
     borderRadius: radius.pill,
-    backgroundColor: 'rgba(10,10,15,0.55)',
+    backgroundColor: 'rgba(8,9,10,0.78)',
     borderWidth: 1,
     borderColor: colors.borderStrong,
   },
@@ -302,13 +375,33 @@ const styles = StyleSheet.create({
   heroChips: { flexDirection: 'row', gap: spacing.sm },
   weekCard: { gap: spacing.md },
   weekTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  weekStreak: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
-  weekStreakValue: { color: colors.text, fontSize: 20, fontWeight: font.black },
-  weekStreakLabel: { color: colors.textDim, fontSize: 13, fontWeight: font.medium },
-  weekCount: { color: colors.text, fontSize: 13, fontWeight: font.bold },
-  weekHint: { color: colors.textDim, fontSize: 13, fontWeight: font.medium },
+  weekEyebrow: { ...type.label, color: colors.textDim },
+  weekCount: { ...metric, color: colors.text, fontSize: 13, fontWeight: font.bold },
+  weekMetrics: { flexDirection: 'row', alignItems: 'stretch' },
+  weekMetric: { flex: 1, alignItems: 'flex-start', gap: 3 },
+  weekMetricRule: {
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: colors.borderStrong,
+    marginHorizontal: spacing.md,
+  },
+  weekMetricValue: {
+    ...metric,
+    color: colors.text,
+    fontSize: 26,
+    lineHeight: 30,
+    fontWeight: font.heavy,
+    letterSpacing: -1,
+  },
+  weekMetricUnit: {
+    color: colors.textDim,
+    fontSize: 12,
+    fontWeight: font.bold,
+    letterSpacing: 0,
+  },
+  weekMetricLabel: { ...type.micro, color: colors.textFaint },
+  weekHint: { ...type.bodySm, color: colors.textDim },
   challengesSection: { gap: spacing.md },
-  sectionTitle: { color: colors.text, fontSize: 18, fontWeight: font.bold, letterSpacing: -0.3 },
+  sectionTitle: { ...type.h2, color: colors.text, fontSize: 18, lineHeight: 22 },
   challengeScroller: { marginHorizontal: -spacing.lg },
   challengeRow: {
     gap: spacing.md,
@@ -319,32 +412,27 @@ const styles = StyleSheet.create({
   challengeCard: { width: 208 },
   competitionSection: { gap: spacing.md },
   competitionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  competitionTitle: { color: colors.text, fontSize: 18, fontWeight: font.bold, letterSpacing: -0.3 },
+  competitionTitle: { ...type.h2, color: colors.text, fontSize: 18, lineHeight: 22 },
+  // Live state carries the fixed alert red, not the CTA lime.
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface2,
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.xs,
+    backgroundColor: 'rgba(255,71,87,0.14)',
   },
-  liveDot: { width: 6, height: 6, borderRadius: radius.pill, backgroundColor: colors.lime },
-  liveText: { color: colors.lime, fontSize: 10, fontWeight: font.bold, textTransform: 'uppercase' },
+  liveDot: { width: 6, height: 6, borderRadius: radius.pill, backgroundColor: colors.effort },
+  liveText: { ...type.micro, color: colors.effort },
   competitionCards: { gap: spacing.md },
   competitionListCard: {
     padding: spacing.md,
     gap: spacing.sm,
   },
   listCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  listCardTitle: {
-    color: colors.textDim,
-    fontSize: 12,
-    fontWeight: font.semibold,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  listCardMeta: { color: colors.lime, fontSize: 12, fontWeight: font.bold },
+  listCardTitle: { ...type.label, color: colors.textDim },
+  listCardMeta: { ...metric, color: colors.lime, fontSize: 12, fontWeight: font.bold },
   rankingList: { marginHorizontal: -spacing.xs },
   rankingRow: {
     minHeight: 42,
@@ -358,14 +446,15 @@ const styles = StyleSheet.create({
   rankingRowUser: {
     borderLeftWidth: 2,
     borderLeftColor: colors.lime,
-    borderRadius: radius.sm,
-    backgroundColor: 'rgba(198,255,61,0.08)',
+    borderRadius: radius.xs,
+    backgroundColor: 'rgba(215,255,62,0.08)',
   },
   rowRank: {
+    ...metric,
     width: 32,
     color: colors.textDim,
     fontSize: 13,
-    fontWeight: font.black,
+    fontWeight: font.heavy,
   },
   rowName: {
     flex: 1,
@@ -374,11 +463,12 @@ const styles = StyleSheet.create({
     fontWeight: font.semibold,
   },
   rowCalories: {
+    ...metric,
     color: colors.text,
     fontSize: 12,
     fontWeight: font.bold,
     textAlign: 'right',
   },
   rowTextUser: { color: colors.lime },
-  listEmpty: { color: colors.textDim, fontSize: 13, fontWeight: font.medium, paddingVertical: spacing.md },
+  listEmpty: { ...type.bodySm, color: colors.textDim, paddingVertical: spacing.md },
 });

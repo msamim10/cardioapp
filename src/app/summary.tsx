@@ -3,7 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GhostButton, GradientButton } from '@/components/ui';
+import { GhostButton, GradientButton, Mascot } from '@/components/ui';
 import { getMode } from '@/lib/gameData';
 import {
   normalizeActionCounts,
@@ -15,7 +15,7 @@ import { useProgress, type RunRecord } from '@/lib/ProgressContext';
 import { isClassKey } from '@/lib/progression';
 import { REVIEW_RUN_MILESTONE } from '@/lib/reviewEligibility';
 import { requestMilestoneStoreReview } from '@/lib/storeReview';
-import { colors, font, spacing } from '@/theme';
+import { colors, font, metric, spacing, type } from '@/theme';
 
 const MOVE_LABEL: Record<TrackedAction, string> = {
   Jump: 'Jump',
@@ -155,14 +155,19 @@ export default function SummaryScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.titleBlock}>
-          <View style={styles.eyebrowRow}>
-            <Ionicons name="checkmark-circle" size={15} color={colors.lime} />
-            <Text style={styles.eyebrow}>Workout complete</Text>
+        {/* The one screen the mascot still gets to play a character on: the
+            reward moment, alongside the run title rather than over the data. */}
+        <View style={styles.titleRow}>
+          <View style={styles.titleBlock}>
+            <View style={styles.eyebrowRow}>
+              <Ionicons name="checkmark-circle" size={15} color={colors.lime} />
+              <Text style={styles.eyebrow}>Workout complete</Text>
+            </View>
+            <Text style={styles.runName} numberOfLines={2}>
+              {playedMode?.name ?? 'Cardio run'}
+            </Text>
           </View>
-          <Text style={styles.runName} numberOfLines={2}>
-            {playedMode?.name ?? 'Cardio run'}
-          </Text>
+          <Mascot size={72} />
         </View>
 
         {/* Hero: score as identity metric (Peloton output / game HUD) */}
@@ -269,22 +274,17 @@ export default function SummaryScreen() {
         {showNext ? (
           <>
             <GradientButton
-              label="Next"
+              label="Next level"
               icon="play-forward"
               accent="lime"
               onPress={openNextMap}
             />
-            <GhostButton
-              label="Go home"
-              icon="home-outline"
-              onPress={() => router.replace('/(tabs)')}
-            />
+            <GhostButton label="Done" onPress={() => router.replace('/(tabs)')} />
           </>
         ) : (
           <GradientButton
-            label="Go home"
-            icon="home"
-            accent="cyan"
+            label="Done"
+            accent="lime"
             onPress={() => router.replace('/(tabs)')}
           />
         )}
@@ -293,12 +293,12 @@ export default function SummaryScreen() {
   );
 }
 
-/** Quiet segment tints — readable on dark, not neon lime/purple. */
+/** Quiet segment tints, drawn from the fixed metric hues. */
 const MOVE_TINT: Record<TrackedAction, string> = {
-  Jump: 'rgba(69, 224, 255, 0.85)',
-  Duck: 'rgba(255, 138, 61, 0.85)',
-  Left: 'rgba(245, 245, 247, 0.45)',
-  Right: 'rgba(160, 160, 176, 0.7)',
+  Jump: 'rgba(61, 197, 240, 0.85)',
+  Duck: 'rgba(255, 106, 43, 0.85)',
+  Left: 'rgba(247, 248, 248, 0.45)',
+  Right: 'rgba(155, 161, 166, 0.7)',
 };
 
 const styles = StyleSheet.create({
@@ -312,7 +312,14 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
     gap: spacing.xxl,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
   titleBlock: {
+    flex: 1,
+    minWidth: 0,
     gap: spacing.sm,
   },
   eyebrowRow: {
@@ -321,17 +328,14 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   eyebrow: {
-    color: colors.textFaint,
-    fontSize: 13,
-    fontWeight: font.semibold,
-    letterSpacing: 0.2,
+    ...type.label,
+    color: colors.textDim,
   },
   runName: {
+    ...type.h1,
     color: colors.text,
-    fontSize: 28,
-    fontWeight: font.bold,
-    letterSpacing: -0.7,
-    lineHeight: 34,
+    fontSize: 29,
+    lineHeight: 33,
   },
   hero: {
     alignItems: 'flex-start',
@@ -339,12 +343,12 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
   },
   heroValue: {
+    ...metric,
     color: colors.text,
-    fontSize: 72,
-    fontWeight: font.black,
-    letterSpacing: -2.5,
-    lineHeight: 76,
-    fontVariant: ['tabular-nums'],
+    fontSize: 76,
+    fontWeight: font.heavy,
+    letterSpacing: -3,
+    lineHeight: 79,
   },
   heroLabelRow: {
     flexDirection: 'row',
@@ -352,10 +356,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   heroLabel: {
+    ...type.label,
     color: colors.textDim,
-    fontSize: 15,
-    fontWeight: font.medium,
-    letterSpacing: 0.1,
   },
   metricStrip: {
     flexDirection: 'row',
@@ -378,18 +380,16 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.md,
   },
   metricValue: {
+    ...metric,
     color: colors.text,
-    fontSize: 22,
-    fontWeight: font.bold,
-    letterSpacing: -0.4,
-    fontVariant: ['tabular-nums'],
+    fontSize: 24,
+    fontWeight: font.heavy,
+    letterSpacing: -0.7,
   },
   metricLabel: {
+    ...type.micro,
     color: colors.textFaint,
-    fontSize: 12,
-    fontWeight: font.semibold,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
+    fontWeight: font.bold,
   },
   section: {
     gap: spacing.md,
@@ -405,16 +405,14 @@ const styles = StyleSheet.create({
     gap: 7,
   },
   sectionTitle: {
+    ...type.h3,
     color: colors.text,
-    fontSize: 17,
-    fontWeight: font.semibold,
-    letterSpacing: -0.2,
   },
   sectionMeta: {
+    ...metric,
     color: colors.textFaint,
     fontSize: 13,
     fontWeight: font.medium,
-    fontVariant: ['tabular-nums'],
   },
   proportionBar: {
     flexDirection: 'row',
@@ -466,20 +464,20 @@ const styles = StyleSheet.create({
     fontWeight: font.medium,
   },
   moveShare: {
+    ...metric,
     minWidth: 40,
     textAlign: 'right',
     color: colors.textFaint,
     fontSize: 14,
     fontWeight: font.medium,
-    fontVariant: ['tabular-nums'],
   },
   moveCount: {
+    ...metric,
     minWidth: 36,
     textAlign: 'right',
     color: colors.text,
     fontSize: 17,
-    fontWeight: font.semibold,
-    fontVariant: ['tabular-nums'],
+    fontWeight: font.bold,
   },
   ctaBar: {
     paddingHorizontal: spacing.xl,

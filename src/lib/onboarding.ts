@@ -48,24 +48,24 @@ export type Option<T extends string> = {
 };
 
 export const goalOptions: Option<GoalKey>[] = [
-  { key: 'lose', label: 'Lose weight', desc: 'Burn it off, one run at a time', accent: 'pink' },
-  { key: 'habit', label: 'Build a habit', desc: 'Show up daily, keep the streak', accent: 'lime' },
-  { key: 'active', label: 'Stay active', desc: 'Keep the body moving & healthy', accent: 'cyan' },
-  { key: 'fun', label: 'Have fun & de-stress', desc: 'Play your way to a clear head', accent: 'violet' },
+  { key: 'lose', label: 'Lose weight', desc: 'Burn calories every session', accent: 'pink' },
+  { key: 'habit', label: 'Build the habit', desc: 'Show up on schedule, hold the streak', accent: 'lime' },
+  { key: 'active', label: 'Stay conditioned', desc: 'Keep your base cardio fitness', accent: 'cyan' },
+  { key: 'fun', label: 'Train without the grind', desc: 'Cardio that holds your attention', accent: 'violet' },
 ];
 
 export const moverOptions: Option<MoverKey>[] = [
-  { key: 'couch', label: 'Couch legend', desc: 'Just getting off the sofa', accent: 'violet' },
-  { key: 'weekend', label: 'Weekend warrior', desc: 'Active when the mood hits', accent: 'cyan' },
-  { key: 'daily', label: 'Daily grinder', desc: 'Moving is already my thing', accent: 'lime' },
-  { key: 'comeback', label: 'Comeback story', desc: 'Getting back into it', accent: 'orange' },
+  { key: 'couch', label: 'Starting from zero', desc: 'No regular training right now', accent: 'violet' },
+  { key: 'weekend', label: 'On and off', desc: 'A session here and there', accent: 'cyan' },
+  { key: 'daily', label: 'Already training', desc: 'Movement is part of my week', accent: 'lime' },
+  { key: 'comeback', label: 'Getting back in', desc: 'Rebuilding after a break', accent: 'orange' },
 ];
 
 export const motivationOptions: Option<MotivationKey>[] = [
   { key: 'compete', label: 'Competition', desc: 'Leaderboards & high scores', accent: 'orange' },
-  { key: 'streaks', label: 'Streaks', desc: 'Never break the chain', accent: 'pink' },
-  { key: 'rewards', label: 'Rewards', desc: 'Coins, unlocks & badges', accent: 'cyan' },
-  { key: 'chill', label: 'Chill vibes', desc: 'Just me, moving, no pressure', accent: 'violet' },
+  { key: 'streaks', label: 'Consistency', desc: 'Never break the chain', accent: 'pink' },
+  { key: 'rewards', label: 'Progression', desc: 'Coins, unlocks & badges', accent: 'cyan' },
+  { key: 'chill', label: 'Low pressure', desc: 'Just moving, on my own terms', accent: 'violet' },
 ];
 
 export const daysOptions = [2, 3, 4, 5, 6] as const;
@@ -101,10 +101,10 @@ export const weeklyGoalOptions: {
   accent: AccentKey;
   recommended?: boolean;
 }[] = [
-  { runs: 3, label: '3 runs / week', desc: 'Easy to keep up', icon: 'leaf', accent: 'cyan' },
-  { runs: 4, label: '4 runs / week', desc: 'Steady, balanced progress', icon: 'flash', accent: 'lime', recommended: true },
-  { runs: 5, label: '5 runs / week', desc: 'Serious momentum', icon: 'barbell', accent: 'violet' },
-  { runs: 6, label: '6 runs / week', desc: 'Go all in', icon: 'flame', accent: 'pink' },
+  { runs: 3, label: '3 sessions / week', desc: 'Sustainable baseline', icon: 'leaf', accent: 'cyan' },
+  { runs: 4, label: '4 sessions / week', desc: 'Steady, balanced progress', icon: 'flash', accent: 'lime', recommended: true },
+  { runs: 5, label: '5 sessions / week', desc: 'Real conditioning load', icon: 'barbell', accent: 'violet' },
+  { runs: 6, label: '6 sessions / week', desc: 'Maximum commitment', icon: 'flame', accent: 'pink' },
 ];
 
 /** All canonical worlds remain available for persisted answers and plan copy. */
@@ -161,6 +161,60 @@ export type StepId =
   | 'days'
   | 'motivation'
   | 'reminders';
+
+/**
+ * Ordered onboarding screens, and the single source of truth for the progress
+ * bar. Screens previously hardcoded their own fraction, which drifted out of
+ * order as the flow changed: `questions` ended at 0.52 while `username` — the
+ * screen straight after it — claimed 0.42, so the bar visibly ran backwards.
+ * Deriving the fraction from position makes that class of bug impossible.
+ *
+ * `welcome` is excluded because it has no progress bar, and the hosted paywall
+ * is excluded because it is native UI we do not chrome.
+ */
+export const ONBOARDING_SCREENS = [
+  'attribution',
+  'questions',
+  'username',
+  'climb',
+  'goal',
+  'notifications',
+  'gameplay-showcase',
+  'create-account',
+  'plan',
+] as const;
+
+export type OnboardingScreenId = (typeof ONBOARDING_SCREENS)[number];
+
+/**
+ * Fraction complete on arriving at a screen. The first screen starts partly
+ * filled (the user already tapped through welcome) and the last lands short of
+ * full, because the offer still follows.
+ */
+export function onboardingProgress(screen: OnboardingScreenId): number {
+  const index = ONBOARDING_SCREENS.indexOf(screen);
+  if (index < 0) return 0;
+  return (index + 1) / (ONBOARDING_SCREENS.length + 1);
+}
+
+/**
+ * Progress across a multi-question screen, spanning that screen's slice up to
+ * the next screen's value so the bar stays monotonic through the sub-steps.
+ */
+export function onboardingStepProgress(
+  screen: OnboardingScreenId,
+  index: number,
+  count: number,
+): number {
+  const start = onboardingProgress(screen);
+  const nextIndex = ONBOARDING_SCREENS.indexOf(screen) + 1;
+  const end =
+    nextIndex < ONBOARDING_SCREENS.length
+      ? onboardingProgress(ONBOARDING_SCREENS[nextIndex])
+      : 1;
+  if (count <= 1) return start;
+  return start + (Math.min(index, count - 1) / count) * (end - start);
+}
 
 export const ONBOARDING_STEPS: { id: StepId; principle: string }[] = [
   { id: 'welcome', principle: 'Social proof + identity framing (low-friction first tap)' },

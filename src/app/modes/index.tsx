@@ -161,5 +161,5 @@ const styles = StyleSheet.create({
     fontWeight: font.medium,
     lineHeight: 17,
   },
-  pressed: { opacity: 0.86, transform: [{ scale: 0.99 }] },
+  pressed: { opacity: 0.72 },
 });

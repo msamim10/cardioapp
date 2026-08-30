@@ -5,8 +5,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Badge, GradientButton, OnboardingTopBar } from '@/components/ui';
 import { useOnboarding } from '@/lib/OnboardingContext';
-import { weeklyGoalOptions } from '@/lib/onboarding';
-import { accentColor, colors, font, radius, spacing } from '@/theme';
+import { onboardingProgress, weeklyGoalOptions } from '@/lib/onboarding';
+import { accentColor, colors, radius, spacing, type } from '@/theme';
 
 const RECOMMENDED = weeklyGoalOptions.find((o) => o.recommended)?.runs ?? 4;
 
@@ -24,14 +24,14 @@ export default function GoalScreen() {
 
   return (
     <View style={styles.root}>
-      <OnboardingTopBar progress={0.58} topInset={insets.top} onBack={() => router.back()} />
+      <OnboardingTopBar progress={onboardingProgress('goal')} topInset={insets.top} onBack={() => router.back()} />
 
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>Set your weekly run goal</Text>
-        <Text style={styles.sub}>Pick a target you can actually hit. You can change this anytime.</Text>
+        <Text style={styles.title}>Set your weekly target</Text>
+        <Text style={styles.sub}>Pick a load you can hold. You can change it anytime.</Text>
 
         <View style={styles.list}>
           {weeklyGoalOptions.map((o) => {
@@ -77,9 +77,9 @@ export default function GoalScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   content: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  title: { color: colors.text, fontSize: 30, fontWeight: font.black, letterSpacing: -0.6, lineHeight: 36 },
-  sub: { color: colors.textDim, fontSize: 15, fontWeight: font.medium, marginTop: spacing.sm, lineHeight: 21 },
-  list: { gap: spacing.md, marginTop: spacing.xl },
+  title: { ...type.h1, color: colors.text },
+  sub: { ...type.body, color: colors.textDim, marginTop: spacing.sm },
+  list: { gap: spacing.sm, marginTop: spacing.xl },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -88,20 +88,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.border,
   },
   rowActive: { borderColor: colors.lime, backgroundColor: colors.surface2 },
   rowLead: {
     width: 44,
     height: 44,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
     backgroundColor: colors.surface2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rowLabel: { color: colors.text, fontSize: 16, fontWeight: font.bold },
-  rowDesc: { color: colors.textDim, fontSize: 13, fontWeight: font.medium, marginTop: 2 },
+  rowLabel: { ...type.h3, color: colors.text, fontSize: 16 },
+  rowDesc: { ...type.bodySm, color: colors.textDim, marginTop: 2 },
   radio: {
     width: 24,
     height: 24,
@@ -119,5 +119,5 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
-  pressed: { opacity: 0.9, transform: [{ scale: 0.99 }] },
+  pressed: { opacity: 0.72 },
 });

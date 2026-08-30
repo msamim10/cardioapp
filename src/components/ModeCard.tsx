@@ -5,7 +5,7 @@ import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-n
 import { formatRunnerCount } from '@/lib/communityActivity';
 import type { Mode } from '@/lib/gameData';
 import { getModeCover } from '@/lib/modeCovers';
-import { accentColor, accentGradient, colors, font, radius, spacing } from '@/theme';
+import { accentColor, accentGradient, colors, font, radius, spacing, type } from '@/theme';
 
 export function ModeCard({
   mode,
@@ -178,18 +178,17 @@ const styles = StyleSheet.create({
   },
   cornerLabel: {
     position: 'absolute',
-    top: -8,
+    top: -9,
     right: 8,
-    paddingHorizontal: 6,
+    paddingHorizontal: 7,
     paddingVertical: 3,
-    borderRadius: radius.pill,
+    borderRadius: radius.xs,
     backgroundColor: colors.lime,
   },
   cornerLabelText: {
+    ...type.micro,
     color: colors.black,
-    fontSize: 8,
-    fontWeight: font.black,
-    letterSpacing: 0.45,
+    fontSize: 9,
   },
   titleWrap: {
     position: 'absolute',
@@ -204,8 +203,8 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 16,
     lineHeight: 19,
-    fontWeight: font.black,
-    letterSpacing: -0.25,
+    fontWeight: font.heavy,
+    letterSpacing: -0.35,
     textShadowColor: 'rgba(0,0,0,0.7)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
@@ -225,7 +224,8 @@ const styles = StyleSheet.create({
   participantText: {
     color: colors.textDim,
     fontSize: 10,
-    fontWeight: font.semibold,
+    fontWeight: font.bold,
+    letterSpacing: 0.3,
   },
   body: {
     minHeight: 42,
@@ -240,14 +240,12 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   meta: {
+    ...type.micro,
     color: colors.textDim,
     fontSize: 11,
-    fontWeight: font.bold,
-    letterSpacing: 0.65,
   },
   metaSpacer: { flex: 1 },
   pressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.98 }],
+    opacity: 0.72,
   },
 });

@@ -24,8 +24,9 @@ import {
   goalOptions,
   motivationOptions,
   moverOptions,
+  onboardingStepProgress,
 } from '@/lib/onboarding';
-import { colors, font, radius, spacing } from '@/theme';
+import { colors, font, metric, radius, spacing, type } from '@/theme';
 
 // Personalization questions. The weekly goal + notifications live on their own
 // dedicated screens, so they're intentionally not part of this step list.
@@ -41,8 +42,6 @@ export default function QuestionsScreen() {
 
   const [index, setIndex] = useState(0);
   const step: Step = STEPS[index];
-  const worldContinueReveal = useRef(new Animated.Value(0)).current;
-  const [worldContinueReady, setWorldContinueReady] = useState(false);
 
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -66,15 +65,11 @@ export default function QuestionsScreen() {
       router.back();
       return;
     }
-    if (step === 'worlds' || STEPS[index - 1] === 'worlds') {
-      worldContinueReveal.setValue(0);
-      setWorldContinueReady(false);
-    }
     setIndex((i) => Math.max(0, i - 1));
   };
 
   const questionNumber = index + 1;
-  const progress = 0.18 + (index / (QUESTION_COUNT - 1)) * 0.34;
+  const progress = onboardingStepProgress('questions', index, QUESTION_COUNT);
 
   const canContinue = useMemo(() => {
     switch (step) {
@@ -134,7 +129,7 @@ export default function QuestionsScreen() {
         >
           <Animated.View style={animatedStyle}>
             {step === 'goal' ? (
-              <StepHead eyebrow="Your why" title="What's your #1 goal?" sub="Pick the one that fits best right now.">
+              <StepHead eyebrow="Objective" title="What are you training for?" sub="Pick the one that fits right now.">
                 <View style={styles.stack}>
                   {goalOptions.map((o) => (
                     <OptionCard
@@ -152,9 +147,9 @@ export default function QuestionsScreen() {
 
             {step === 'mover' ? (
               <StepHead
-                eyebrow="Your vibe"
-                title="What kind of mover are you?"
-                sub="No judgment — just so we start you at the right pace."
+                eyebrow="Baseline"
+                title="Where are you starting from?"
+                sub="This sets your opening pace. You can move up any time."
               >
                 <View style={styles.stack}>
                   {moverOptions.map((o) => (
@@ -173,22 +168,19 @@ export default function QuestionsScreen() {
 
             {step === 'worlds' ? (
               <StepHead
-                eyebrow="Your playground"
-                title="Explore the worlds ahead"
-                sub="Every run takes you somewhere new."
+                eyebrow="The catalogue"
+                title="Where you'll be training"
+                sub="Every session drops you somewhere new."
               >
-                <WorldChoices
-                  continueReveal={worldContinueReveal}
-                  onContinueReady={setWorldContinueReady}
-                />
+                <WorldChoices />
               </StepHead>
             ) : null}
 
             {step === 'motivation' ? (
               <StepHead
-                eyebrow="Your fuel"
-                title="What keeps you going?"
-                sub="We'll dial up the parts of the game that hook you."
+                eyebrow="Motivation"
+                title="What keeps you coming back?"
+                sub="We'll lean into the part of the game that works on you."
               >
                 <View style={styles.stack}>
                   {motivationOptions.map((o) => (
@@ -209,37 +201,18 @@ export default function QuestionsScreen() {
       </KeyboardAvoidingView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
-        <Animated.View
-          pointerEvents={step === 'worlds' && !worldContinueReady ? 'none' : 'auto'}
-          accessibilityElementsHidden={step === 'worlds' && !worldContinueReady}
-          importantForAccessibility={
-            step === 'worlds' && !worldContinueReady ? 'no-hide-descendants' : 'auto'
-          }
-          style={step === 'worlds' ? { opacity: worldContinueReveal } : undefined}
-        >
-          <GradientButton
-            label="CONTINUE"
-            accent="lime"
-            onPress={canContinue && (step !== 'worlds' || worldContinueReady) ? goNext : undefined}
-            style={
-              !canContinue || (step === 'worlds' && !worldContinueReady)
-                ? styles.disabled
-                : undefined
-            }
-          />
-        </Animated.View>
+        <GradientButton
+          label="CONTINUE"
+          accent="lime"
+          onPress={canContinue ? goNext : undefined}
+          style={!canContinue ? styles.disabled : undefined}
+        />
       </View>
     </View>
   );
 }
 
-function WorldChoices({
-  continueReveal,
-  onContinueReady,
-}: {
-  continueReveal: Animated.Value;
-  onContinueReady: (ready: boolean) => void;
-}) {
+function WorldChoices() {
   const { width } = useWindowDimensions();
   const cardWidth = Math.min(
     220,
@@ -267,8 +240,6 @@ function WorldChoices({
 
     reveals.forEach((value) => value.setValue(reduceMotion ? 1 : 0));
     moreReveal.setValue(reduceMotion ? 1 : 0);
-    continueReveal.setValue(reduceMotion ? 1 : 0);
-    onContinueReady(reduceMotion);
     if (reduceMotion) return;
 
     const rowAnimations = [0, 2, 4].map((rowStart) =>
@@ -292,29 +263,16 @@ function WorldChoices({
     );
     const animation = Animated.sequence([
       ...rowAnimations,
-      Animated.parallel([
-        Animated.timing(moreReveal, {
-          toValue: 1,
-          duration: 280,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.sequence([
-          Animated.delay(100),
-          Animated.timing(continueReveal, {
-            toValue: 1,
-            duration: 300,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-        ]),
-      ]),
+      Animated.timing(moreReveal, {
+        toValue: 1,
+        duration: 280,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
     ]);
-    animation.start(({ finished }) => {
-      if (finished) onContinueReady(true);
-    });
+    animation.start();
     return () => animation.stop();
-  }, [continueReveal, moreReveal, onContinueReady, reduceMotion, reveals]);
+  }, [moreReveal, reduceMotion, reveals]);
 
   return (
     <View>
@@ -385,7 +343,7 @@ function WorldChoices({
           },
         ]}
       >
-        <Text style={styles.moreWorldsText}>And many more worlds to explore.</Text>
+        <Text style={styles.moreWorldsText}>Plus the full catalogue inside.</Text>
       </Animated.View>
     </View>
   );
@@ -422,18 +380,18 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   backBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  counter: { color: colors.textDim, fontSize: 13, fontWeight: font.bold, width: 44, textAlign: 'right' },
-  content: { paddingHorizontal: spacing.lg },
-  eyebrow: {
-    color: colors.lime,
+  counter: {
+    ...metric,
+    color: colors.textDim,
     fontSize: 13,
-    fontWeight: font.black,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    marginBottom: 6,
+    fontWeight: font.bold,
+    width: 44,
+    textAlign: 'right',
   },
-  title: { color: colors.text, fontSize: 30, fontWeight: font.black, letterSpacing: -0.6, lineHeight: 36 },
-  sub: { color: colors.textDim, fontSize: 15, fontWeight: font.medium, marginTop: spacing.sm, lineHeight: 21 },
+  content: { paddingHorizontal: spacing.lg },
+  eyebrow: { ...type.label, color: colors.lime, marginBottom: 8 },
+  title: { ...type.h1, color: colors.text },
+  sub: { ...type.body, color: colors.textDim, marginTop: spacing.sm },
   stepBody: { marginTop: spacing.xl },
   stack: { gap: spacing.md },
   worldGrid: {
@@ -455,7 +413,8 @@ const styles = StyleSheet.create({
     bottom: spacing.sm,
     color: colors.white,
     fontSize: 13,
-    fontWeight: font.black,
+    fontWeight: font.heavy,
+    letterSpacing: -0.2,
     lineHeight: 15,
     textShadowColor: 'rgba(0,0,0,0.7)',
     textShadowOffset: { width: 0, height: 1 },
@@ -466,8 +425,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   moreWorldsText: {
+    ...type.bodySm,
     color: colors.textDim,
-    fontSize: 14,
     fontWeight: font.semibold,
     textAlign: 'center',
   },
@@ -480,5 +439,5 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   disabled: { opacity: 0.4 },
-  pressed: { opacity: 0.9, transform: [{ scale: 0.98 }] },
+  pressed: { opacity: 0.72 },
 });

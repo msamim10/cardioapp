@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { isCardioSurfPoseAvailable } from 'cardiosurf-pose';
 import { useCameraPermissions } from 'expo-camera';
 import * as Device from 'expo-device';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -22,6 +23,14 @@ import {
   logCalibrationFailure,
   logCalibrationSuccess,
 } from '@/lib/analytics';
+import {
+  loadCalibrationProfile,
+  proportionsFromBaseline,
+  proportionsMismatch,
+  recordCalibrationComplete,
+  shouldGuideCalibration,
+  type BodyProportions,
+} from '@/lib/calibrationProfile';
 import type { CalibrationFailureReason } from '@/lib/funnelStore';
 import {
   INITIAL_POSE_FEEDBACK,
@@ -35,6 +44,8 @@ import { useProgress } from '@/lib/ProgressContext';
 import { parseOptionalClassKeyParam } from '@/lib/progression';
 import {
   INITIAL_PREFLIGHT_STATE,
+  PREFLIGHT_COUNTDOWN_SECONDS,
+  PREFLIGHT_EXPRESS_COUNTDOWN_SECONDS,
   reducePreflight,
 } from '@/lib/preflightState';
 import {
@@ -42,7 +53,7 @@ import {
   createTrackingRunId,
   stageTrackingHandoff,
 } from '@/lib/trackingSession';
-import { colors, font, radius, spacing } from '@/theme';
+import { colors, font, metric, radius, spacing, type } from '@/theme';
 
 const TRACKING_TIMEOUT_MS = 25_000;
 
@@ -87,6 +98,10 @@ export default function PreflightScreen() {
   const [trackingStatus, setTrackingStatus] = useState<TrackingStatus>('calibrating');
   const [requesting, setRequesting] = useState(false);
   const [unavailableReason, setUnavailableReason] = useState('');
+  // Guided mode teaches the framing; express mode is a silent sensor lock for
+  // anyone who has already calibrated on this device at least once.
+  const [guided, setGuided] = useState(true);
+  const storedProportionsRef = useRef<BodyProportions | null>(null);
   const analyzerRef = useRef(new PoseAnalyzer());
   const stateRef = useRef(state);
   const launchedRef = useRef(false);
@@ -98,6 +113,8 @@ export default function PreflightScreen() {
   // can classify a failure without re-subscribing on every frame.
   const latestFrameRef = useRef<PoseFrame | null>(null);
   latestFrameRef.current = poseFrame;
+  const guidedRef = useRef(guided);
+  guidedRef.current = guided;
   // True while a calibration cycle is in progress; gates attempt/outcome events
   // so a purely "unavailable" (no detector / permission denied) isn't a failure.
   const calibrationCycleRef = useRef(false);
@@ -112,6 +129,20 @@ export default function PreflightScreen() {
     clearTrackingHandoff();
     return () => {
       if (!launchedRef.current) clearTrackingHandoff();
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    loadCalibrationProfile()
+      .then((profile) => {
+        if (!active) return;
+        storedProportionsRef.current = profile.proportions;
+        setGuided(shouldGuideCalibration(profile));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
     };
   }, []);
 
@@ -227,12 +258,25 @@ export default function PreflightScreen() {
         calibrationCycleRef.current = true;
         logCalibrationAttempt();
       }
+      if (phase === 'stabilizing') {
+        // A body whose proportions no longer match the stored ones is most
+        // likely a different person on a shared device, so re-teach framing.
+        const fresh = analyzerRef.current.calibrationSnapshot();
+        const proportions = fresh ? proportionsFromBaseline(fresh.baseline) : null;
+        if (proportionsMismatch(storedProportionsRef.current, proportions)) {
+          setGuided(true);
+        }
+      }
       return;
     }
     if (phase === 'countdown') {
       if (calibrationCycleRef.current) {
         calibrationCycleRef.current = false;
         logCalibrationSuccess();
+        const snapshot = analyzerRef.current.calibrationSnapshot();
+        recordCalibrationComplete(
+          snapshot ? proportionsFromBaseline(snapshot.baseline) : null,
+        ).catch(() => {});
       }
       return;
     }
@@ -262,7 +306,12 @@ export default function PreflightScreen() {
         dispatch({ type: 'CALIBRATION_READY' });
       } else if (phase === 'stabilizing') {
         if (!result.move && result.feedback.readiness === 'ready') {
-          dispatch({ type: 'STABLE_FRAME' });
+          dispatch({
+            type: 'STABLE_FRAME',
+            countdownFrom: guidedRef.current
+              ? PREFLIGHT_COUNTDOWN_SECONDS
+              : PREFLIGHT_EXPRESS_COUNTDOWN_SECONDS,
+          });
         } else {
           dispatch({ type: 'TRACKING_LOST' });
         }
@@ -344,7 +393,20 @@ export default function PreflightScreen() {
         <View style={styles.emptyCamera} />
       )}
 
-      {cameraActive ? <View pointerEvents="none" style={styles.vignette} /> : null}
+      {cameraActive ? (
+        <>
+          <LinearGradient
+            colors={['rgba(0,0,0,0.72)', 'rgba(0,0,0,0)']}
+            pointerEvents="none"
+            style={styles.topScrim}
+          />
+          <LinearGradient
+            colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.86)']}
+            pointerEvents="none"
+            style={styles.bottomScrim}
+          />
+        </>
+      ) : null}
 
       <Pressable
         accessibilityRole="button"
@@ -356,15 +418,17 @@ export default function PreflightScreen() {
       </Pressable>
 
       <View style={[styles.header, { top: insets.top + spacing.md }]}>
-        <Text style={styles.eyebrow}>RUN SETUP</Text>
+        <Text style={styles.eyebrow}>
+          {guided ? 'ONE-TIME SETUP' : 'SENSOR CHECK'}
+        </Text>
         <Text style={styles.runName} numberOfLines={1}>{params.name ?? 'Your run'}</Text>
       </View>
 
       {state.phase === 'permission' ? (
         <SetupCard
           icon="camera-outline"
-          title="Turn on form tracking"
-          detail="Your camera stays on-device and is never recorded. We’ll calibrate before the run starts."
+          title="Set up body tracking"
+          detail="One time, then it runs itself. Your camera is processed on-device and never recorded or uploaded."
           primary={permission?.canAskAgain === false ? 'OPEN SETTINGS' : 'ENABLE CAMERA'}
           loading={requesting}
           onPrimary={permission?.canAskAgain === false
@@ -376,10 +440,10 @@ export default function PreflightScreen() {
       ) : state.phase === 'unavailable' || state.phase === 'timed-out' ? (
         <SetupCard
           icon={state.phase === 'timed-out' ? 'body-outline' : 'warning-outline'}
-          title={state.phase === 'timed-out' ? 'Still looking for you' : 'Tracking unavailable'}
+          title={state.phase === 'timed-out' ? 'No signal' : 'Tracking unavailable'}
           detail={
             state.phase === 'timed-out'
-              ? 'Step back so your shoulders and hips are visible, then retry.'
+              ? 'Step back until your shoulders and hips are in frame, then try again. You can also train without tracking.'
               : unavailableReason
           }
           primary={permission?.canAskAgain === false ? 'OPEN SETTINGS' : 'TRY AGAIN'}
@@ -396,10 +460,13 @@ export default function PreflightScreen() {
       ) : (
         <>
           <View style={styles.centerGuide} pointerEvents="none">
-            <View style={styles.guideOval} />
-            <View style={styles.floorGuide}>
-              <View style={styles.floorDot} />
+            <View style={styles.reticle}>
+              <View style={[styles.bracket, styles.bracketTL]} />
+              <View style={[styles.bracket, styles.bracketTR]} />
+              <View style={[styles.bracket, styles.bracketBL]} />
+              <View style={[styles.bracket, styles.bracketBR]} />
             </View>
+            <View style={styles.floorGuide} />
           </View>
           <View
             accessible
@@ -407,45 +474,87 @@ export default function PreflightScreen() {
             accessibilityRole="summary"
             accessibilityLabel={
               state.phase === 'countdown'
-                ? `Calibration ready. Starting in ${state.countdown}. Hold center.`
-                : `${trackingStatus === 'searching' ? 'Step into frame.' : state.phase === 'stabilizing' ? 'Calibration ready.' : 'Stand centered.'} Place your phone securely. Step back 3 to 5 feet and keep your shoulders and hips in frame. Full body is best.`
+                ? `Body locked. Starting in ${state.countdown}. Hold still.`
+                : `${trackingStatus === 'searching' ? 'No body detected. Step into frame.' : state.phase === 'stabilizing' ? 'Body locked. Hold still.' : 'Acquiring. Reading your body.'} Stand your phone up, then step back until your shoulders and hips are in frame. Signal ${Math.round(feedback.calibrationProgress * 100)} percent.`
             }
             style={[styles.guidance, { bottom: insets.bottom + spacing.xl }]}
           >
             {state.phase === 'countdown' ? (
               <>
-                <Text style={styles.readyLabel}>CALIBRATION READY</Text>
+                <Text style={styles.readyLabel}>LOCKED</Text>
                 <Text style={styles.countdown}>{state.countdown}</Text>
-                <Text style={styles.hint}>Hold center — your run is about to start</Text>
               </>
             ) : (
               <>
+                <View style={styles.statusRow}>
+                  <View
+                    style={[
+                      styles.statusDot,
+                      state.phase === 'stabilizing' && styles.statusDotReady,
+                    ]}
+                  />
+                  <Text style={styles.statusLabel}>
+                    {trackingStatus === 'searching'
+                      ? 'NO BODY DETECTED'
+                      : state.phase === 'stabilizing'
+                        ? 'BODY LOCKED'
+                        : 'ACQUIRING'}
+                  </Text>
+                </View>
                 <Text style={styles.guidanceTitle}>
                   {trackingStatus === 'searching'
                     ? 'Step into frame'
                     : state.phase === 'stabilizing'
-                      ? 'Calibration ready'
-                      : 'Stand centered'}
+                      ? 'Hold still'
+                      : 'Reading your body'}
                 </Text>
-                <Text style={styles.setupGuidance}>
-                  Place your phone securely.{'\n'}Step back 3–5 feet and keep your shoulders and hips in frame.
-                </Text>
-                <Text style={styles.hint}>
-                  Full body is best, but shoulders and hips are sufficient to calibrate.
-                </Text>
-                <View style={styles.progressTrack}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      { width: `${Math.round(feedback.calibrationProgress * 100)}%` },
-                    ]}
-                  />
-                </View>
+                {guided ? (
+                  <Text style={styles.setupGuidance}>
+                    Stand your phone up, then step back until your shoulders and hips
+                    sit inside the brackets. Full body is ideal.
+                  </Text>
+                ) : null}
+                <SignalMeter value={feedback.calibrationProgress} />
+                {guided ? null : (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Show setup instructions"
+                    hitSlop={10}
+                    onPress={() => setGuided(true)}
+                    style={styles.helpLink}
+                  >
+                    <Text style={styles.helpLinkText}>Show setup guide</Text>
+                  </Pressable>
+                )}
               </>
             )}
           </View>
         </>
       )}
+    </View>
+  );
+}
+
+const SIGNAL_SEGMENTS = 12;
+
+/**
+ * Segmented signal readout. Reads as sensor acquisition rather than a loading
+ * bar, which is the distinction between instrument UI and game UI here.
+ */
+function SignalMeter({ value }: { value: number }) {
+  const clamped = Math.max(0, Math.min(1, value));
+  const lit = Math.round(clamped * SIGNAL_SEGMENTS);
+  return (
+    <View style={styles.signal}>
+      <View style={styles.signalTrack}>
+        {Array.from({ length: SIGNAL_SEGMENTS }, (_, index) => (
+          <View
+            key={index}
+            style={[styles.segment, index < lit && styles.segmentLit]}
+          />
+        ))}
+      </View>
+      <Text style={styles.signalValue}>{Math.round(clamped * 100)}%</Text>
     </View>
   );
 }
@@ -487,11 +596,8 @@ function SetupCard({
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.black },
   emptyCamera: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.bg },
-  vignette: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.08)',
-    borderWidth: 0,
-  },
+  topScrim: { position: 'absolute', top: 0, left: 0, right: 0, height: 190 },
+  bottomScrim: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 340 },
   close: {
     position: 'absolute',
     left: spacing.lg,
@@ -504,66 +610,108 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
   header: { position: 'absolute', left: 76, right: 76, alignItems: 'center' },
-  eyebrow: { color: colors.lime, fontSize: 10, fontWeight: font.black, letterSpacing: 1.7 },
-  runName: { color: colors.white, fontSize: 15, fontWeight: font.bold, marginTop: 2 },
+  eyebrow: { ...type.micro, color: colors.lime, letterSpacing: 1.7 },
+  runName: { ...type.h3, color: colors.white, marginTop: 3 },
   centerGuide: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  guideOval: {
-    width: '48%',
-    height: '62%',
-    borderWidth: 1,
-    borderRadius: 999,
-    borderColor: 'rgba(255,255,255,0.24)',
+  reticle: { width: '62%', height: '58%' },
+  bracket: {
+    position: 'absolute',
+    width: 26,
+    height: 26,
+    borderColor: 'rgba(255,255,255,0.9)',
   },
+  bracketTL: { top: 0, left: 0, borderTopWidth: 2, borderLeftWidth: 2 },
+  bracketTR: { top: 0, right: 0, borderTopWidth: 2, borderRightWidth: 2 },
+  bracketBL: { bottom: 0, left: 0, borderBottomWidth: 2, borderLeftWidth: 2 },
+  bracketBR: { bottom: 0, right: 0, borderBottomWidth: 2, borderRightWidth: 2 },
   floorGuide: {
     position: 'absolute',
-    bottom: '18%',
-    width: '54%',
-    height: 2,
-    alignItems: 'center',
-    backgroundColor: 'rgba(198,255,61,0.38)',
+    bottom: '20%',
+    width: '46%',
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.34)',
   },
-  floorDot: { width: 10, height: 10, marginTop: -4, borderRadius: 5, backgroundColor: colors.lime },
   guidance: {
     position: 'absolute',
     left: spacing.xl,
     right: spacing.xl,
     alignItems: 'center',
-    padding: spacing.lg,
-    borderRadius: radius.xl,
-    backgroundColor: 'rgba(5,8,12,0.82)',
   },
-  guidanceTitle: { color: colors.white, fontSize: 27, fontWeight: font.black, letterSpacing: -0.5 },
-  setupGuidance: {
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: radius.pill,
+    backgroundColor: colors.textFaint,
+  },
+  statusDotReady: { backgroundColor: colors.lime },
+  statusLabel: {
+    ...type.micro,
     color: colors.white,
-    fontSize: 15,
-    lineHeight: 21,
-    fontWeight: font.bold,
+    letterSpacing: 1.4,
+  },
+  guidanceTitle: {
+    ...type.h1,
+    color: colors.white,
+    fontSize: 30,
+    lineHeight: 34,
+    textAlign: 'center',
+  },
+  setupGuidance: {
+    ...type.body,
+    color: 'rgba(255,255,255,0.82)',
     textAlign: 'center',
     marginTop: spacing.sm,
+    maxWidth: 320,
   },
-  readyLabel: { color: colors.lime, fontSize: 12, fontWeight: font.black, letterSpacing: 1.5 },
-  countdown: { color: colors.white, fontSize: 96, lineHeight: 106, fontWeight: font.black },
-  hint: {
-    color: 'rgba(255,255,255,0.76)',
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: font.semibold,
-    textAlign: 'center',
-    marginTop: spacing.xs,
+  readyLabel: {
+    ...type.micro,
+    color: colors.lime,
+    letterSpacing: 2,
   },
-  progressTrack: {
-    width: '100%',
-    height: 5,
-    marginTop: spacing.md,
-    overflow: 'hidden',
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+  countdown: {
+    ...metric,
+    color: colors.white,
+    fontSize: 104,
+    lineHeight: 112,
+    fontWeight: font.heavy,
+    letterSpacing: -3,
   },
-  progressFill: { height: '100%', borderRadius: radius.pill, backgroundColor: colors.lime },
+  signal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+  },
+  signalTrack: { flexDirection: 'row', gap: 3, alignItems: 'center' },
+  segment: {
+    width: 9,
+    height: 3,
+    backgroundColor: 'rgba(255,255,255,0.24)',
+  },
+  segmentLit: { backgroundColor: colors.lime },
+  signalValue: {
+    ...metric,
+    ...type.micro,
+    color: colors.white,
+    minWidth: 34,
+    letterSpacing: 0.6,
+  },
+  helpLink: { marginTop: spacing.lg, paddingVertical: spacing.xs },
+  helpLinkText: {
+    ...type.bodySm,
+    color: 'rgba(255,255,255,0.66)',
+    fontWeight: font.bold,
+  },
   card: {
     position: 'absolute',
     left: spacing.lg,
@@ -581,19 +729,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radius.lg,
-    backgroundColor: 'rgba(198,255,61,0.1)',
+    backgroundColor: 'rgba(215,255,62,0.1)',
   },
-  cardTitle: { color: colors.white, fontSize: 27, fontWeight: font.black, marginTop: spacing.lg },
-  cardDetail: { color: colors.textDim, fontSize: 15, lineHeight: 21, marginTop: spacing.sm },
+  cardTitle: {
+    ...type.h1,
+    color: colors.white,
+    fontSize: 27,
+    lineHeight: 31,
+    marginTop: spacing.lg,
+  },
+  cardDetail: { ...type.body, color: colors.textDim, marginTop: spacing.sm },
   primary: {
     minHeight: 54,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: spacing.xl,
-    borderRadius: radius.pill,
+    borderRadius: radius.button,
     backgroundColor: colors.lime,
   },
-  primaryText: { color: colors.black, fontSize: 14, fontWeight: font.black, letterSpacing: 0.6 },
+  primaryText: { ...type.action, color: colors.black },
   secondary: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: spacing.xs },
   secondaryText: { color: colors.textDim, fontSize: 12, fontWeight: font.bold, letterSpacing: 0.4 },
 });

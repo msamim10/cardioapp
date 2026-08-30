@@ -42,7 +42,7 @@ export function ModeEmblem({
       <LinearGradient
         colors={
           selected
-            ? ['rgba(198,255,61,0.22)', 'rgba(198,255,61,0.07)']
+            ? ['rgba(215,255,62,0.22)', 'rgba(215,255,62,0.07)']
             : limeIcon
               ? [colors.surface, colors.surface]
             : ['rgba(255,255,255,0.10)', 'rgba(255,255,255,0.025)']
@@ -107,8 +107,8 @@ export function ModeClassCard({
         <LinearGradient
           colors={
             selected
-              ? ['rgba(198,255,61,0.08)', 'rgba(22,22,31,0.98)']
-              : ['rgba(255,255,255,0.035)', 'rgba(22,22,31,0.98)']
+              ? ['rgba(215,255,62,0.08)', 'rgba(20,22,24,0.98)']
+              : ['rgba(255,255,255,0.035)', 'rgba(20,22,24,0.98)']
           }
           style={StyleSheet.absoluteFill}
         />
@@ -150,8 +150,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.10)',
   },
   emblemOuterSelected: {
-    backgroundColor: 'rgba(198,255,61,0.06)',
-    borderColor: 'rgba(198,255,61,0.36)',
+    backgroundColor: 'rgba(215,255,62,0.06)',
+    borderColor: 'rgba(215,255,62,0.36)',
   },
   emblemOuterSurface: {
     backgroundColor: colors.surface,
@@ -221,5 +221,5 @@ const styles = StyleSheet.create({
     fontWeight: font.semibold,
     marginTop: 3,
   },
-  pressed: { opacity: 0.86, transform: [{ scale: 0.98 }] },
+  pressed: { opacity: 0.72 },
 });

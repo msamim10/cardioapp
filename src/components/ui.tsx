@@ -18,7 +18,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { CLASS_META, CLASS_ORDER, type ClassKey, type LeaderRow } from '@/lib/progression';
-import { AccentKey, accentColor, accentGradient, colors, font, radius, spacing } from '@/theme';
+import { AccentKey, accentColor, accentGradient, colors, font, metric, radius, spacing, type } from '@/theme';
 
 const MASCOT_FULL = require('../../assets/mascot/fox.png');
 const MASCOT_AVATAR = require('../../assets/mascot/fox-avatar.png');
@@ -67,22 +67,9 @@ const GROUND_UNIT = GROUND_DASHES.reduce((sum, w) => sum + w + GROUND_GAP, 0);
 function GroundUnit() {
   return (
     <View style={styles.groundUnit}>
-      {GROUND_DASHES.map((w, i) => {
-        const accent = i % 3 === 1;
-        return (
-          <View
-            key={i}
-            style={[
-              styles.groundDash,
-              {
-                width: w,
-                backgroundColor: accent ? colors.lime : colors.borderStrong,
-                opacity: accent ? 0.9 : 0.55,
-              },
-            ]}
-          />
-        );
-      })}
+      {GROUND_DASHES.map((w, i) => (
+        <View key={i} style={[styles.groundDash, { width: w }]} />
+      ))}
     </View>
   );
 }
@@ -160,9 +147,9 @@ export function MascotRunner({ size = 200, style }: { size?: number; style?: Vie
   }, [reduceMotion, bob, scroll]);
 
   const width = Math.round(size * RUN_RATIO);
-  const translateY = bob.interpolate({ inputRange: [0, 1], outputRange: [0, -5] });
-  const shadowScale = bob.interpolate({ inputRange: [0, 1], outputRange: [1, 0.86] });
-  const shadowOpacity = bob.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0.24] });
+  const translateY = bob.interpolate({ inputRange: [0, 1], outputRange: [0, -2] });
+  const shadowScale = bob.interpolate({ inputRange: [0, 1], outputRange: [1, 0.94] });
+  const shadowOpacity = bob.interpolate({ inputRange: [0, 1], outputRange: [0.34, 0.24] });
   const groundX = scroll.interpolate({ inputRange: [0, 1], outputRange: [0, -GROUND_UNIT] });
 
   return (
@@ -683,7 +670,7 @@ export function UsernameField({
         accessibilityLabel="Generate a random username"
         style={({ pressed }) => [styles.diceBtn, pressed && styles.pressed]}
       >
-        <Ionicons name="dice" size={22} color={colors.text} />
+        <Ionicons name="shuffle" size={22} color={colors.text} />
       </Pressable>
     </View>
   );
@@ -698,17 +685,21 @@ export function Badge({ label, accent = 'lime' }: { label: string; accent?: Acce
   );
 }
 
-const CONFETTI_COLORS = [colors.lime, colors.violet, colors.pink, colors.cyan, colors.orange, colors.white];
+// Two colors only. A six-color burst reads as a birthday party; a monochrome
+// brand-lime one reads as a race finish.
+const CONFETTI_COLORS = [colors.lime, colors.white];
 
 /**
- * Lightweight hand-rolled confetti burst — no native dependency. Each particle
- * is a small colored View animated on the native driver from the top of the
- * screen outward and down. Set `trigger` true to fire. Honors reduce-motion.
+ * Lightweight hand-rolled shard burst — no native dependency. Each particle is
+ * a thin brand-colored View animated on the native driver from the top of the
+ * screen outward and down. Deliberately sparse, rectangular and quick so it
+ * registers as a finish-line marker rather than a celebration overlay. Set
+ * `trigger` true to fire. Honors reduce-motion.
  */
 export function ConfettiBurst({
   trigger,
-  count = 46,
-  duration = 2200,
+  count = 22,
+  duration = 1500,
 }: {
   trigger: boolean;
   count?: number;
@@ -732,13 +723,12 @@ export function ConfettiBurst({
       Array.from({ length: count }).map(() => ({
         progress: new Animated.Value(0),
         startX: Math.random() * width,
-        driftX: (Math.random() * 2 - 1) * 120,
-        fall: height * (0.55 + Math.random() * 0.5),
-        size: 6 + Math.random() * 8,
+        driftX: (Math.random() * 2 - 1) * 90,
+        fall: height * (0.5 + Math.random() * 0.45),
+        size: 2 + Math.random() * 2,
         color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
-        delay: Math.random() * 260,
-        spin: (Math.random() * 4 - 2) * 360,
-        rounded: Math.random() > 0.5,
+        delay: Math.random() * 180,
+        spin: (Math.random() * 2 - 1) * 90,
       })),
     [count, width, height]
   );
@@ -778,9 +768,9 @@ export function ConfettiBurst({
               left: p.startX,
               top: 0,
               width: p.size,
-              height: p.size * 1.4,
+              height: p.size * 7,
               backgroundColor: p.color,
-              borderRadius: p.rounded ? p.size : 2,
+              borderRadius: 1,
               opacity,
               transform: [{ translateY }, { translateX }, { rotate }],
             }}
@@ -951,23 +941,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   groundDash: {
-    height: 5,
-    borderRadius: radius.pill,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: colors.borderStrong,
     marginRight: GROUND_GAP,
   },
   eyebrow: {
+    ...type.label,
     color: colors.textDim,
-    fontSize: 13,
-    fontWeight: font.semibold,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   screenTitle: {
+    ...type.h1,
     color: colors.text,
-    fontSize: 30,
-    fontWeight: font.black,
-    letterSpacing: -0.5,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -976,10 +962,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   sectionTitle: {
+    ...type.h2,
     color: colors.text,
     fontSize: 18,
-    fontWeight: font.bold,
-    letterSpacing: -0.3,
+    lineHeight: 22,
   },
   card: {
     backgroundColor: colors.surface,
@@ -1009,30 +995,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 16,
-    borderRadius: radius.pill,
+    minHeight: 56,
+    paddingVertical: 17,
+    borderRadius: radius.button,
   },
   gradientBtnText: {
+    ...type.action,
     color: colors.black,
-    fontSize: 16,
-    fontWeight: font.black,
-    letterSpacing: 0.2,
+    textTransform: 'uppercase',
   },
   ghostBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 15,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface2,
+    minHeight: 52,
+    paddingVertical: 16,
+    borderRadius: radius.button,
+    backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: colors.borderStrong,
   },
   ghostBtnText: {
+    ...type.action,
     color: colors.text,
-    fontSize: 15,
-    fontWeight: font.bold,
+    fontSize: 14,
+    textTransform: 'uppercase',
   },
   progressTrack: {
     height: 8,
@@ -1062,21 +1050,19 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   statReadoutValue: {
+    ...metric,
     color: colors.text,
     fontSize: 20,
-    fontWeight: font.black,
-    letterSpacing: -0.3,
+    fontWeight: font.heavy,
+    letterSpacing: -0.5,
   },
   statReadoutLabel: {
+    ...type.micro,
     color: colors.textDim,
-    fontSize: 11,
-    fontWeight: font.semibold,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    fontWeight: font.bold,
   },
   pressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.98 }],
+    opacity: 0.72,
   },
   pill: {
     flexDirection: 'row',
@@ -1115,8 +1101,15 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: 6,
   },
-  statTileValue: { color: colors.text, fontSize: 22, fontWeight: font.black, marginTop: 4 },
-  statTileLabel: { color: colors.textDim, fontSize: 13, fontWeight: font.medium },
+  statTileValue: {
+    ...metric,
+    color: colors.text,
+    fontSize: 24,
+    fontWeight: font.heavy,
+    letterSpacing: -0.6,
+    marginTop: 4,
+  },
+  statTileLabel: { ...type.micro, color: colors.textDim, fontWeight: font.bold },
   optionCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1125,18 +1118,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.border,
   },
   optionLead: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.md,
+    width: 44,
+    height: 44,
+    borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  optionTitle: { color: colors.text, fontSize: 17, fontWeight: font.bold, letterSpacing: -0.2 },
-  optionDesc: { color: colors.textDim, fontSize: 13, fontWeight: font.medium, marginTop: 3 },
+  optionTitle: { ...type.h3, color: colors.text },
+  optionDesc: { ...type.bodySm, color: colors.textDim, marginTop: 3 },
   optionCheck: {
     width: 24,
     height: 24,
@@ -1154,24 +1147,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     borderRadius: radius.md,
     backgroundColor: colors.surface,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.border,
   },
-  selectChipLabel: { color: colors.text, fontSize: 18, fontWeight: font.black },
+  selectChipLabel: { ...metric, color: colors.text, fontSize: 18, fontWeight: font.heavy },
   selectChipSub: { color: colors.textDim, fontSize: 12, fontWeight: font.medium, marginTop: 2 },
   classRow: { flexDirection: 'row', gap: spacing.sm },
   classChip: {
     flex: 1,
     alignItems: 'center',
-    gap: 4,
+    gap: 5,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.xs,
     borderRadius: radius.md,
     backgroundColor: colors.surface,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.border,
   },
-  classChipLabel: { color: colors.textDim, fontSize: 13, fontWeight: font.bold },
+  classChipLabel: { ...type.micro, color: colors.textDim, fontSize: 11 },
   classChipSub: { color: colors.textFaint, fontSize: 11, fontWeight: font.medium },
   leaderboard: {
     borderRadius: radius.lg,
@@ -1188,10 +1181,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   leaderRowUser: { backgroundColor: colors.lime },
-  leaderRank: { width: 34, color: colors.textDim, fontSize: 14, fontWeight: font.black },
+  leaderRank: { ...metric, width: 34, color: colors.textDim, fontSize: 14, fontWeight: font.heavy },
   leaderName: { flex: 1, color: colors.text, fontSize: 15, fontWeight: font.semibold },
   leaderCals: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  leaderCalText: { color: colors.text, fontSize: 14, fontWeight: font.bold },
+  leaderCalText: { ...metric, color: colors.text, fontSize: 14, fontWeight: font.bold },
 
   topBar: {
     flexDirection: 'row',
@@ -1203,7 +1196,7 @@ const styles = StyleSheet.create({
   topBarBack: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
 
   checkbox: {
-    borderRadius: 8,
+    borderRadius: radius.xs,
     borderWidth: 2,
     borderColor: colors.borderStrong,
     alignItems: 'center',
@@ -1218,12 +1211,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
-    height: 60,
+    height: 58,
     borderRadius: radius.md,
-    borderWidth: 1.5,
+    borderWidth: 1,
     backgroundColor: colors.surface,
   },
-  usernameAt: { color: colors.textDim, fontSize: 18, fontWeight: font.black },
+  usernameAt: { color: colors.textDim, fontSize: 18, fontWeight: font.heavy },
   usernameInput: { flex: 1, color: colors.text, fontSize: 17, fontWeight: font.bold, paddingVertical: 0 },
   usernameCheck: {
     width: 22,
@@ -1234,18 +1227,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   diceBtn: {
-    width: 60,
-    height: 60,
+    width: 58,
+    height: 58,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.surface2,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.borderStrong,
   },
 
-  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill },
-  badgeText: { color: colors.black, fontSize: 10, fontWeight: font.black, letterSpacing: 0.5 },
+  badge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: radius.xs },
+  badgeText: { ...type.micro, color: colors.black },
 
   climbRow: {
     position: 'absolute',
@@ -1262,7 +1255,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   climbRowUser: { backgroundColor: colors.lime, borderColor: colors.lime },
-  climbRank: { width: 34, color: colors.textDim, fontSize: 15, fontWeight: font.black },
+  climbRank: { ...metric, width: 34, color: colors.textDim, fontSize: 15, fontWeight: font.heavy },
   climbAvatar: {
     width: 34,
     height: 34,
@@ -1274,6 +1267,6 @@ const styles = StyleSheet.create({
   },
   climbAvatarUser: { backgroundColor: 'rgba(0,0,0,0.14)' },
   climbHandle: { flex: 1, color: colors.text, fontSize: 15, fontWeight: font.bold },
-  climbValue: { color: colors.text, fontSize: 14, fontWeight: font.black },
+  climbValue: { ...metric, color: colors.text, fontSize: 14, fontWeight: font.heavy },
   climbTextOnColor: { color: colors.black },
 });

@@ -281,7 +281,7 @@ const styles = StyleSheet.create({
     gap: 8,
     minHeight: 48,
     borderRadius: radius.pill,
-    backgroundColor: 'rgba(255,73,134,0.12)',
+    backgroundColor: 'rgba(255,71,87,0.12)',
     borderWidth: 1,
     borderColor: colors.pink,
   },

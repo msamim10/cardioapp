@@ -293,7 +293,7 @@ const styles = StyleSheet.create({
   error: { color: colors.pink, fontSize: 13, fontWeight: font.semibold, lineHeight: 19 },
   submit: {
     minHeight: 52,
-    borderRadius: radius.pill,
+    borderRadius: radius.button,
     backgroundColor: colors.lime,
     alignItems: 'center',
     justifyContent: 'center',

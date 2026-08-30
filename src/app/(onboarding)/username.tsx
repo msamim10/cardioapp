@@ -11,7 +11,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   GradientButton,
-  Mascot,
   OnboardingTopBar,
   UsernameField,
   type UsernameStatus,
@@ -23,7 +22,8 @@ import {
   normalizeUsername,
   validateUsername,
 } from '@/lib/username';
-import { colors, font, spacing } from '@/theme';
+import { onboardingProgress } from '@/lib/onboarding';
+import { colors, spacing, type } from '@/theme';
 
 export default function UsernameScreen() {
   const router = useRouter();
@@ -32,7 +32,7 @@ export default function UsernameScreen() {
 
   const [value, setValue] = useState(() => username ?? generateUsername());
   const [status, setStatus] = useState<UsernameStatus>('empty');
-  const [hint, setHint] = useState('Lowercase, numbers, 3-20 characters. Tap the dice to generate.');
+  const [hint, setHint] = useState('Lowercase and numbers, 3-20 characters. Tap shuffle for a suggestion.');
 
   // Track the most recent value so an in-flight availability check can't apply a
   // stale result after the user keeps typing.
@@ -43,7 +43,7 @@ export default function UsernameScreen() {
     const check = validateUsername(value);
     if (!check.valid) {
       setStatus(value.length === 0 ? 'empty' : 'invalid');
-      setHint(check.reason && check.reason !== 'empty' ? check.reason : 'Lowercase, numbers, 3-20 characters.');
+      setHint(check.reason && check.reason !== 'empty' ? check.reason : 'Lowercase and numbers, 3-20 characters.');
       return;
     }
     setStatus('checking');
@@ -54,10 +54,10 @@ export default function UsernameScreen() {
       if (!active || latest.current !== value) return;
       if (available) {
         setStatus('valid');
-        setHint('Nice — that handle is available.');
+        setHint('Available.');
       } else {
         setStatus('invalid');
-        setHint('That handle is taken. Try another.');
+        setHint('Already taken. Try another.');
       }
     }, 400);
     return () => {
@@ -77,7 +77,7 @@ export default function UsernameScreen() {
 
   return (
     <View style={styles.root}>
-      <OnboardingTopBar progress={0.42} topInset={insets.top} onBack={() => router.back()} />
+      <OnboardingTopBar progress={onboardingProgress('username')} topInset={insets.top} onBack={() => router.back()} />
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -88,12 +88,9 @@ export default function UsernameScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.mascotWrap}>
-            <Mascot variant="avatar" size={96} />
-          </View>
-          <Text style={styles.title}>Claim your username</Text>
+          <Text style={styles.title}>Claim your handle</Text>
           <Text style={styles.sub}>
-            This is how everyone else sees you in challenges and on leaderboards.
+            This is how you appear in challenges and on leaderboards.
           </Text>
 
           <View style={styles.fieldWrap}>
@@ -122,27 +119,22 @@ export default function UsernameScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  content: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl, alignItems: 'center' },
-  mascotWrap: { marginBottom: spacing.lg },
+  content: { paddingHorizontal: spacing.lg, paddingTop: spacing.xxxl, alignItems: 'center' },
   title: {
+    ...type.h1,
     color: colors.text,
-    fontSize: 30,
-    fontWeight: font.black,
-    letterSpacing: -0.6,
     textAlign: 'center',
   },
   sub: {
+    ...type.body,
     color: colors.textDim,
-    fontSize: 15,
-    fontWeight: font.medium,
     marginTop: spacing.sm,
-    lineHeight: 21,
     textAlign: 'center',
     paddingHorizontal: spacing.sm,
   },
   fieldWrap: { alignSelf: 'stretch', marginTop: spacing.xxl },
-  hint: { color: colors.textFaint, fontSize: 13, fontWeight: font.medium, marginTop: spacing.md, marginLeft: 4 },
-  hintError: { color: colors.pink },
+  hint: { ...type.bodySm, color: colors.textFaint, marginTop: spacing.md, marginLeft: 4 },
+  hintError: { color: colors.effort },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,

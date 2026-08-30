@@ -2,10 +2,15 @@ import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { WelcomeWalkingHero } from '@/components/WelcomeWalkingHero';
-import { GradientButton } from '@/components/ui';
+import { GameplayHero } from '@/components/GameplayHero';
+import { GradientButton, Mascot } from '@/components/ui';
 import { logOnboardingStart } from '@/lib/analytics';
-import { colors, font, spacing } from '@/theme';
+import { modeCovers } from '@/lib/modeCovers';
+import { colors, font, radius, spacing, type } from '@/theme';
+
+// The first frame of paid traffic is the world you run into, not the mascot:
+// a real athlete mid-sprint in a lit night scene.
+const HERO_ART = modeCovers['prison-escape-run'];
 
 export default function WelcomeScreen() {
   const router = useRouter();
@@ -18,7 +23,6 @@ export default function WelcomeScreen() {
   const { height } = useWindowDimensions();
   const usableHeight = height - insets.top - insets.bottom;
   const heroHeight = Math.min(320, Math.max(220, Math.round(usableHeight * 0.34)));
-  const foxVerticalOffset = Math.min(32, Math.max(24, Math.round(usableHeight * 0.038)));
   const copyTopSpacing = Math.min(30, Math.max(18, Math.round(usableHeight * 0.032)));
   const groupTopInset = Math.min(34, Math.max(18, Math.round(usableHeight * 0.038)));
 
@@ -32,27 +36,40 @@ export default function WelcomeScreen() {
         },
       ]}
     >
-      <View pointerEvents="none" style={styles.wordmark}>
+      <View
+        accessible
+        accessibilityLabel="CardioSurf"
+        accessibilityRole="header"
+        pointerEvents="none"
+        style={styles.wordmark}
+      >
+        <Mascot size={26} style={styles.wordmarkFox} variant="avatar" />
         <Text style={styles.wordmarkText}>CardioSurf</Text>
       </View>
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingTop: groupTopInset }]}
         showsVerticalScrollIndicator={false}
       >
-        <WelcomeWalkingHero height={heroHeight} verticalOffset={foxVerticalOffset} />
+        <GameplayHero
+          accessibilityLabel="A runner sprinting through a floodlit night level"
+          height={heroHeight}
+          source={HERO_ART}
+          style={styles.hero}
+        />
 
         <View style={styles.content}>
           <View style={[styles.copy, { paddingTop: copyTopSpacing }]}>
+            <Text style={styles.eyebrow}>Full-body cardio</Text>
             <Text style={styles.title}>Run into another world</Text>
             <Text style={styles.subtitle}>
-              Move through immersive levels, build your streak, and make every workout feel like
-              play.
+              Real cardio, built like a game. Your camera reads every jump, duck and dodge — no
+              treadmill, no equipment.
             </Text>
           </View>
 
           <View style={styles.footer}>
             <GradientButton
-              label="GET STARTED"
+              label="Start training"
               accent="lime"
               onPress={() => router.push('/(onboarding)/attribution')}
               style={styles.primaryButton}
@@ -83,18 +100,32 @@ const styles = StyleSheet.create({
   },
   wordmark: {
     minHeight: 32,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 7,
     paddingHorizontal: spacing.lg,
+  },
+  // The mascot rides the wordmark as a brand mark. At this size it reads as a
+  // logo glyph, which is the whole point of demoting it off the hero.
+  wordmarkFox: {
+    marginTop: -2,
   },
   wordmarkText: {
     color: colors.text,
-    fontSize: 18,
-    fontWeight: font.black,
-    letterSpacing: -0.35,
+    fontSize: 15,
+    fontWeight: font.heavy,
+    letterSpacing: 2.2,
+    textTransform: 'uppercase',
   },
   scrollContent: {
     flexGrow: 1,
+  },
+  hero: {
+    marginHorizontal: spacing.lg,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
   },
   content: {
     flex: 1,
@@ -108,21 +139,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingBottom: spacing.lg,
   },
+  eyebrow: {
+    ...type.label,
+    color: colors.lime,
+    marginBottom: spacing.sm,
+    textAlign: 'center',
+  },
   title: {
+    ...type.display,
     color: colors.text,
-    fontSize: 38,
-    fontWeight: font.black,
-    letterSpacing: -1,
-    lineHeight: 42,
     textAlign: 'center',
   },
   subtitle: {
+    ...type.body,
     color: colors.textDim,
-    fontSize: 16,
-    fontWeight: font.medium,
-    lineHeight: 23,
     marginTop: spacing.md,
-    maxWidth: 540,
+    maxWidth: 400,
     textAlign: 'center',
   },
   footer: {
@@ -157,7 +189,6 @@ const styles = StyleSheet.create({
     color: colors.lime,
     fontSize: 14,
     fontWeight: font.bold,
-    textDecorationLine: 'underline',
   },
   pressed: {
     opacity: 0.7,

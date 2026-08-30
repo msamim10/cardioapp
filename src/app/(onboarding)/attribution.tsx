@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GradientButton, OnboardingTopBar } from '@/components/ui';
 import { useOnboarding } from '@/lib/OnboardingContext';
-import { attributionOptions, type AttributionKey } from '@/lib/onboarding';
+import { attributionOptions, onboardingProgress, type AttributionKey } from '@/lib/onboarding';
 import { colors, font, radius, spacing } from '@/theme';
 
 const CHANNEL_STYLE: Record<AttributionKey, { color: string; background: string }> = {
@@ -12,8 +12,8 @@ const CHANNEL_STYLE: Record<AttributionKey, { color: string; background: string 
   tiktok: { color: '#FFFFFF', background: 'rgba(37,244,238,0.11)' },
   twitter: { color: '#FFFFFF', background: 'rgba(255,255,255,0.08)' },
   appstore: { color: '#0D96F6', background: 'rgba(13,150,246,0.13)' },
-  friends: { color: colors.lime, background: 'rgba(198,255,61,0.10)' },
-  other: { color: colors.textDim, background: 'rgba(160,160,176,0.09)' },
+  friends: { color: colors.lime, background: 'rgba(215,255,62,0.10)' },
+  other: { color: colors.textDim, background: 'rgba(155,161,166,0.09)' },
 };
 
 export default function AttributionScreen() {
@@ -25,7 +25,7 @@ export default function AttributionScreen() {
 
   return (
     <View style={styles.root}>
-      <OnboardingTopBar progress={0.15} topInset={insets.top} onBack={() => router.back()} />
+      <OnboardingTopBar progress={onboardingProgress('attribution')} topInset={insets.top} onBack={() => router.back()} />
 
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}
@@ -119,5 +119,5 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   disabled: { opacity: 0.4 },
-  pressed: { opacity: 0.9, transform: [{ scale: 0.99 }] },
+  pressed: { opacity: 0.72 },
 });

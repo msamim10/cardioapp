@@ -16,9 +16,9 @@ const LEVEL_SEGMENTS = 15;
 const CHART_HEIGHT = 142;
 
 const METRICS = {
-  calories: { color: colors.orange, tint: 'rgba(255,138,61,0.13)' },
-  minutes: { color: colors.cyan, tint: 'rgba(69,224,255,0.11)' },
-  movement: { color: colors.violet, tint: 'rgba(139,92,255,0.14)' },
+  calories: { color: colors.orange, tint: 'rgba(255,106,43,0.13)' },
+  minutes: { color: colors.cyan, tint: 'rgba(61,197,240,0.11)' },
+  movement: { color: colors.violet, tint: 'rgba(91,108,255,0.14)' },
   runs: { color: colors.text, tint: 'rgba(255,255,255,0.07)' },
 } as const;
 
@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: 31, lineHeight: 36, fontWeight: font.black, letterSpacing: -0.8, marginTop: 1 },
   headerMark: { width: 38, height: 38, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.borderStrong, alignItems: 'center', justifyContent: 'center' },
   headerMarkInner: { width: 9, height: 9, borderRadius: radius.pill, backgroundColor: colors.lime, shadowColor: colors.lime, shadowOpacity: 0.6, shadowRadius: 8 },
-  levelHero: { minHeight: 230, flexDirection: 'row', alignItems: 'center', overflow: 'hidden', padding: spacing.lg, borderRadius: radius.xl, borderWidth: 1, borderColor: 'rgba(139,92,255,0.28)' },
+  levelHero: { minHeight: 230, flexDirection: 'row', alignItems: 'center', overflow: 'hidden', padding: spacing.lg, borderRadius: radius.xl, borderWidth: 1, borderColor: 'rgba(91,108,255,0.28)' },
   orbit: { width: 154, height: 154, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   orbitInner: { width: 108, height: 108, borderRadius: 54, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(6,6,12,0.72)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   levelNumeral: { maxWidth: 86, color: colors.text, fontSize: 55, lineHeight: 59, fontWeight: font.black, letterSpacing: -2.5 },
@@ -459,7 +459,7 @@ const styles = StyleSheet.create({
   bar: { width: '58%', minWidth: 9, maxWidth: 24, borderTopLeftRadius: 7, borderTopRightRadius: 7, borderBottomLeftRadius: 3, borderBottomRightRadius: 3 },
   todayValue: { color: colors.orange, fontSize: 8, fontWeight: font.black, marginBottom: 4 },
   dayMarker: { width: 27, height: 27, marginTop: 7, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
-  dayMarkerToday: { borderWidth: 1, borderColor: colors.lime, backgroundColor: 'rgba(198,255,61,0.08)' },
+  dayMarkerToday: { borderWidth: 1, borderColor: colors.lime, backgroundColor: 'rgba(215,255,62,0.08)' },
   weekday: { color: colors.textFaint, fontSize: 10, fontWeight: font.bold },
   weekdayToday: { color: colors.text },
   emptyState: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border },
@@ -468,7 +468,7 @@ const styles = StyleSheet.create({
   emptyTitle: { color: colors.text, fontSize: 13, fontWeight: font.bold },
   emptyText: { color: colors.textFaint, fontSize: 11, lineHeight: 15, fontWeight: font.medium, marginTop: 2 },
   lifetimeStack: { gap: spacing.sm },
-  calorieCard: { minHeight: 122, flexDirection: 'row', alignItems: 'center', overflow: 'hidden', padding: spacing.lg, borderRadius: radius.lg, backgroundColor: colors.bgElevated, borderWidth: 1, borderColor: 'rgba(255,138,61,0.18)' },
+  calorieCard: { minHeight: 122, flexDirection: 'row', alignItems: 'center', overflow: 'hidden', padding: spacing.lg, borderRadius: radius.lg, backgroundColor: colors.bgElevated, borderWidth: 1, borderColor: 'rgba(255,106,43,0.18)' },
   metricIcon: { width: 46, height: 46, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   calorieCopy: { flex: 1, minWidth: 0, marginLeft: spacing.md },
   metricKicker: { color: colors.textFaint, fontSize: 9, fontWeight: font.black, letterSpacing: 1.25 },

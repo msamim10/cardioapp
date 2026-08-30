@@ -196,6 +196,80 @@ export async function getCurrentOffering(): Promise<PurchasesOffering | null> {
   }
 }
 
+/** Why the hosted RevenueCat UI cannot be presented right now. */
+export type PurchasesUnreadyReason =
+  | 'unconfigured'
+  | 'native_module_missing'
+  | 'native_ui_module_missing'
+  | 'configure_failed'
+  | 'no_current_offering';
+
+export type PurchasesReadiness =
+  | { ready: true }
+  | { ready: false; reason: PurchasesUnreadyReason };
+
+/** How long to keep waiting for the current offering to arrive over the network. */
+const OFFERING_READY_TIMEOUT_MS = 8_000;
+const OFFERING_POLL_INTERVAL_MS = 400;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Whether `offerings.current` resolves, quietly — this is polled, so it can't log. */
+async function hasCurrentOffering(): Promise<boolean> {
+  const Purchases = getPurchases();
+  if (!Purchases) return false;
+  try {
+    const offerings = await Purchases.getOfferings();
+    return (offerings.current ?? null) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Await everything the hosted Paywall UI needs, in order: a real key, both native
+ * modules, a completed `configure`, and a current offering actually fetched from
+ * RevenueCat.
+ *
+ * The UI resolves its paywall from the current offering, so presenting before
+ * offerings land produces an error result rather than a paywall — which is why
+ * this waits for the fetch instead of assuming a fixed delay is long enough.
+ * Returning a specific reason (rather than a bare boolean) is what lets callers
+ * log something actionable instead of silently degrading to custom UI.
+ */
+export async function ensurePurchasesReady(
+  timeoutMs = OFFERING_READY_TIMEOUT_MS
+): Promise<PurchasesReadiness> {
+  if (!isRevenueCatConfigured || !revenueCatApiKey) {
+    return { ready: false, reason: 'unconfigured' };
+  }
+  if (!getPurchases()) return { ready: false, reason: 'native_module_missing' };
+  if (!(await configurePurchases())) return { ready: false, reason: 'configure_failed' };
+  if (!getPurchasesUI()) return { ready: false, reason: 'native_ui_module_missing' };
+
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await hasCurrentOffering()) return { ready: true };
+    if (Date.now() >= deadline) return { ready: false, reason: 'no_current_offering' };
+    await sleep(OFFERING_POLL_INTERVAL_MS);
+  }
+}
+
+/** Human-readable cause for an unready state, for logs the user has to act on. */
+export function describePurchasesUnready(reason: PurchasesUnreadyReason): string {
+  switch (reason) {
+    case 'unconfigured':
+      return 'no real RevenueCat API key for this platform (check EXPO_PUBLIC_REVENUECAT_* env vars)';
+    case 'native_module_missing':
+    case 'native_ui_module_missing':
+      return 'the react-native-purchases native module is absent — Expo Go and web cannot present the hosted paywall, use a development build';
+    case 'configure_failed':
+      return 'Purchases.configure() failed — see the preceding [purchases] configure warning (an Expo Go run needs a development build, or a test_ Test Store key)';
+    case 'no_current_offering':
+      return 'RevenueCat returned no current offering — check that an offering is marked Current in the dashboard and has a paywall attached';
+  }
+}
+
 /** The three plan tiers CardioSurf Pro is sold as. */
 export type PlanKey = 'lifetime' | 'yearly' | 'monthly';
 

@@ -2,128 +2,124 @@ export const SHOWCASE_MEDIA_ASPECT_RATIO = 9 / 16;
 
 export type ShowcasePreviewStatus = 'loading' | 'ready' | 'error';
 
-export type Rect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-export type ShowcaseGridLayout = {
-  columns: number;
-  rows: number;
-  tileWidth: number;
-  tileHeight: number;
-  gap: number;
-  contentWidth: number;
-  contentHeight: number;
+export type ShowcaseCarouselLayout = {
+  cardWidth: number;
+  cardHeight: number;
+  gutter: number;
+  /** Width of one snap cell: the card plus one gutter. Also the snap interval. */
+  itemWidth: number;
+  /** Content padding that parks the snapped card dead centre in the viewport. */
+  sidePadding: number;
+  /** Visible width of each neighbouring card once a card is snapped. */
+  peek: number;
 };
 
 /**
- * A "wall of players" grid. Tiles are laid out in a fixed 3 columns and sized to
- * fill the available area, clamped between square and portrait so the grid reads
- * as many tiny simultaneous clips without clipping on short phones. With 12
- * clips this yields a clean 4 rows × 3 columns (no orphan/partial row), which
- * fills a tall phone's vertical space better than a wide 4-across layout.
+ * Neighbours must always show. The peek is what tells the user the reel keeps
+ * going, which is the only thing left carrying the "lots of people are doing
+ * this" signal now that the tile wall is gone.
  */
-export function getShowcaseGridLayout(
+const MIN_PEEK = 26;
+const MAX_WIDTH_FRACTION = 0.82;
+
+/**
+ * One large card at a time, centred, with both neighbours peeking.
+ *
+ * Cards keep the clips' native 9:16 framing rather than cropping to a squarer
+ * card, because these are full-body shots and a vertical crop takes heads and
+ * feet off. On a tall phone that makes height the binding constraint, which in
+ * turn gives a generous peek for free.
+ *
+ * `itemWidth` is the snap interval, and `sidePadding` is derived from it, so
+ * snapping to a multiple of the interval centres card N exactly — including the
+ * first and last, whose scroll extents land precisely on 0 and (N-1)·interval.
+ */
+export function getShowcaseCarouselLayout(
   availableWidth: number,
   availableHeight: number,
-  tileCount: number,
-  gap = 8,
-): ShowcaseGridLayout {
-  if (availableWidth <= 0 || tileCount <= 0) {
-    return { columns: 0, rows: 0, tileWidth: 0, tileHeight: 0, gap, contentWidth: 0, contentHeight: 0 };
+  gutter = 12,
+): ShowcaseCarouselLayout {
+  if (availableWidth <= 0 || availableHeight <= 0) {
+    return { cardWidth: 0, cardHeight: 0, gutter, itemWidth: 0, sidePadding: 0, peek: 0 };
   }
 
-  const columns = 3;
-  const rows = Math.ceil(tileCount / columns);
-  const tileWidth = Math.floor((availableWidth - gap * (columns - 1)) / columns);
-
-  // Prefer filling the available height, but keep every tile between square and
-  // a gentle portrait so 9:16 clips (contentFit: cover) never distort or clip.
-  const minTileHeight = tileWidth;
-  const maxTileHeight = Math.round(tileWidth * 1.5);
-  const fitHeight =
-    availableHeight > 0 ? Math.floor((availableHeight - gap * (rows - 1)) / rows) : maxTileHeight;
-  const tileHeight = Math.min(Math.max(fitHeight, minTileHeight), maxTileHeight);
+  const heightCapped = availableHeight * SHOWCASE_MEDIA_ASPECT_RATIO;
+  const widthCapped = availableWidth * MAX_WIDTH_FRACTION;
+  const peekCapped = availableWidth - 2 * (MIN_PEEK + gutter);
+  const cardWidth = Math.floor(Math.max(0, Math.min(heightCapped, widthCapped, peekCapped)));
+  const cardHeight = Math.floor(cardWidth / SHOWCASE_MEDIA_ASPECT_RATIO);
+  const itemWidth = cardWidth + gutter;
 
   return {
-    columns,
-    rows,
-    tileWidth: Math.max(0, tileWidth),
-    tileHeight: Math.max(0, tileHeight),
-    gap,
-    contentWidth: columns * tileWidth + gap * (columns - 1),
-    contentHeight: rows * tileHeight + gap * (rows - 1),
+    cardWidth,
+    cardHeight,
+    gutter,
+    itemWidth,
+    sidePadding: Math.max(0, (availableWidth - itemWidth) / 2),
+    peek: Math.max(0, (availableWidth - cardWidth) / 2 - gutter),
   };
 }
 
-/** Row/column and pixel offset of a tile within the grid content box. */
-export function getTilePosition(
-  index: number,
-  layout: Pick<ShowcaseGridLayout, 'columns' | 'tileWidth' | 'tileHeight' | 'gap'>,
-): { row: number; col: number; x: number; y: number } {
-  const columns = Math.max(1, layout.columns);
-  const col = index % columns;
-  const row = Math.floor(index / columns);
-  return {
-    row,
-    col,
-    x: col * (layout.tileWidth + layout.gap),
-    y: row * (layout.tileHeight + layout.gap),
-  };
+/** Scroll offset that centres a card. Feeds `getItemLayout`. */
+export function getCarouselItemOffset(index: number, itemWidth: number): number {
+  return index * itemWidth;
 }
 
 /**
- * Concurrency cap. Many simultaneous expo-video decoders crash on device, so
- * only a spread-out subset of tiles ever mount a real player; the rest stay on
- * their poster image. The selection is evenly distributed across the wall (and
- * always includes tile 0, the hero's landing slot) so the grid still reads as
- * "lots of people playing" rather than a clustered few.
+ * Which cards keep a mounted native player. Only the settled card and its
+ * immediate neighbours, so the next card is already buffered when the user
+ * lands on it and the screen never holds more than three decoders.
+ *
+ * This is driven by the *settled* index rather than the live one so that no
+ * native player is created or released while a finger is on the screen.
  */
-export function selectPlayingTileIndices(tileCount: number, cap: number): number[] {
-  if (tileCount <= 0 || cap <= 0) return [];
-  const count = Math.min(cap, tileCount);
-  const picked = new Set<number>();
-  for (let i = 0; i < count; i += 1) {
-    picked.add(Math.min(tileCount - 1, Math.round((i * tileCount) / count)));
+export function selectMountedIndices(center: number, count: number, radius = 1): number[] {
+  if (count <= 0) return [];
+  const clamped = Math.min(Math.max(center, 0), count - 1);
+  const indices: number[] = [];
+  for (let index = clamped - radius; index <= clamped + radius; index += 1) {
+    if (index >= 0 && index < count) indices.push(index);
   }
-  // Rounding collisions can leave us below the cap; backfill with the next free
-  // slots so we always run exactly `count` decoders.
-  for (let i = 0; picked.size < count && i < tileCount; i += 1) {
-    picked.add(i);
-  }
-  return Array.from(picked).sort((a, b) => a - b);
+  return indices;
 }
 
 /**
- * Transform that makes a view (laid out at `target`) visually appear at
- * `appearAs`. Used for both the hero shrink-into-grid intro and the
- * tap-to-expand zoom, driven by a single interpolated progress value.
+ * Playback gate: only cards the viewability config reports as on screen play.
+ * Mid-swipe two cards clear the threshold at once, which is wanted — the
+ * incoming card is already moving as it slides in — but the result is capped so
+ * a fast fling can never spin up more than `max` simultaneous decoders.
  */
-export function getRectAppearanceTransform(
-  target: Rect,
-  appearAs: Rect,
-): { scaleX: number; scaleY: number; translateX: number; translateY: number } {
-  const scaleX = target.width > 0 ? appearAs.width / target.width : 1;
-  const scaleY = target.height > 0 ? appearAs.height / target.height : 1;
-  const targetCx = target.x + target.width / 2;
-  const targetCy = target.y + target.height / 2;
-  const appearCx = appearAs.x + appearAs.width / 2;
-  const appearCy = appearAs.y + appearAs.height / 2;
-  return {
-    scaleX,
-    scaleY,
-    translateX: appearCx - targetCx,
-    translateY: appearCy - targetCy,
-  };
+export function selectPlayingIndices(viewable: number[], active: number, max = 2): number[] {
+  if (viewable.length === 0) return [];
+  const nearestFirst = Array.from(new Set(viewable)).sort(
+    (a, b) => Math.abs(a - active) - Math.abs(b - active) || a - b,
+  );
+  return nearestFirst.slice(0, Math.max(1, max)).sort((a, b) => a - b);
 }
 
 /**
- * Every tile owns a stable player and plays as soon as its source is ready and
- * the screen lifecycle (focused + foreground, and not eclipsed by an expanded
- * tile) permits it. Playback never depends on scroll position.
+ * The card that owns the counter and the emphasis. Because two cards straddle
+ * the visibility threshold in the middle of every swipe, holding the previous
+ * card until it actually leaves keeps the counter from flickering back and
+ * forth within a single gesture.
+ */
+export function resolveActiveIndex(viewable: number[], previous: number): number {
+  if (viewable.length === 0) return previous;
+  if (viewable.includes(previous)) return previous;
+  return viewable.reduce((best, index) =>
+    Math.abs(index - previous) < Math.abs(best - previous) ? index : best,
+  );
+}
+
+/** Order-insensitive compare, so a viewability tick that changes nothing does not re-render. */
+export function sameIndices(a: readonly number[], b: readonly number[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+}
+
+/**
+ * A card plays as soon as its source is ready and the screen lifecycle
+ * (focused + foregrounded) plus its own visibility permit it.
  */
 export function shouldPreviewPlay(
   status: ShowcasePreviewStatus,
@@ -133,9 +129,9 @@ export function shouldPreviewPlay(
 }
 
 /**
- * Generation guard for a tile's async source load: an in-flight replaceAsync
+ * Generation guard for a card's async source load: an in-flight replaceAsync
  * must never touch its native player after unmount or after a newer load
- * (retry / source swap) superseded it.
+ * superseded it.
  */
 export function isPreviewLoadCurrent(
   mounted: boolean,

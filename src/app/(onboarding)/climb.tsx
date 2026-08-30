@@ -12,7 +12,8 @@ import {
 } from '@/components/ui';
 import { useProgress } from '@/lib/ProgressContext';
 import { sampleRivalHandles } from '@/lib/username';
-import { colors, font, spacing } from '@/theme';
+import { onboardingProgress } from '@/lib/onboarding';
+import { colors, spacing, type } from '@/theme';
 
 // Aspirational preview values for the finale. Fictional rivals only. // simulated until backend
 const PREVIEW_XP = [9120, 8430, 7980, 7210, 6540, 5890, 5230];
@@ -39,10 +40,12 @@ export default function ClimbScreen() {
 
   return (
     <View style={styles.root}>
-      <OnboardingTopBar progress={0.5} topInset={insets.top} onBack={() => router.back()} />
+      <OnboardingTopBar progress={onboardingProgress('climb')} topInset={insets.top} onBack={() => router.back()} />
       <View style={styles.content}>
         <Text style={styles.title}>Climb the leaderboard</Text>
-        <Text style={styles.sub}>Every run pushes you up the ranks. Here&apos;s the view from the top.</Text>
+        <Text style={styles.sub}>
+          Every session moves you up the ranks. Here&apos;s the view from the top.
+        </Text>
 
         <View style={styles.board}>
           <LeaderboardClimb
@@ -55,8 +58,7 @@ export default function ClimbScreen() {
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
         <GradientButton
-          label="LET'S GO"
-          icon="rocket"
+          label="Continue"
           accent="lime"
           onPress={() => router.push('/(onboarding)/goal')}
         />
@@ -70,8 +72,8 @@ export default function ClimbScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   content: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  title: { color: colors.text, fontSize: 32, fontWeight: font.black, letterSpacing: -0.7, lineHeight: 37 },
-  sub: { color: colors.textDim, fontSize: 15, fontWeight: font.medium, marginTop: spacing.sm, lineHeight: 21 },
+  title: { ...type.h1, color: colors.text, fontSize: 32, lineHeight: 36 },
+  sub: { ...type.body, color: colors.textDim, marginTop: spacing.sm },
   board: { marginTop: spacing.xl },
   footer: {
     paddingHorizontal: spacing.lg,

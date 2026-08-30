@@ -154,9 +154,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radius.lg,
-    backgroundColor: 'rgba(198,255,61,0.1)',
+    backgroundColor: 'rgba(215,255,62,0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(198,255,61,0.22)',
+    borderColor: 'rgba(215,255,62,0.22)',
   },
   title: {
     color: colors.text,
@@ -221,5 +221,5 @@ const styles = StyleSheet.create({
     letterSpacing: 0.35,
   },
   disabled: { opacity: 0.68 },
-  pressed: { opacity: 0.8, transform: [{ scale: 0.99 }] },
+  pressed: { opacity: 0.72 },
 });

@@ -8,23 +8,28 @@
  * rule persistently across launches.
  *
  * The rungs MUST be ordered the way users actually move through CardioSurf.
- * The paywall is trial-gated (hard) and sits at the end of onboarding, so a new
- * user cannot finish a workout before starting a free trial. A completed run is
- * therefore a LATER and more valuable signal than the paywall or the trial —
- * runs during the 3-day trial are the best predictor of trial → paid conversion,
- * which makes 5 and 6 the states worth optimizing towards. Ordering runs before
- * the paywall (as an earlier version of this schema did) made those rungs
- * permanently unreachable, because the paywall always raised the value first.
+ * The paywall is a hard gate presented as the last step of onboarding, right
+ * after account creation, so the offer is now seen BEFORE the camera
+ * calibration rather than after it: calibration and runs are only reachable
+ * once the entitlement is active. Calibration therefore sits above the paywall
+ * and the trial, and completed runs above that — runs during the 3-day trial
+ * are the best predictor of trial → paid conversion, which makes 5 and 6 the
+ * states worth optimizing towards.
  *
  * Ladder (0–7 of the available 0–63):
  *   0  install only, no activity
- *   1  opened / onboarding started, calibration not complete
- *   2  calibration complete
- *   3  paywall viewed
- *   4  trial started
+ *   1  opened / registered, offer not yet seen
+ *   2  paywall viewed
+ *   3  trial started
+ *   4  calibration complete
  *   5  one run completed
  *   6  two or more runs completed
  *   7  paid conversion
+ *
+ * Monthly has no introductory offer, so a monthly buyer jumps straight from 2
+ * to 7 and their calibration/run rungs are never reported. That is the intended
+ * trade-off: a paid conversion is the most valuable signal available, and Apple
+ * keeps only the highest value.
  *
  * Re-entrant events are safe: the paywall can be viewed again (or a trial
  * restored) after runs have been logged, and `raiseConversionValue` drops those
@@ -44,10 +49,10 @@ import { raiseConversionValue } from './funnelStore';
 
 export const CONVERSION_STEPS = {
   install: 0,
-  opened_no_calibration: 1,
-  calibration_complete: 2,
-  paywall_viewed: 3,
-  trial_started: 4,
+  opened_offer_unseen: 1,
+  paywall_viewed: 2,
+  trial_started: 3,
+  calibration_complete: 4,
   one_run: 5,
   two_plus_runs: 6,
   paid_conversion: 7,
@@ -58,10 +63,10 @@ export type ConversionStepName = keyof typeof CONVERSION_STEPS;
 /** The ladder in ascending order, with labels for the debug funnel screen. */
 export const CONVERSION_LADDER: readonly { value: number; label: string }[] = [
   { value: CONVERSION_STEPS.install, label: 'Install only' },
-  { value: CONVERSION_STEPS.opened_no_calibration, label: 'Opened, not calibrated' },
-  { value: CONVERSION_STEPS.calibration_complete, label: 'Calibration complete' },
+  { value: CONVERSION_STEPS.opened_offer_unseen, label: 'Opened, offer not seen' },
   { value: CONVERSION_STEPS.paywall_viewed, label: 'Paywall viewed' },
   { value: CONVERSION_STEPS.trial_started, label: 'Trial started' },
+  { value: CONVERSION_STEPS.calibration_complete, label: 'Calibration complete' },
   { value: CONVERSION_STEPS.one_run, label: 'One run completed' },
   { value: CONVERSION_STEPS.two_plus_runs, label: 'Two or more runs' },
   { value: CONVERSION_STEPS.paid_conversion, label: 'Paid conversion' },

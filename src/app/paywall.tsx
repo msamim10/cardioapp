@@ -14,7 +14,7 @@ import {
   type PlanKey,
 } from '@/lib/purchases';
 import { PRIVACY_POLICY_URL, TERMS_URL, openLegalUrl } from '@/lib/legal';
-import { colors, font, gradients, radius, spacing } from '@/theme';
+import { colors, font, gradients, metric, radius, spacing, type } from '@/theme';
 
 /**
  * Dismissible subscription gate (fallback when hosted RevenueCat UI unavailable).
@@ -27,7 +27,11 @@ import { colors, font, gradients, radius, spacing } from '@/theme';
 type Plan = {
   id: PlanKey;
   title: string;
+  /** Explicit subscription length, required on-screen by Guideline 3.1.2. */
+  length: string;
   cadence: string;
+  /** Adverb form of `cadence`, for sentence-shaped renewal copy. */
+  renewal: string;
 };
 
 // Prices, per-week sub-copy, savings badge, and trial length are ALL derived
@@ -35,21 +39,24 @@ type Plan = {
 // dollar amounts here: the App Store prices changed (e.g. yearly is now $69.99),
 // and flashing a stale number is worse than briefly showing a loading state.
 const PLANS: Plan[] = [
-  { id: 'yearly', title: 'Yearly', cadence: 'per year' },
-  { id: 'monthly', title: 'Monthly', cadence: 'per month' },
+  { id: 'yearly', title: 'Yearly', length: '12 months', cadence: 'per year', renewal: 'yearly' },
+  { id: 'monthly', title: 'Monthly', length: '1 month', cadence: 'per month', renewal: 'monthly' },
 ];
 
 type LivePrice = { price: string; sub?: string; trial?: string; amount?: number };
 
-// Fallback trial length when the live RevenueCat intro offer isn't loaded yet.
-// Must match the intro offer configured in App Store Connect (currently 3 days).
-const DEFAULT_TRIAL_LABEL = '3-day';
+// Fallback trial length, used only until the live intro offer resolves. The two
+// products are ASYMMETRIC in App Store Connect: yearly carries a 3-day
+// introductory free trial, monthly has NONE and bills immediately. Claiming a
+// trial on a plan that has no intro offer is a false subscription term, so this
+// map is keyed per plan and monthly is deliberately absent.
+const FALLBACK_TRIAL_LABEL: Partial<Record<PlanKey, string>> = { yearly: '3-day' };
 
 const VALUE_STACK: { icon: keyof typeof Ionicons.glyphMap; title: string; sub: string }[] = [
   { icon: 'infinite', title: 'Every world unlocked', sub: 'All levels — Neon Rails, Red Light Rush, Wild City & more' },
-  { icon: 'sparkles', title: 'New worlds every week', sub: 'Fresh video levels dropped weekly' },
-  { icon: 'flash', title: 'No limits', sub: 'Unlimited runs, no daily caps or ads' },
-  { icon: 'trophy', title: 'Full rewards', sub: 'Every badge, coin multiplier & leaderboard' },
+  { icon: 'layers', title: 'New worlds every week', sub: 'Fresh video levels added weekly' },
+  { icon: 'flash', title: 'Unlimited training', sub: 'No daily caps, no ads' },
+  { icon: 'trophy', title: 'Full progression', sub: 'Every badge, coin multiplier & leaderboard' },
 ];
 
 export default function PaywallScreen() {
@@ -85,8 +92,11 @@ export default function PaywallScreen() {
     return Array.isArray(value) ? value[0] : value;
   };
 
+  // A subscription gate must always have a reachable way out, even when it was
+  // opened as the first route of the session.
   const dismiss = () => {
-    router.back();
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)');
   };
 
   const finishGranted = () => {
@@ -148,11 +158,31 @@ export default function PaywallScreen() {
   // UI can render a skeleton instead of a stale/incorrect hardcoded amount.
   const priceFor = (plan: Plan): string | null => livePrices[plan.id]?.price ?? null;
   const subFor = (plan: Plan): string | null => livePrices[plan.id]?.sub ?? null;
+  // Trial length is read from the live intro offer; the per-plan fallback only
+  // supplies wording before the offering resolves, and never invents a trial for
+  // a plan that doesn't have one.
+  const trialFor = (plan: Plan): string | null =>
+    livePrices[plan.id]?.trial ?? (pricesResolved ? null : FALLBACK_TRIAL_LABEL[plan.id] ?? null);
   const selectedPlan = PLANS.find((p) => p.id === selected);
-  // Trial length is read from the live intro offer; fall back to the ASC-configured
-  // length only for wording (this is not a price, so it can't flash a wrong amount).
-  const trialLabel =
-    (selectedPlan ? livePrices[selectedPlan.id]?.trial : undefined) ?? DEFAULT_TRIAL_LABEL;
+  const selectedTrial = selectedPlan ? trialFor(selectedPlan) : null;
+  const selectedPrice = selectedPlan ? priceFor(selectedPlan) : null;
+
+  // Guideline 3.1.2 wants the length, the price per period, and — where an
+  // introductory offer exists — that it auto-converts and to what. The amount is
+  // only ever named once the live Offering resolves it, so the copy degrades to
+  // period-only wording rather than risking a stale figure.
+  const pricePerPeriod =
+    selectedPrice && selectedPlan ? `${selectedPrice} ${selectedPlan.cadence}` : null;
+  const summaryLine = selectedTrial
+    ? `${selectedTrial} free trial, then ${pricePerPeriod ?? `billed ${selectedPlan?.renewal}`}`
+    : `${pricePerPeriod ?? `Billed ${selectedPlan?.renewal}`}, charged today`;
+  const termsLine = selectedTrial
+    ? `Your ${selectedTrial} free trial converts to a paid ${selectedPlan?.title} subscription${
+        pricePerPeriod ? ` at ${pricePerPeriod}` : ''
+      } unless you cancel at least 24 hours before it ends. Billed to your Apple ID and renews automatically. Manage or cancel anytime in your App Store account settings.`
+    : `Your ${selectedPlan?.title} subscription has no free trial and is billed to your Apple ID today${
+        pricePerPeriod ? ` at ${pricePerPeriod}` : ''
+      }. It renews automatically unless canceled at least 24 hours before the end of the current period. Manage or cancel anytime in your App Store account settings.`;
 
   // Accurate savings badge computed from live amounts (yearly vs 12× monthly).
   // Hidden until both live prices are known so we never assert a fabricated %.
@@ -218,10 +248,12 @@ export default function PaywallScreen() {
           <Ionicons name="close" size={22} color={colors.textDim} />
         </Pressable>
 
-        <LinearGradient colors={gradients.violet} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-          <Text style={styles.heroEyebrow}>CARDIOSURF PRO</Text>
+        <LinearGradient colors={gradients.graphite} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={styles.hero}>
+          <Text style={styles.heroEyebrow}>CardioSurf Pro</Text>
           <Text style={styles.heroTitle}>Unlock every world</Text>
-          <Text style={styles.heroSub}>Turn every workout into a game you can&apos;t put down.</Text>
+          <Text style={styles.heroSub}>
+            Full-body cardio you&apos;ll actually finish. Every world, every week.
+          </Text>
         </LinearGradient>
 
         <View style={styles.valueStack}>
@@ -244,6 +276,7 @@ export default function PaywallScreen() {
             const price = priceFor(plan);
             const sub = subFor(plan);
             const badge = badgeFor(plan);
+            const trial = trialFor(plan);
             return (
               <Pressable
                 key={plan.id}
@@ -263,8 +296,10 @@ export default function PaywallScreen() {
                   <View style={[styles.radio, active && styles.radioActive]}>
                     {active ? <Ionicons name="checkmark" size={14} color={colors.black} /> : null}
                   </View>
-                  <View>
-                    <Text style={styles.planTitle}>{plan.title}</Text>
+                  <View style={styles.planCopy}>
+                    <Text style={styles.planTitle}>
+                      {plan.title} <Text style={styles.planLength}>· {plan.length}</Text>
+                    </Text>
                     <View style={styles.priceRow}>
                       {price ? (
                         <Text style={styles.planPrice}>
@@ -278,6 +313,11 @@ export default function PaywallScreen() {
                         <View style={styles.priceSkeleton} />
                       )}
                     </View>
+                    <Text style={trial ? styles.planTrial : styles.planNoTrial}>
+                      {trial
+                        ? `${trial} free trial, then billed ${plan.renewal}`
+                        : `No free trial — billed ${plan.renewal} from today`}
+                    </Text>
                   </View>
                 </View>
                 {sub ? (
@@ -296,27 +336,20 @@ export default function PaywallScreen() {
         style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}
       >
         <View style={styles.trialRow}>
-          <Ionicons name="lock-open" size={14} color={colors.textDim} />
-          <Text style={styles.trialText}>
-            {(() => {
-              const selectedPrice = selectedPlan ? priceFor(selectedPlan) : null;
-              // Only assert "then <price>" once the live price is known; otherwise
-              // show just the trial line so we never render a stale amount.
-              return selectedPrice
-                ? `${trialLabel} free trial, then ${selectedPrice}`
-                : `${trialLabel} free trial`;
-            })()}
-          </Text>
+          <Ionicons name={selectedTrial ? 'lock-open' : 'card-outline'} size={14} color={colors.textDim} />
+          <Text style={styles.trialText}>{summaryLine}</Text>
         </View>
         <GradientButton
-          label={`START ${trialLabel.toUpperCase()} FREE TRIAL`}
-          icon="rocket"
+          label={
+            selectedTrial
+              ? `START ${selectedTrial.toUpperCase()} FREE TRIAL`
+              : `SUBSCRIBE ${(selectedPlan?.title ?? '').toUpperCase()}`
+          }
+          icon={selectedTrial ? 'arrow-forward' : 'card'}
           accent="lime"
           onPress={handlePurchase}
         />
-        <Text style={styles.disclosure}>
-          Billed to your Apple ID. Your subscription renews automatically unless canceled at least 24 hours before the end of the current period. Manage or cancel anytime in your App Store account settings.
-        </Text>
+        <Text style={styles.disclosure}>{termsLine}</Text>
         <View style={styles.linksRow}>
           <Pressable onPress={handleRestore} hitSlop={8}>
             <Text style={styles.link}>Restore Purchases</Text>
@@ -343,22 +376,35 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   content: { paddingHorizontal: spacing.lg, gap: spacing.lg },
   close: { alignSelf: 'flex-end', width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  hero: { borderRadius: radius.xl, padding: spacing.xl, marginTop: -spacing.sm },
-  heroEyebrow: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: font.black, letterSpacing: 2 },
-  heroTitle: { color: colors.white, fontSize: 32, fontWeight: font.black, letterSpacing: -0.6, marginTop: 4 },
-  heroSub: { color: 'rgba(255,255,255,0.85)', fontSize: 15, fontWeight: font.medium, marginTop: spacing.sm, lineHeight: 21 },
+  hero: {
+    borderRadius: radius.xl,
+    padding: spacing.xl,
+    marginTop: -spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  heroEyebrow: { ...type.label, color: colors.lime, letterSpacing: 2 },
+  heroTitle: { ...type.h1, color: colors.white, fontSize: 33, lineHeight: 36, marginTop: 6 },
+  heroSub: {
+    ...type.body,
+    color: 'rgba(255,255,255,0.78)',
+    marginTop: spacing.sm,
+    maxWidth: 330,
+  },
   valueStack: { gap: spacing.lg },
   valueRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   valueIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
+    width: 42,
+    height: 42,
+    borderRadius: radius.sm,
     backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  valueTitle: { color: colors.text, fontSize: 16, fontWeight: font.bold },
-  valueSub: { color: colors.textDim, fontSize: 13, fontWeight: font.medium, marginTop: 1 },
+  valueTitle: { ...type.h3, color: colors.text, fontSize: 16 },
+  valueSub: { ...type.bodySm, color: colors.textDim, marginTop: 1 },
   plans: { gap: spacing.md },
   plan: {
     flexDirection: 'row',
@@ -367,21 +413,22 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.border,
   },
   planActive: { borderColor: colors.lime, backgroundColor: colors.surface2 },
   planBadge: {
     position: 'absolute',
-    top: -10,
+    top: -9,
     left: spacing.lg,
     backgroundColor: colors.lime,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: radius.pill,
+    borderRadius: radius.xs,
   },
-  planBadgeText: { color: colors.black, fontSize: 10, fontWeight: font.black, letterSpacing: 0.5 },
-  planLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  planBadgeText: { ...type.micro, color: colors.black },
+  planLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexShrink: 1 },
+  planCopy: { flexShrink: 1 },
   radio: {
     width: 24,
     height: 24,
@@ -392,7 +439,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   radioActive: { backgroundColor: colors.lime, borderColor: colors.lime },
-  planTitle: { color: colors.text, fontSize: 17, fontWeight: font.black },
+  planTitle: { color: colors.text, fontSize: 17, fontWeight: font.heavy, letterSpacing: -0.3 },
+  planLength: { color: colors.textDim, fontSize: 13, fontWeight: font.medium, letterSpacing: 0 },
+  planTrial: { color: colors.lime, fontSize: 12, fontWeight: font.bold, marginTop: 3 },
+  planNoTrial: { color: colors.textFaint, fontSize: 12, fontWeight: font.semibold, marginTop: 3 },
   priceRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, minHeight: 18 },
   priceSkeleton: {
     width: 96,
@@ -406,9 +456,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     backgroundColor: colors.surface2,
   },
-  planPrice: { color: colors.text, fontSize: 14, fontWeight: font.bold },
+  planPrice: { ...metric, color: colors.text, fontSize: 14, fontWeight: font.bold },
   planCadence: { color: colors.textDim, fontSize: 13, fontWeight: font.medium },
-  perWeek: { color: colors.textDim, fontSize: 13, fontWeight: font.bold, flexShrink: 1, textAlign: 'right' },
+  perWeek: { ...metric, color: colors.textDim, fontSize: 13, fontWeight: font.bold, flexShrink: 1, textAlign: 'right' },
   footer: {
     position: 'absolute',
     left: 0,
@@ -429,7 +479,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   linksRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' },
-  link: { color: colors.textFaint, fontSize: 12, fontWeight: font.semibold },
+  link: { color: colors.textDim, fontSize: 12, fontWeight: font.semibold },
   linkDot: { color: colors.textFaint, fontSize: 12 },
-  pressed: { opacity: 0.92, transform: [{ scale: 0.99 }] },
+  pressed: { opacity: 0.72 },
 });

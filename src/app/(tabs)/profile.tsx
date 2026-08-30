@@ -1,9 +1,15 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Mascot, SectionHeader } from '@/components/ui';
 import { useAuth } from '@/lib/AuthContext';
+import {
+  loadCalibrationProfile,
+  requestCalibrationGuidance,
+  type CalibrationProfile,
+} from '@/lib/calibrationProfile';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import { useProgress } from '@/lib/ProgressContext';
 import { useSubscription } from '@/lib/SubscriptionContext';
@@ -17,7 +23,42 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { reopenWelcome } = useOnboarding();
   const { user, signOut, deleteAccount } = useAuth();
-  const { isPremium, presentCustomerCenter, presentPaywall } = useSubscription();
+  const { isPremium, presentCustomerCenter, presentPaywall, restore } = useSubscription();
+  const [restoring, setRestoring] = useState(false);
+  const [calibration, setCalibration] = useState<CalibrationProfile | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    loadCalibrationProfile()
+      .then((profile) => {
+        if (active) setCalibration(profile);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const calibrationStatus =
+    calibration === null
+      ? 'Checking…'
+      : calibration.guidanceRequested
+        ? 'Guided setup runs on your next workout'
+        : calibration.completedCount === 0
+          ? 'Runs automatically on your first workout'
+          : `Calibrated ${calibration.completedCount === 1 ? 'once' : `${calibration.completedCount} times`} · tap to redo the guided setup`;
+
+  // Calibration itself is measured every session, so this only re-arms the
+  // guided instructions for users who changed shoes, treadmill, or phone spot.
+  const handleRecalibrate = useCallback(() => {
+    requestCalibrationGuidance()
+      .then((profile) => setCalibration(profile))
+      .catch(() => {});
+    Alert.alert(
+      'Guided setup re-armed',
+      'Your next workout will walk you through camera placement and framing again.',
+    );
+  }, []);
   const {
     classData,
     longestStreak,
@@ -104,6 +145,28 @@ export default function ProfileScreen() {
     await requestSubscriptionAccess(presentPaywall, router, { ifNeeded: true });
   };
 
+  // Guideline 3.1.2 wants restore reachable from account settings, not only from
+  // inside a paywall — the path a subscriber on a new device actually looks for.
+  const handleRestore = async () => {
+    if (restoring) return;
+    setRestoring(true);
+    try {
+      const premium = await restore();
+      if (premium === true) {
+        Alert.alert('Subscription restored', 'CardioSurf Pro is active on this device.');
+      } else if (premium === null) {
+        Alert.alert(
+          'Subscriptions unavailable',
+          'Restoring needs a development build with RevenueCat configured. It\u2019s not available in Expo Go.'
+        );
+      } else {
+        Alert.alert('Nothing to restore', 'No previous purchases were found for this Apple ID.');
+      }
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   return (
     <ScrollView
       style={styles.root}
@@ -143,6 +206,21 @@ export default function ProfileScreen() {
             </View>
           ))}
         </View>
+      </View>
+
+      {/* Tracking */}
+      <View style={styles.section}>
+        <SectionHeader title="Tracking" />
+        <Pressable
+          onPress={handleRecalibrate}
+          style={({ pressed }) => [styles.settingRow, pressed && { opacity: 0.85 }]}
+        >
+          <View style={styles.settingLead}>
+            <Text style={styles.settingText}>Body tracking setup</Text>
+            <Text style={styles.settingHint}>{calibrationStatus}</Text>
+          </View>
+          <Ionicons name="refresh" size={18} color={colors.textFaint} />
+        </Pressable>
       </View>
 
       {/* Support */}
@@ -204,14 +282,26 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
           </Pressable>
         ) : (
-          <Pressable
-            onPress={handleUpgrade}
-            style={({ pressed }) => [styles.upgradeRow, pressed && { opacity: 0.85 }]}
-          >
-            <Ionicons name="sparkles" size={18} color={colors.lime} />
-            <Text style={styles.upgradeText}>Upgrade to Pro</Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.lime} />
-          </Pressable>
+          <>
+            <Pressable
+              onPress={handleUpgrade}
+              style={({ pressed }) => [styles.upgradeRow, pressed && { opacity: 0.85 }]}
+            >
+              <Ionicons name="sparkles" size={18} color={colors.lime} />
+              <Text style={styles.upgradeText}>Upgrade to Pro</Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.lime} />
+            </Pressable>
+            <Pressable
+              disabled={restoring}
+              onPress={handleRestore}
+              style={({ pressed }) => [styles.settingRow, pressed && { opacity: 0.85 }]}
+            >
+              <Text style={styles.settingText}>
+                {restoring ? 'Restoring…' : 'Restore purchases'}
+              </Text>
+              <Ionicons name="refresh" size={18} color={colors.textFaint} />
+            </Pressable>
+          </>
         )}
         <Pressable
           onPress={handleLogout}
@@ -278,6 +368,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   settingText: { color: colors.text, fontSize: 15, fontWeight: font.semibold },
+  settingLead: { flex: 1, gap: 3, paddingRight: spacing.md },
+  settingHint: { color: colors.textFaint, fontSize: 12, lineHeight: 16, fontWeight: font.medium },
   upgradeRow: {
     flexDirection: 'row',
     alignItems: 'center',

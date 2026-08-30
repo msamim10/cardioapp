@@ -64,7 +64,7 @@ function PathConnector({
           width: length,
           left: midX - length / 2,
           top: midY - CONNECTOR_THICKNESS / 2,
-          backgroundColor: lit ? 'rgba(198,255,61,0.42)' : 'rgba(255,255,255,0.10)',
+          backgroundColor: lit ? 'rgba(215,255,62,0.42)' : 'rgba(255,255,255,0.10)',
           transform: [{ rotate: `${angle}deg` }],
         },
       ]}
@@ -153,7 +153,7 @@ function PathNode({
         {current ? (
           <View style={styles.currentHalo} pointerEvents="none">
             <LinearGradient
-              colors={['rgba(198,255,61,0.38)', 'rgba(198,255,61,0.05)', 'transparent']}
+              colors={['rgba(215,255,62,0.38)', 'rgba(215,255,62,0.05)', 'transparent']}
               style={StyleSheet.absoluteFill}
             />
           </View>
@@ -319,7 +319,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: NODE_SIZE + 24,
   },
-  nodePressed: { opacity: 0.88, transform: [{ scale: 0.97 }] },
+  nodePressed: { opacity: 0.72 },
   currentHalo: {
     position: 'absolute',
     width: NODE_SIZE + 28,
@@ -339,10 +339,10 @@ const styles = StyleSheet.create({
   },
   nodeRingCurrent: {
     borderColor: colors.lime,
-    backgroundColor: 'rgba(198,255,61,0.16)',
+    backgroundColor: 'rgba(215,255,62,0.16)',
   },
   nodeRingCompleted: {
-    borderColor: 'rgba(198,255,61,0.35)',
+    borderColor: 'rgba(215,255,62,0.35)',
   },
   nodeRingLocked: {
     borderColor: colors.border,

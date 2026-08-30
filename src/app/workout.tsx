@@ -372,10 +372,10 @@ export default function WorkoutScreen() {
     return (
       <View style={[styles.root, styles.center]}>
         <StatusBar hidden />
-        <Text style={styles.fallbackEmoji}>🎬</Text>
+        <Ionicons name="videocam-off-outline" size={44} color={colors.textFaint} style={styles.fallbackIcon} />
         <Text style={styles.fallbackTitle}>Level not available yet</Text>
-        <Text style={styles.fallbackSub}>This video isn&apos;t hosted yet. Choose another run to continue.</Text>
-        <GradientButton label="GO BACK" icon="arrow-back" onPress={exitEarly} style={{ marginTop: spacing.xl, alignSelf: 'stretch' }} />
+        <Text style={styles.fallbackSub}>This video isn&apos;t hosted yet. Choose another level to continue.</Text>
+        <GradientButton label="Go back" icon="arrow-back" onPress={exitEarly} style={{ marginTop: spacing.xl, alignSelf: 'stretch' }} />
         <Pressable onPress={exitEarly} style={{ marginTop: spacing.lg }}>
           <Text style={styles.link}>Go back</Text>
         </Pressable>
@@ -521,10 +521,10 @@ export default function WorkoutScreen() {
       {/* Error / not uploaded yet */}
       {status === 'error' ? (
         <View style={styles.endOverlay}>
-          <Text style={styles.endEmoji}>🚧</Text>
+          <Ionicons name="cloud-offline-outline" size={44} color={colors.textFaint} style={styles.fallbackIcon} />
           <Text style={styles.endTitle}>Level not ready yet</Text>
-          <Text style={styles.fallbackSub}>This video is still uploading. Try Downtown Run, or check back soon.</Text>
-          <GradientButton label="BACK" icon="arrow-back" onPress={exitEarly} style={{ alignSelf: 'stretch', marginTop: spacing.lg }} />
+          <Text style={styles.fallbackSub}>This video is still uploading. Pick another level, or check back soon.</Text>
+          <GradientButton label="Back" icon="arrow-back" onPress={exitEarly} style={{ alignSelf: 'stretch', marginTop: spacing.lg }} />
         </View>
       ) : null}
 
@@ -562,7 +562,7 @@ export default function WorkoutScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.black },
   center: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl },
-  fallbackEmoji: { fontSize: 60, marginBottom: spacing.md },
+  fallbackIcon: { marginBottom: spacing.md },
   fallbackTitle: { color: colors.text, fontSize: 22, fontWeight: font.black },
   fallbackSub: { color: colors.textDim, fontSize: 14, fontWeight: font.medium, textAlign: 'center', marginTop: spacing.sm },
   link: { color: colors.lime, fontSize: 15, fontWeight: font.bold },
@@ -611,8 +611,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     backgroundColor: 'rgba(0,0,0,0.7)',
   },
-  endEmoji: { fontSize: 64 },
-  endTitle: { color: colors.white, fontSize: 26, fontWeight: font.black, marginTop: spacing.sm },
+  endTitle: {
+    color: colors.white,
+    fontSize: 26,
+    fontWeight: font.heavy,
+    letterSpacing: -0.7,
+    marginTop: spacing.sm,
+  },
   pipPlacement: {
     position: 'absolute',
     borderRadius: radius.md,

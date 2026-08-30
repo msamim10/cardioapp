@@ -17,7 +17,7 @@ export type PreflightEvent =
   | { type: 'PERMISSION_GRANTED' }
   | { type: 'CALIBRATION_PROGRESS' }
   | { type: 'CALIBRATION_READY' }
-  | { type: 'STABLE_FRAME' }
+  | { type: 'STABLE_FRAME'; countdownFrom?: number }
   | { type: 'TRACKING_LOST' }
   | { type: 'COUNTDOWN_TICK' }
   | { type: 'UNAVAILABLE' }
@@ -25,6 +25,11 @@ export type PreflightEvent =
   | { type: 'RETRY' };
 
 export const PREFLIGHT_STABLE_FRAMES = 6;
+
+export const PREFLIGHT_COUNTDOWN_SECONDS = 3;
+
+/** Returning users have already proven the framing, so the hold is shorter. */
+export const PREFLIGHT_EXPRESS_COUNTDOWN_SECONDS = 2;
 
 export const INITIAL_PREFLIGHT_STATE: PreflightState = {
   phase: 'permission',
@@ -47,7 +52,11 @@ export function reducePreflight(
       if (state.phase !== 'stabilizing') return state;
       const stableFrames = state.stableFrames + 1;
       return stableFrames >= PREFLIGHT_STABLE_FRAMES
-        ? { phase: 'countdown', stableFrames, countdown: 3 }
+        ? {
+            phase: 'countdown',
+            stableFrames,
+            countdown: event.countdownFrom ?? PREFLIGHT_COUNTDOWN_SECONDS,
+          }
         : { ...state, stableFrames };
     }
     case 'TRACKING_LOST':
@@ -56,7 +65,10 @@ export function reducePreflight(
         : state;
     case 'COUNTDOWN_TICK':
       return state.phase === 'countdown'
-        ? { ...state, countdown: Math.max(0, (state.countdown ?? 3) - 1) }
+        ? {
+            ...state,
+            countdown: Math.max(0, (state.countdown ?? PREFLIGHT_COUNTDOWN_SECONDS) - 1),
+          }
         : state;
     case 'UNAVAILABLE':
       return { phase: 'unavailable', stableFrames: 0, countdown: null };

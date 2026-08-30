@@ -34,6 +34,7 @@ export const CALIBRATION_FAILURE_REASONS: CalibrationFailureReason[] = [
 
 type Counters = {
   onboardingStart: number;
+  planReviewed: number;
   calibrationAttempt: number;
   calibrationSuccess: number;
   calibrationFailure: number;
@@ -50,6 +51,8 @@ type FunnelState = {
   onboardingCompletedAt: number | null;
   firstCalibrationSuccessAt: number | null;
   firstRunCompletedAt: number | null;
+  /** Epoch ms the pre-paywall plan screen was first reached. */
+  planFirstReviewedAt: number | null;
   /** Calibration attempts recorded before the FIRST success (drop-off signal). */
   calibrationAttemptsBeforeFirstSuccess: number;
   counters: Counters;
@@ -62,6 +65,8 @@ type FunnelState = {
   lastReportedConversionValue: number | null;
   /** True once the ATT prompt has been requested (shown at most once, ever). */
   attRequested: boolean;
+  /** True once the end-of-onboarding paywall step has run (at most once, ever). */
+  onboardingPaywallShown: boolean;
 };
 
 function emptyState(): FunnelState {
@@ -71,9 +76,11 @@ function emptyState(): FunnelState {
     onboardingCompletedAt: null,
     firstCalibrationSuccessAt: null,
     firstRunCompletedAt: null,
+    planFirstReviewedAt: null,
     calibrationAttemptsBeforeFirstSuccess: 0,
     counters: {
       onboardingStart: 0,
+      planReviewed: 0,
       calibrationAttempt: 0,
       calibrationSuccess: 0,
       calibrationFailure: 0,
@@ -93,6 +100,7 @@ function emptyState(): FunnelState {
     conversionValueMax: 0,
     lastReportedConversionValue: null,
     attRequested: false,
+    onboardingPaywallShown: false,
   };
 }
 
@@ -166,6 +174,19 @@ export function markOnboardingStart(now = Date.now()): Promise<void> {
 export function markOnboardingComplete(now = Date.now()): Promise<void> {
   return mutate((state) => {
     if (state.onboardingCompletedAt === null) state.onboardingCompletedAt = now;
+  });
+}
+
+/**
+ * The pre-paywall plan screen was reached. Local-only on purpose: the Singular
+ * account is near its registered-event limit, and this is a step-completion
+ * signal for the local funnel rather than something the SKAdNetwork ladder or
+ * the ad networks need.
+ */
+export function markPlanReviewed(now = Date.now()): Promise<void> {
+  return mutate((state) => {
+    state.counters.planReviewed += 1;
+    if (state.planFirstReviewedAt === null) state.planFirstReviewedAt = now;
   });
 }
 
@@ -266,6 +287,29 @@ export async function claimAttRequest(): Promise<boolean> {
   return claimed;
 }
 
+/**
+ * Atomically claim the one-time end-of-onboarding paywall step. Resolves true
+ * only for the caller that first flips the flag, so a cold start, a remount, or
+ * a second sign-in on the same device never re-presents it.
+ */
+export async function claimOnboardingPaywall(): Promise<boolean> {
+  let claimed = false;
+  await mutate((state) => {
+    if (!state.onboardingPaywallShown) {
+      state.onboardingPaywallShown = true;
+      claimed = true;
+    }
+  });
+  return claimed;
+}
+
+/** Release the one-time onboarding paywall claim (presentation never happened). */
+export function releaseOnboardingPaywall(): Promise<void> {
+  return mutate((state) => {
+    state.onboardingPaywallShown = false;
+  });
+}
+
 export async function resetFunnel(): Promise<void> {
   await writeChain.catch(() => {});
   cache = emptyState();
@@ -285,6 +329,8 @@ export type FunnelSnapshot = {
     completed: boolean;
     /** onboardingStart -> firstCalibrationSuccess rate (0..1), null if no starts. */
     calibrationSuccessRate: number | null;
+    /** Times the pre-paywall plan screen was reached. */
+    planReviewed: number;
   };
   calibration: {
     attempts: number;
@@ -331,6 +377,7 @@ export async function getFunnelSnapshot(now = Date.now()): Promise<FunnelSnapsho
         state.counters.calibrationSuccess,
         state.counters.onboardingStart,
       ),
+      planReviewed: state.counters.planReviewed,
     },
     calibration: {
       attempts: state.counters.calibrationAttempt,

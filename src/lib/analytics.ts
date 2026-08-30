@@ -170,7 +170,7 @@ export function logOnboardingStart(): void {
   safely('logOnboardingStart', async () => {
     await markOnboardingStart();
     // Separates "opened the app" from an install that never got past the icon.
-    await bumpConversionValue('opened_no_calibration');
+    await bumpConversionValue('opened_offer_unseen');
   });
 }
 
@@ -179,8 +179,8 @@ export function logCompleteRegistration(method?: 'google' | 'apple' | 'email'): 
   safely('logCompleteRegistration', async () => {
     singularEvent(EVENTS.completeRegistration, method ? { method } : undefined);
     await markOnboardingComplete();
-    // "Opened, engaged, not yet calibrated" rung of the SKAN ladder.
-    await bumpConversionValue('opened_no_calibration');
+    // "Registered, offer not yet seen" rung — the paywall follows immediately.
+    await bumpConversionValue('opened_offer_unseen');
   });
 }
 
@@ -190,7 +190,14 @@ export function logCalibrationAttempt(): void {
 }
 
 /** Calibration reached a usable baseline (preflight countdown). Fires the
- *  `onboarding_complete` Singular event once, on the first ever success. */
+ *  `onboarding_complete` Singular event once, on the first ever success.
+ *
+ *  NAME DRIFT, deliberately not renamed: the paywall is now the last onboarding
+ *  step, so first calibration happens on the first RUN, after registration and
+ *  the offer. `onboarding_complete` therefore means "first successful body
+ *  tracking setup", which is a first-run activation signal rather than the end
+ *  of the onboarding screens. The name is wired into a live Singular account and
+ *  the TikTok partner config, so it stays; read it as activation. */
 export function logCalibrationSuccess(): void {
   safely('logCalibrationSuccess', async () => {
     const wasFirst = await markCalibrationSuccess();
@@ -307,6 +314,8 @@ type TrackingTransparencyModule = typeof import('expo-tracking-transparency');
 const ATT_FOREGROUND_TIMEOUT_MS = 15_000;
 
 let attRequestInFlight = false;
+/** The in-flight (or last completed) ATT round-trip, so callers can sequence off it. */
+let attRequestSettled: Promise<void> = Promise.resolve();
 
 function getTrackingModule(): TrackingTransparencyModule | null {
   if (Platform.OS !== 'ios') return null;
@@ -387,10 +396,20 @@ function waitUntilActive(timeoutMs: number): Promise<boolean> {
  *
  * Once the answer is on file this also re-collects RevenueCat's `$idfa`/`$idfv`,
  * which is what makes RevenueCat's Singular integration forward events at all.
+ *
+ * The returned promise resolves only once the sheet has been answered (or the
+ * ask abandoned), including for callers that arrive while a request is already
+ * in flight — so anything that must not overlap the system sheet, such as the
+ * end-of-onboarding paywall, can simply await this first.
  */
-export async function requestTrackingAuthorization(): Promise<void> {
-  if (attRequestInFlight) return;
+export function requestTrackingAuthorization(): Promise<void> {
+  if (attRequestInFlight) return attRequestSettled;
   attRequestInFlight = true;
+  attRequestSettled = runTrackingAuthorizationRequest();
+  return attRequestSettled;
+}
+
+async function runTrackingAuthorizationRequest(): Promise<void> {
   // Set at each point where the ATT answer is known to exist, so the `finally`
   // below refreshes the RevenueCat identifiers exactly once.
   let trackingResolved = false;

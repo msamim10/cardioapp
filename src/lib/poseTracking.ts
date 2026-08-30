@@ -393,7 +393,7 @@ export class PoseAnalyzer {
         status: this.baseline ? 'tracking' : 'calibrating',
         move: null,
         feedback: this.feedback(
-          this.baseline ? 'Ready — move!' : 'Stand centered — calibrating',
+          this.baseline ? 'Tracking — go' : 'Stand centered — calibrating',
           'Keep shoulders and hips visible; knees help, full body is best for jumps',
         ),
       };
@@ -555,7 +555,7 @@ export class PoseAnalyzer {
           ? isNeutral
             ? 'Hold center — rearming'
             : 'Return to center — other moves ready'
-          : 'Ready — move!',
+          : 'Tracking — go',
         'Shoulders + hips required; knees help, full body gives best jump accuracy',
         waitingForNeutral ? 'return-to-center' : 'ready',
       ),

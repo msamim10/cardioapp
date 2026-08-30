@@ -14,7 +14,7 @@ import {
 import { modes, type Mode } from '@/lib/gameData';
 import { getModeCover } from '@/lib/modeCovers';
 import { caloriesForRun, CLASS_META, CLASS_ORDER, type ClassKey } from '@/lib/progression';
-import { cardSurface, colors, font, radius, spacing } from '@/theme';
+import { cardSurface, colors, font, metric, radius, spacing, type } from '@/theme';
 
 export default function LevelsScreen() {
   const router = useRouter();
@@ -217,34 +217,29 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: spacing.md,
     left: spacing.md,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(10,10,15,0.78)',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: radius.xs,
+    backgroundColor: 'rgba(8,9,10,0.82)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: 'rgba(255,255,255,0.16)',
   },
-  featuredBadgeText: {
-    color: colors.lime,
-    fontSize: 10,
-    fontWeight: font.black,
-    letterSpacing: 0.7,
-  },
+  featuredBadgeText: { ...type.micro, color: colors.lime },
   heroText: { padding: spacing.lg },
   heroTitle: {
+    ...type.h1,
     color: colors.white,
-    fontSize: 30,
-    fontWeight: font.black,
-    letterSpacing: -0.6,
+    fontSize: 32,
+    lineHeight: 35,
   },
   heroDescriptor: {
-    color: 'rgba(255,255,255,0.74)',
+    color: 'rgba(255,255,255,0.72)',
     fontSize: 15,
     fontWeight: font.medium,
     marginTop: 4,
   },
   heroMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: spacing.sm },
-  heroMetaText: { color: colors.white, fontSize: 12, fontWeight: font.bold },
+  heroMetaText: { ...metric, color: colors.white, fontSize: 12, fontWeight: font.bold },
   metaDot: { width: 3, height: 3, borderRadius: 2, backgroundColor: colors.lime },
   modesSection: { marginTop: spacing.xs },
   modeRow: { flexDirection: 'row', gap: spacing.sm },
@@ -268,10 +263,9 @@ const styles = StyleSheet.create({
   },
   recommendationBody: { flex: 1, alignItems: 'flex-start' },
   recommendationTitle: {
+    ...type.h3,
     color: colors.text,
     fontSize: 15,
-    fontWeight: font.bold,
-    letterSpacing: -0.2,
     alignSelf: 'stretch',
   },
   recommendationMeta: {
@@ -281,16 +275,16 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  metaItemText: { color: colors.textDim, fontSize: 11, fontWeight: font.medium },
+  metaItemText: { ...metric, color: colors.textDim, fontSize: 11, fontWeight: font.medium },
   difficultyBadge: {
     marginTop: spacing.sm,
-    paddingHorizontal: 8,
+    paddingHorizontal: 7,
     paddingVertical: 4,
-    borderRadius: radius.pill,
+    borderRadius: radius.xs,
     backgroundColor: colors.surface2,
     borderWidth: 1,
     borderColor: colors.borderStrong,
   },
-  difficultyText: { color: colors.lime, fontSize: 10, fontWeight: font.bold },
-  pressed: { opacity: 0.88, transform: [{ scale: 0.99 }] },
+  difficultyText: { ...type.micro, color: colors.lime },
+  pressed: { opacity: 0.72 },
 });

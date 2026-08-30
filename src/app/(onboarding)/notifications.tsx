@@ -3,11 +3,12 @@ import { type Href, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GradientButton, MascotRunner, OnboardingTopBar } from '@/components/ui';
+import { GradientButton, OnboardingTopBar } from '@/components/ui';
 import { ensureNotificationPermission, scheduleWeeklyReminders } from '@/lib/notifications';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import { useProgress } from '@/lib/ProgressContext';
-import { accentColor, colors, font, radius, spacing } from '@/theme';
+import { onboardingProgress } from '@/lib/onboarding';
+import { accentColor, colors, font, radius, spacing, type } from '@/theme';
 
 /**
  * Notifications opt-in.
@@ -21,9 +22,9 @@ import { accentColor, colors, font, radius, spacing } from '@/theme';
  */
 
 const BENEFITS: { icon: keyof typeof Ionicons.glyphMap; title: string; sub: string; accent: 'lime' | 'violet' | 'orange' }[] = [
-  { icon: 'alarm', title: 'Run reminders', sub: 'A nudge on your goal days so you never miss', accent: 'lime' },
-  { icon: 'gift', title: 'Reward alerts', sub: "Know the moment you've earned coins & badges", accent: 'violet' },
-  { icon: 'flame', title: 'Streak protection', sub: 'Stay on track before your streak slips', accent: 'orange' },
+  { icon: 'alarm', title: 'Session reminders', sub: 'A prompt on your goal days so you never miss', accent: 'lime' },
+  { icon: 'diamond', title: 'Reward alerts', sub: "Know the moment you've earned coins & badges", accent: 'violet' },
+  { icon: 'flame', title: 'Streak protection', sub: 'A heads-up before your streak breaks', accent: 'orange' },
 ];
 
 export default function NotificationsScreen() {
@@ -65,17 +66,16 @@ export default function NotificationsScreen() {
 
   return (
     <View style={styles.root}>
-      <OnboardingTopBar progress={0.72} topInset={insets.top} onBack={() => router.back()} />
+      <OnboardingTopBar progress={onboardingProgress('notifications')} topInset={insets.top} onBack={() => router.back()} />
 
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 140 }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.mascotWrap}>
-          <MascotRunner size={140} />
-        </View>
-        <Text style={styles.title}>Never miss a run</Text>
-        <Text style={styles.sub}>Get nudged about your runs, rewards, and streaks.</Text>
+        <Text style={styles.title}>Never miss a session</Text>
+        <Text style={styles.sub}>
+          Consistency is the whole game. We&apos;ll keep you on schedule.
+        </Text>
 
         <View style={styles.list}>
           {BENEFITS.map((b) => (
@@ -104,15 +104,12 @@ export default function NotificationsScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  content: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  mascotWrap: { alignItems: 'center', marginBottom: spacing.md },
-  title: { color: colors.text, fontSize: 30, fontWeight: font.black, letterSpacing: -0.6, textAlign: 'center' },
+  content: { paddingHorizontal: spacing.lg, paddingTop: spacing.xxl },
+  title: { ...type.h1, color: colors.text, textAlign: 'center' },
   sub: {
+    ...type.body,
     color: colors.textDim,
-    fontSize: 15,
-    fontWeight: font.medium,
     marginTop: spacing.sm,
-    lineHeight: 21,
     textAlign: 'center',
   },
   list: { gap: spacing.md, marginTop: spacing.xxl },
@@ -130,13 +127,13 @@ const styles = StyleSheet.create({
   rowLead: {
     width: 44,
     height: 44,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
     backgroundColor: colors.surface2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rowTitle: { color: colors.text, fontSize: 16, fontWeight: font.bold },
-  rowSub: { color: colors.textDim, fontSize: 13, fontWeight: font.medium, marginTop: 2, lineHeight: 18 },
+  rowTitle: { ...type.h3, color: colors.text, fontSize: 16 },
+  rowSub: { ...type.bodySm, color: colors.textDim, marginTop: 2 },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
@@ -146,5 +143,5 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   skipRow: { alignSelf: 'center', paddingVertical: spacing.sm, paddingHorizontal: spacing.lg },
-  skipText: { color: colors.textDim, fontSize: 15, fontWeight: font.bold, textDecorationLine: 'underline' },
+  skipText: { color: colors.textDim, fontSize: 14, fontWeight: font.bold },
 });

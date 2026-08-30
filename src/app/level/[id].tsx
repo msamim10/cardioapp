@@ -26,17 +26,17 @@ import {
 } from '@/lib/progression';
 import { useSubscription } from '@/lib/SubscriptionContext';
 import { canStartRun, requestSubscriptionAccess } from '@/lib/subscriptionAccess';
-import { colors, font, radius, spacing } from '@/theme';
+import { colors, font, metric, radius, spacing, type } from '@/theme';
 
 const PREP_ITEMS: {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   detail: string;
 }[] = [
-  { icon: 'resize-outline', title: 'Clear space', detail: 'Make room to move safely.' },
-  { icon: 'volume-high-outline', title: 'Sound on', detail: 'Listen for movement cues.' },
-  { icon: 'phone-portrait-outline', title: 'Position screen', detail: 'Keep your phone or TV easy to see.' },
-  { icon: 'body-outline', title: 'Stay in frame', detail: 'Secure your shoes and stay visible.' },
+  { icon: 'resize-outline', title: 'Clear space', detail: 'Room to move on all sides.' },
+  { icon: 'volume-high-outline', title: 'Sound on', detail: 'Audio cues call the moves.' },
+  { icon: 'phone-portrait-outline', title: 'Screen placed', detail: 'Phone or TV in clear view.' },
+  { icon: 'body-outline', title: 'In frame', detail: 'Full body visible to the camera.' },
 ];
 
 type PlaybackDestination = 'phone' | 'tv';
@@ -158,7 +158,7 @@ export default function LevelDetailScreen() {
           >
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </Pressable>
-          <Text style={styles.headerTitle}>Run recap</Text>
+          <Text style={styles.headerTitle}>Level brief</Text>
           <View style={styles.headerSpacer} />
         </View>
 
@@ -234,7 +234,7 @@ export default function LevelDetailScreen() {
 
         {Platform.OS === 'ios' ? (
           <View style={styles.playDestinationGroup}>
-            <SectionHeader title="Where do you want to play?" />
+            <SectionHeader title="Choose your screen" />
             <View style={styles.playDestinationOptions}>
               <OptionCard
                 title="Phone"
@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
   back: {
     width: 42,
     height: 42,
-    borderRadius: radius.pill,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.surface,
@@ -358,10 +358,9 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   headerTitle: {
+    ...type.label,
     flex: 1,
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: font.bold,
+    color: colors.textDim,
     textAlign: 'center',
   },
   headerSpacer: { width: 42 },
@@ -380,17 +379,16 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
   },
   heroTitle: {
+    ...type.h1,
     color: colors.white,
-    fontSize: 29,
-    lineHeight: 33,
-    fontWeight: font.black,
-    letterSpacing: -0.5,
+    fontSize: 32,
+    lineHeight: 35,
   },
   heroSubtitle: {
-    color: 'rgba(255,255,255,0.74)',
+    color: 'rgba(255,255,255,0.72)',
     fontSize: 14,
     fontWeight: font.medium,
-    marginTop: 3,
+    marginTop: 4,
   },
   heroSummaryRow: {
     flexDirection: 'row',
@@ -405,15 +403,17 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 7,
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(6,6,10,0.7)',
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(6,6,10,0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   heroSummaryValue: {
+    ...metric,
     color: colors.white,
     fontSize: 12,
     fontWeight: font.bold,
+    letterSpacing: 0.3,
   },
   section: { gap: spacing.sm },
   prepRow: {
@@ -425,12 +425,12 @@ const styles = StyleSheet.create({
   prepCard: {
     flex: 1,
     minWidth: 0,
-    minHeight: 116,
+    minHeight: 124,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
-    paddingHorizontal: 4,
-    paddingVertical: 7,
+    gap: 6,
+    paddingHorizontal: 5,
+    paddingVertical: spacing.sm,
     borderRadius: radius.md,
     backgroundColor: colors.bgElevated,
     borderWidth: 1,
@@ -438,15 +438,16 @@ const styles = StyleSheet.create({
   },
   prepTitle: {
     color: colors.text,
-    fontSize: 11,
-    lineHeight: 13,
-    fontWeight: font.semibold,
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: font.bold,
+    letterSpacing: -0.1,
     textAlign: 'center',
   },
   prepDetail: {
     color: colors.textDim,
-    fontSize: 9,
-    lineHeight: 11,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: font.medium,
     textAlign: 'center',
   },
@@ -489,16 +490,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    borderRadius: radius.pill,
+    borderRadius: radius.button,
     backgroundColor: colors.lime,
   },
   beginButtonText: {
+    ...type.action,
     color: colors.black,
-    fontSize: 16,
-    fontWeight: font.black,
-    letterSpacing: 0.5,
   },
   beginDisabled: { opacity: 0.82 },
-  beginPressed: { opacity: 0.84, transform: [{ scale: 0.99 }] },
-  pressed: { opacity: 0.82, transform: [{ scale: 0.98 }] },
+  beginPressed: { opacity: 0.72 },
+  pressed: { opacity: 0.72 },
 });

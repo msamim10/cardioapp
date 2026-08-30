@@ -1,7 +1,7 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { OnboardingProvider, useOnboarding } from '@/lib/OnboardingContext';
@@ -106,16 +106,25 @@ function RootNavigator() {
     };
   }, [hydrated, remindersOn, daysPerWeek, streak]);
 
-  // Keep the themed loading state mounted while a redirect settles so neither
-  // the welcome screen nor the tabs flash for the wrong completion state.
-  if (!routeMatchesGate) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color={colors.lime} />
-      </View>
-    );
-  }
+  // The themed loading state covers the stack while a redirect settles, so
+  // neither the welcome screen nor the tabs flash for the wrong completion
+  // state. It has to be an overlay rather than a replacement: unmounting the
+  // navigator leaves the redirect above with nothing to dispatch to, and
+  // react-navigation drops the action ("was not handled by any navigator"),
+  // which stranded the app on this spinner at the end of onboarding.
+  return (
+    <View style={styles.root}>
+      <RootStack />
+      {!routeMatchesGate ? (
+        <View style={styles.gateOverlay}>
+          <ActivityIndicator color={colors.lime} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
+function RootStack() {
   return (
     <Stack
       screenOptions={{
@@ -147,3 +156,13 @@ function RootNavigator() {
     </Stack>
   );
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.bg },
+  gateOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

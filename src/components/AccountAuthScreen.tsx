@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,12 +18,15 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Mascot } from '@/components/ui';
 import { requestTrackingAuthorization } from '@/lib/analytics';
 import { authErrorMessage, useAuth, type SignInResult } from '@/lib/AuthContext';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import { PRIVACY_POLICY_URL, TERMS_URL, openLegalUrl } from '@/lib/legal';
-import { colors, font, radius, spacing } from '@/theme';
+import { presentOnboardingOffer } from '@/lib/onboardingOffer';
+import { buildOnboardingPlan, shouldShowPlan } from '@/lib/onboardingPlan';
+import { useProgress } from '@/lib/ProgressContext';
+import { useSubscription } from '@/lib/SubscriptionContext';
+import { colors, font, radius, spacing, type } from '@/theme';
 
 type Mode = 'create' | 'signin';
 type Busy = 'google' | 'apple' | 'email' | 'reset' | null;
@@ -45,8 +48,11 @@ export function AccountAuthScreen({ mode }: { mode: Mode }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const auth = useAuth();
-  const { completeOnboarding } = useOnboarding();
+  const { answers, completeOnboarding } = useOnboarding();
+  const { username } = useProgress();
+  const { isPremium, presentPaywall } = useSubscription();
   const emailRef = useRef<TextInput>(null);
+  const mountedRef = useRef(true);
   const [busy, setBusy] = useState<Busy>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -81,6 +87,13 @@ export function AccountAuthScreen({ mode }: { mode: Mode }) {
     };
   }, []);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const expand = () => {
     if (expanded) return;
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -88,13 +101,43 @@ export function AccountAuthScreen({ mode }: { mode: Mode }) {
     requestAnimationFrame(() => emailRef.current?.focus());
   };
 
-  const finish = (result: SignInResult) => {
-    if (result.status === 'signed-in') {
-      completeOnboarding();
-      router.replace('/(tabs)');
-    } else if (result.status === 'error' || result.status === 'unavailable') {
+  /**
+   * A new account with personalisation answers on file goes to the plan screen,
+   * which presents the offer itself once the user has seen what their answers
+   * produced. Sign-in, and any create path with nothing to reflect, keeps the
+   * original behaviour and presents the offer straight from here.
+   *
+   * The ATT sheet is unaffected either way: it is scheduled on mount, and
+   * `presentOnboardingOffer` awaits the same one-shot request before presenting,
+   * so the two native modals stay separated regardless of which route is taken.
+   */
+  const finish = async (result: SignInResult) => {
+    if (result.status === 'error' || result.status === 'unavailable') {
       setError(result.message);
+      return;
     }
+    if (result.status !== 'signed-in') return;
+
+    if (mode === 'create' && shouldShowPlan(buildOnboardingPlan(answers, username))) {
+      // The id travels as a param so the plan screen keys RevenueCat to the
+      // same account this sign-in produced, without waiting on auth state to
+      // propagate through context first.
+      router.replace(
+        `/(onboarding)/plan?userId=${encodeURIComponent(result.user.id)}` as Href,
+      );
+      return;
+    }
+
+    await presentOnboardingOffer({
+      userId: result.user.id,
+      isPremium,
+      presentPaywall,
+      isMounted: () => mountedRef.current,
+    });
+    // Runs whichever way the offer went: the account exists, so onboarding is
+    // done. Runs stay gated by `canStartRun` until the entitlement is active.
+    completeOnboarding();
+    router.replace('/(tabs)');
   };
 
   const social = async (provider: 'google' | 'apple') => {
@@ -102,7 +145,9 @@ export function AccountAuthScreen({ mode }: { mode: Mode }) {
     setBusy(provider);
     setError(null);
     try {
-      finish(provider === 'google' ? await auth.signInWithGoogle() : await auth.signInWithApple());
+      await finish(
+        provider === 'google' ? await auth.signInWithGoogle() : await auth.signInWithApple()
+      );
     } finally {
       setBusy(null);
     }
@@ -117,7 +162,7 @@ export function AccountAuthScreen({ mode }: { mode: Mode }) {
         mode === 'create'
           ? await auth.signUpWithEmail(email, password, name)
           : await auth.signInWithEmail(email, password);
-      finish(result);
+      await finish(result);
     } finally {
       setBusy(null);
     }
@@ -167,7 +212,7 @@ export function AccountAuthScreen({ mode }: { mode: Mode }) {
         </Pressable>
 
         <View style={styles.header}>
-          <Mascot variant="avatar" size={82} />
+          <Text style={styles.wordmark}>CardioSurf</Text>
           <Text style={styles.title}>{isCreate ? 'Save your progress' : 'Welcome back'}</Text>
           <Text style={styles.subtitle}>
             {isCreate
@@ -320,33 +365,40 @@ const styles = StyleSheet.create({
   back: {
     width: 44,
     height: 44,
-    borderRadius: radius.pill,
+    borderRadius: radius.md,
     backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  header: { alignItems: 'center', marginTop: spacing.lg },
+  header: { alignItems: 'center', marginTop: spacing.xxl },
+  wordmark: {
+    color: colors.textDim,
+    fontSize: 13,
+    fontWeight: font.heavy,
+    letterSpacing: 2.4,
+    textTransform: 'uppercase',
+  },
   title: {
+    ...type.h1,
     color: colors.text,
     fontSize: 32,
-    lineHeight: 38,
-    fontWeight: font.black,
-    letterSpacing: -0.7,
+    lineHeight: 36,
     marginTop: spacing.md,
     textAlign: 'center',
   },
   subtitle: {
+    ...type.body,
     color: colors.textDim,
-    fontSize: 15,
-    lineHeight: 21,
     textAlign: 'center',
     marginTop: spacing.sm,
-    maxWidth: 420,
+    maxWidth: 400,
   },
   stack: { gap: spacing.sm, marginTop: spacing.xl },
   provider: {
     minHeight: 54,
-    borderRadius: radius.pill,
+    borderRadius: radius.button,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -355,11 +407,11 @@ const styles = StyleSheet.create({
   apple: { backgroundColor: colors.white },
   google: { backgroundColor: colors.white, borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)' },
   googleLogo: { width: 20, height: 20 },
-  appleText: { color: colors.black, fontSize: 16, fontWeight: font.black },
-  googleText: { color: GOOGLE_TEXT, fontSize: 16, fontWeight: font.black },
+  appleText: { color: colors.black, fontSize: 16, fontWeight: font.bold, letterSpacing: -0.2 },
+  googleText: { color: GOOGLE_TEXT, fontSize: 16, fontWeight: font.bold, letterSpacing: -0.2 },
   divider: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginVertical: spacing.lg },
   line: { height: 1, backgroundColor: colors.border, flex: 1 },
-  or: { color: colors.textFaint, fontSize: 11, fontWeight: font.bold },
+  or: { ...type.micro, color: colors.textFaint },
   form: { gap: spacing.sm },
   input: {
     minHeight: 52,
@@ -373,13 +425,13 @@ const styles = StyleSheet.create({
   },
   submit: {
     minHeight: 54,
-    borderRadius: radius.pill,
+    borderRadius: radius.button,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.lime,
     marginTop: spacing.xs,
   },
-  submitText: { color: colors.black, fontSize: 15, fontWeight: font.black },
+  submitText: { ...type.action, color: colors.black },
   switchRow: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -390,7 +442,7 @@ const styles = StyleSheet.create({
   switchCopy: { color: colors.textDim, fontSize: 14 },
   linkButton: { alignSelf: 'center', padding: spacing.sm },
   linkText: { color: colors.lime, fontSize: 14, fontWeight: font.bold },
-  inlineError: { color: colors.pink, fontSize: 13, lineHeight: 18 },
+  inlineError: { color: colors.effort, fontSize: 13, lineHeight: 18 },
   legal: {
     color: colors.textFaint,
     fontSize: 12,
@@ -401,13 +453,13 @@ const styles = StyleSheet.create({
   },
   legalLink: { color: colors.textDim, fontWeight: font.bold, textDecorationLine: 'underline' },
   errorBox: {
-    backgroundColor: 'rgba(255,73,134,0.12)',
-    borderColor: colors.pink,
+    backgroundColor: 'rgba(255,71,87,0.12)',
+    borderColor: colors.effort,
     borderWidth: 1,
     borderRadius: radius.md,
     padding: spacing.md,
     marginTop: spacing.lg,
   },
-  errorText: { color: colors.pink, fontSize: 13, lineHeight: 18 },
+  errorText: { color: colors.effort, fontSize: 13, lineHeight: 18 },
   disabled: { opacity: 0.5 },
 });

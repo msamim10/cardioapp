@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
   },
   submit: {
     minHeight: 54,
-    borderRadius: radius.pill,
+    borderRadius: radius.button,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.lime,
@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.md,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(198,255,61,0.10)',
+    backgroundColor: 'rgba(215,255,62,0.10)',
     borderWidth: 1,
     borderColor: colors.lime,
   },

@@ -1,110 +1,209 @@
 import assert from 'node:assert/strict';
 // @ts-expect-error -- required by Node's type-stripping ESM resolver
-import { getRectAppearanceTransform, getShowcaseGridLayout, getTilePosition, isPreviewLoadCurrent, selectPlayingTileIndices, shouldPreviewPlay } from '../src/lib/showcaseMedia.ts';
+import { getCarouselItemOffset, getShowcaseCarouselLayout, isPreviewLoadCurrent, resolveActiveIndex, sameIndices, selectMountedIndices, selectPlayingIndices, shouldPreviewPlay, SHOWCASE_MEDIA_ASPECT_RATIO } from '../src/lib/showcaseMedia.ts';
 
-const TILE_COUNT = 12; // 4 original + 8 new gameplay clips = a clean 4-row × 3-column grid
-const CAP = 6; // MAX_CONCURRENT_TILE_PLAYERS
+const CLIP_COUNT = 12;
+const GUTTER = 12; // spacing.md
+const PRELOAD_RADIUS = 1;
+const MAX_PLAYING = 2;
+// itemVisiblePercentThreshold, as a fraction.
+const VIEWABILITY_THRESHOLD = 0.6;
+const MIN_PEEK = 26;
 
-function gridFitsShortAndNarrowScreens() {
-  const viewports: [number, number][] = [
-    [320, 360],
-    [320, 480],
-    [375, 520],
-    [393, 560],
-    [430, 640],
-  ];
-  for (const [width, height] of viewports) {
-    const layout = getShowcaseGridLayout(width, height, TILE_COUNT);
-    assert.equal(layout.columns, 3, `grid should use exactly 3 columns at ${width}x${height}`);
-    assert.equal(layout.rows, 4, `12 tiles must form exactly 4 full rows at ${width}x${height}`);
-    assert.ok(layout.tileWidth > 0 && layout.tileHeight > 0, `tiles must render at ${width}x${height}`);
-    assert.ok(layout.contentWidth <= width, `grid must not exceed width at ${width}x${height}`);
-    assert.equal(layout.rows, Math.ceil(TILE_COUNT / layout.columns), 'rows derive from count/columns');
-    // Every tile stays between square and gentle portrait so 9:16 cover clips
-    // never distort or clip.
+const VIEWPORTS: [number, number][] = [
+  [320, 300],
+  [320, 480],
+  [375, 460],
+  [393, 500],
+  [430, 620],
+  [744, 900], // iPad-ish: the width cap, not the height, must bind here
+];
+
+/**
+ * Visible fraction of one snap cell at a given scroll offset. This is exactly
+ * what FlatList's `itemVisiblePercentThreshold` measures, so the playback gate
+ * can be reasoned about straight from the layout numbers.
+ */
+function visibleFraction(
+  index: number,
+  offset: number,
+  layout: { sidePadding: number; itemWidth: number },
+  viewportWidth: number,
+): number {
+  const left = layout.sidePadding + index * layout.itemWidth;
+  const right = left + layout.itemWidth;
+  const overlap = Math.max(0, Math.min(right, offset + viewportWidth) - Math.max(left, offset));
+  return overlap / layout.itemWidth;
+}
+
+function cardsAlwaysFitAndNeighboursAlwaysPeek() {
+  for (const [width, height] of VIEWPORTS) {
+    const layout = getShowcaseCarouselLayout(width, height, GUTTER);
+    const at = `${width}x${height}`;
+    assert.ok(layout.cardWidth > 0 && layout.cardHeight > 0, `a card must render at ${at}`);
+    assert.ok(layout.cardHeight <= height, `the card must not overflow the rail at ${at}`);
+    assert.ok(layout.cardWidth < width, `the card must leave room for its neighbours at ${at}`);
+    // The peek is the only remaining "the set keeps going" cue now that the
+    // tile wall is gone, so it can never collapse to zero.
+    assert.ok(layout.peek >= MIN_PEEK, `neighbours must peek by at least ${MIN_PEEK}px at ${at}`);
+    // 9:16 framing is preserved so full-body shots never lose heads or feet.
+    const aspect = layout.cardWidth / layout.cardHeight;
     assert.ok(
-      layout.tileHeight >= layout.tileWidth && layout.tileHeight <= Math.round(layout.tileWidth * 1.5),
-      `tile aspect must stay between 1:1 and ~2:3 at ${width}x${height}`,
+      Math.abs(aspect - SHOWCASE_MEDIA_ASPECT_RATIO) < 0.01,
+      `the card must keep the clips' 9:16 framing at ${at}`,
+    );
+    assert.equal(layout.itemWidth, layout.cardWidth + layout.gutter, `snap cell is card + gutter at ${at}`);
+  }
+}
+
+function unmeasuredCarouselIsSafe() {
+  for (const [width, height] of [
+    [0, 0],
+    [0, 500],
+    [393, 0],
+  ] as [number, number][]) {
+    const layout = getShowcaseCarouselLayout(width, height, GUTTER);
+    assert.equal(layout.cardWidth, 0, 'an unmeasured rail renders nothing');
+    assert.equal(layout.itemWidth, 0, 'an unmeasured rail has no snap interval');
+    assert.equal(layout.sidePadding, 0, 'an unmeasured rail has no padding');
+  }
+}
+
+function snapOffsetsCentreEveryCard() {
+  for (const [width, height] of VIEWPORTS) {
+    const layout = getShowcaseCarouselLayout(width, height, GUTTER);
+    const at = `${width}x${height}`;
+    for (let index = 0; index < CLIP_COUNT; index += 1) {
+      const offset = getCarouselItemOffset(index, layout.itemWidth);
+      assert.equal(offset % layout.itemWidth, 0, `offset ${index} is a snapToInterval multiple at ${at}`);
+      // Snapping to a multiple of the interval must park the card dead centre,
+      // which is only true because sidePadding is derived from itemWidth.
+      const cardLeft = layout.sidePadding + index * layout.itemWidth + layout.gutter / 2;
+      const cardCentre = cardLeft + layout.cardWidth / 2 - offset;
+      assert.ok(
+        Math.abs(cardCentre - width / 2) < 1e-6,
+        `card ${index} must land dead centre at ${at} (got ${cardCentre}, want ${width / 2})`,
+      );
+    }
+    // The first and last cards must be reachable: the scrollable extent has to
+    // land exactly on offset 0 and on the last card's snap point, or the ends
+    // of the reel sit off-centre.
+    const contentWidth = 2 * layout.sidePadding + CLIP_COUNT * layout.itemWidth;
+    const maxOffset = contentWidth - width;
+    assert.ok(
+      Math.abs(maxOffset - getCarouselItemOffset(CLIP_COUNT - 1, layout.itemWidth)) < 1e-6,
+      `the last card must be reachable and centred at ${at}`,
     );
   }
 }
 
-function unmeasuredGridIsSafe() {
-  const layout = getShowcaseGridLayout(0, 0, TILE_COUNT);
-  assert.equal(layout.tileWidth, 0, 'an unmeasured grid renders nothing');
-  assert.equal(layout.contentWidth, 0, 'an unmeasured grid has no content box');
+function viewabilityIsolatesTheSnappedCard() {
+  for (const [width, height] of VIEWPORTS) {
+    const layout = getShowcaseCarouselLayout(width, height, GUTTER);
+    const at = `${width}x${height}`;
+    for (const index of [0, 5, CLIP_COUNT - 1]) {
+      const offset = getCarouselItemOffset(index, layout.itemWidth);
+      assert.ok(
+        visibleFraction(index, offset, layout, width) >= 0.999,
+        `the snapped card is fully visible at ${at}`,
+      );
+      for (const neighbour of [index - 1, index + 1]) {
+        if (neighbour < 0 || neighbour >= CLIP_COUNT) continue;
+        assert.ok(
+          visibleFraction(neighbour, offset, layout, width) < VIEWABILITY_THRESHOLD,
+          `a peeking neighbour must stay below the playback threshold at ${at}`,
+        );
+      }
+    }
+  }
 }
 
-function concurrencyCapSpreadsAcrossTheWall() {
-  const live = selectPlayingTileIndices(TILE_COUNT, CAP);
-  assert.equal(live.length, CAP, 'exactly CAP tiles mount a real decoder');
-  assert.equal(new Set(live).size, CAP, 'live tiles are unique (no doubled decoder)');
-  assert.ok(
-    live.every((index) => index >= 0 && index < TILE_COUNT),
-    'live tile indices stay within the wall',
-  );
-  assert.ok(live.includes(0), "the hero's landing slot (tile 0) always plays");
-  // Spread: the live tiles should not be clustered into the first CAP slots.
-  assert.ok(Math.max(...live) >= TILE_COUNT - 3, 'live tiles reach the far end of the wall');
+function noMoreThanTwoCardsCanEverBeVisible() {
+  // Mid-gesture two cards straddle the threshold, which is wanted so the
+  // incoming card is already moving as it slides in. Three never can, which is
+  // what keeps MAX_PLAYING an honest cap rather than a lucky one.
+  for (const [width, height] of VIEWPORTS) {
+    const layout = getShowcaseCarouselLayout(width, height, GUTTER);
+    const steps = 40;
+    for (let step = 0; step <= steps * (CLIP_COUNT - 1); step += 1) {
+      const offset = (step / steps) * layout.itemWidth;
+      let above = 0;
+      for (let index = 0; index < CLIP_COUNT; index += 1) {
+        if (visibleFraction(index, offset, layout, width) >= VIEWABILITY_THRESHOLD) above += 1;
+      }
+      assert.ok(
+        above <= MAX_PLAYING,
+        `at most ${MAX_PLAYING} cards may clear the threshold at ${width}x${height} (offset ${offset} had ${above})`,
+      );
+    }
+  }
 }
 
-function capNeverExceedsTileCount() {
-  const live = selectPlayingTileIndices(3, CAP);
-  assert.equal(live.length, 3, 'cap is clamped to the number of tiles');
-  assert.deepEqual(selectPlayingTileIndices(0, CAP), [], 'no tiles means no decoders');
-  assert.deepEqual(selectPlayingTileIndices(TILE_COUNT, 0), [], 'a zero cap disables playback');
-}
-
-function heroLandsCleanlyInSlotZero() {
-  const layout = getShowcaseGridLayout(393, 560, TILE_COUNT);
-  const pos = getTilePosition(0, layout);
-  assert.deepEqual([pos.row, pos.col], [0, 0], 'tile 0 sits at the top-left slot');
-  const heroRect = { x: 20, y: 10, width: 300, height: 520 };
-  const slotZero = { x: pos.x, y: pos.y, width: layout.tileWidth, height: layout.tileHeight };
-  const t = getRectAppearanceTransform(heroRect, slotZero);
-  // The shrink transform must scale the big hero down to the small tile, and
-  // the docked center must coincide with the tile center (clean landing).
-  assert.ok(t.scaleX > 0 && t.scaleX < 1, 'hero scales down horizontally into its slot');
-  assert.ok(t.scaleY > 0 && t.scaleY < 1, 'hero scales down vertically into its slot');
-  const dockedCx = heroRect.x + heroRect.width / 2 + t.translateX;
-  const dockedCy = heroRect.y + heroRect.height / 2 + t.translateY;
-  assert.ok(Math.abs(dockedCx - (slotZero.x + slotZero.width / 2)) < 1e-6, 'docked hero centers on slot X');
-  assert.ok(Math.abs(dockedCy - (slotZero.y + slotZero.height / 2)) < 1e-6, 'docked hero centers on slot Y');
-}
-
-function expandZoomIsReversible() {
-  const full = { x: 0, y: 0, width: 393, height: 852 };
-  const tile = { x: 100, y: 300, width: 88, height: 132 };
-  const t = getRectAppearanceTransform(full, tile);
-  // At progress 0 the fullscreen card must appear exactly over the tapped tile.
-  const appearCx = full.x + full.width / 2 + t.translateX;
-  const appearCy = full.y + full.height / 2 + t.translateY;
-  assert.ok(Math.abs(appearCx - (tile.x + tile.width / 2)) < 1e-6, 'collapsed card centers on the tile X');
-  assert.ok(Math.abs(appearCy - (tile.y + tile.height / 2)) < 1e-6, 'collapsed card centers on the tile Y');
-  assert.ok(t.scaleX > 0 && t.scaleX < 1, 'card starts scaled down to the tile');
-  const degenerate = getRectAppearanceTransform({ x: 0, y: 0, width: 0, height: 0 }, tile);
-  assert.equal(degenerate.scaleX, 1, 'a zero-size target never divides by zero');
-}
-
-function tilesPlayWithLifecycleAndPauseWhenEclipsed() {
-  // Grid tiles play only while focused + foregrounded AND no tile is expanded.
-  assert.equal(shouldPreviewPlay('ready', true), true, 'ready tiles play when the grid is active');
-  assert.equal(shouldPreviewPlay('ready', false), false, 'blur/background/expanded pauses every tile');
-  assert.equal(shouldPreviewPlay('loading', true), false, 'a still-loading tile stays on its poster');
-  assert.equal(shouldPreviewPlay('error', true), false, 'a failed tile never attempts playback');
-}
-
-function partialErrorIsolation() {
-  const statuses = ['ready', 'error', 'ready', 'ready', 'ready', 'ready'] as const;
+function preloadWindowCapsMountedDecoders() {
+  const cap = PRELOAD_RADIUS * 2 + 1;
+  for (let center = 0; center < CLIP_COUNT; center += 1) {
+    const window = selectMountedIndices(center, CLIP_COUNT, PRELOAD_RADIUS);
+    assert.ok(window.length <= cap, `no more than ${cap} players are ever mounted`);
+    assert.ok(window.includes(center), 'the settled card always owns a player');
+    assert.equal(new Set(window).size, window.length, 'a card never mounts two players');
+    assert.ok(
+      window.every((index) => index >= 0 && index < CLIP_COUNT),
+      'the preload window never runs off the ends of the reel',
+    );
+  }
+  // Neighbour preloading is the whole point: landing on the next card must find
+  // it already buffered rather than blank.
+  assert.deepEqual(selectMountedIndices(0, CLIP_COUNT, PRELOAD_RADIUS), [0, 1], 'the first card preloads its right neighbour');
   assert.deepEqual(
-    statuses.map((status) => shouldPreviewPlay(status, true)),
-    [true, false, true, true, true, true],
-    'a single failed decoder must not pause the healthy tiles',
+    selectMountedIndices(CLIP_COUNT - 1, CLIP_COUNT, PRELOAD_RADIUS),
+    [CLIP_COUNT - 2, CLIP_COUNT - 1],
+    'the last card preloads its left neighbour',
   );
+  assert.deepEqual(selectMountedIndices(6, CLIP_COUNT, PRELOAD_RADIUS), [5, 6, 7], 'a middle card preloads both sides');
+  assert.deepEqual(selectMountedIndices(4, 0, PRELOAD_RADIUS), [], 'an empty reel mounts nothing');
+  assert.deepEqual(selectMountedIndices(99, CLIP_COUNT, PRELOAD_RADIUS), [10, 11], 'an out-of-range centre is clamped');
+}
+
+function onlyVisibleCardsPlay() {
+  assert.deepEqual(selectPlayingIndices([3], 3, MAX_PLAYING), [3], 'at rest exactly one card plays');
+  assert.deepEqual(selectPlayingIndices([3, 4], 3, MAX_PLAYING), [3, 4], 'mid-swipe both visible cards play');
+  assert.deepEqual(selectPlayingIndices([], 3, MAX_PLAYING), [], 'nothing visible means nothing plays');
+  // A fling can report a burst of items; the cap must hold and must keep the
+  // cards nearest the active one rather than an arbitrary prefix.
+  assert.deepEqual(
+    selectPlayingIndices([0, 1, 6, 7, 8, 11], 7, MAX_PLAYING),
+    [6, 7],
+    'a fling never spins up more than the cap, and keeps the nearest cards',
+  );
+  assert.deepEqual(selectPlayingIndices([2, 2, 3], 2, MAX_PLAYING), [2, 3], 'duplicate tokens never double a decoder');
+}
+
+function activeCardDoesNotFlickerMidSwipe() {
+  assert.equal(resolveActiveIndex([], 4), 4, 'an empty viewability tick changes nothing');
+  assert.equal(resolveActiveIndex([4], 4), 4, 'the snapped card stays active');
+  // Both cards are viewable through the middle of the gesture; holding the
+  // previous one stops the counter bouncing 03/04/03 within a single swipe.
+  assert.equal(resolveActiveIndex([4, 5], 4), 4, 'the outgoing card holds while both are visible');
+  assert.equal(resolveActiveIndex([5], 4), 5, 'the incoming card takes over once the old one leaves');
+  assert.equal(resolveActiveIndex([9, 10], 2), 9, 'after a fling the nearest visible card becomes active');
+}
+
+function redundantViewabilityTicksDoNotRerender() {
+  assert.equal(sameIndices([3, 4], [3, 4]), true, 'an unchanged playing set is recognised');
+  assert.equal(sameIndices([3], [3, 4]), false, 'a widened playing set is a change');
+  assert.equal(sameIndices([3, 4], [4, 5]), false, 'a shifted playing set is a change');
+  assert.equal(sameIndices([], []), true, 'two empty sets match');
+}
+
+function playbackRespectsLifecycleAndReadiness() {
+  assert.equal(shouldPreviewPlay('ready', true), true, 'a ready, visible card plays');
+  assert.equal(shouldPreviewPlay('ready', false), false, 'blur, background or off-screen pauses a card');
+  assert.equal(shouldPreviewPlay('loading', true), false, 'a buffering card stays on its poster');
+  assert.equal(shouldPreviewPlay('error', true), false, 'a failed card never attempts playback');
 }
 
 function unmountAndStaleLoadSafety() {
-  assert.equal(isPreviewLoadCurrent(true, 5, 5), true, "a tile's current load may configure its player");
+  assert.equal(isPreviewLoadCurrent(true, 5, 5), true, "a card's current load may configure its player");
   assert.equal(
     isPreviewLoadCurrent(false, 5, 5),
     false,
@@ -113,19 +212,21 @@ function unmountAndStaleLoadSafety() {
   assert.equal(
     isPreviewLoadCurrent(true, 4, 5),
     false,
-    'a stale load generation (e.g. after a focus-player source swap) must remain inert',
+    'a stale load generation must remain inert once the preload window moved on',
   );
 }
 
-gridFitsShortAndNarrowScreens();
-unmeasuredGridIsSafe();
-concurrencyCapSpreadsAcrossTheWall();
-capNeverExceedsTileCount();
-heroLandsCleanlyInSlotZero();
-expandZoomIsReversible();
-tilesPlayWithLifecycleAndPauseWhenEclipsed();
-partialErrorIsolation();
+cardsAlwaysFitAndNeighboursAlwaysPeek();
+unmeasuredCarouselIsSafe();
+snapOffsetsCentreEveryCard();
+viewabilityIsolatesTheSnappedCard();
+noMoreThanTwoCardsCanEverBeVisible();
+preloadWindowCapsMountedDecoders();
+onlyVisibleCardsPlay();
+activeCardDoesNotFlickerMidSwipe();
+redundantViewabilityTicksDoNotRerender();
+playbackRespectsLifecycleAndReadiness();
 unmountAndStaleLoadSafety();
 console.log(
-  'Showcase lifecycle replay passed: clean 4-row x 3-column tile wall, spread concurrency cap (6 of 12 decoders), clean hero-shrink and reversible tap-to-expand geometry, lifecycle/eclipse pausing, partial-error isolation, and unmount/stale-load safety',
+  'Showcase lifecycle replay passed: one 9:16 card centred per snap with guaranteed neighbour peek, snap offsets that centre every card including the ends, viewability that isolates the snapped card (never more than 2 visible at once), a 3-player preload window, visible-only playback with lifecycle gating, non-flickering active index, and unmount/stale-load safety',
 );

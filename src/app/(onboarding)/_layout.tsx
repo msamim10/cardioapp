@@ -20,6 +20,7 @@ export default function OnboardingLayout() {
       <Stack.Screen name="notifications" />
       <Stack.Screen name="gameplay-showcase" />
       <Stack.Screen name="create-account" options={{ animation: 'slide_from_right' }} />
+      <Stack.Screen name="plan" options={{ animation: 'fade' }} />
       <Stack.Screen name="signin" options={{ animation: 'slide_from_right' }} />
     </Stack>
   );
