@@ -17,7 +17,7 @@ export default function WelcomeScreen() {
   }, []);
   const { height } = useWindowDimensions();
   const usableHeight = height - insets.top - insets.bottom;
-  const heroHeight = Math.min(320, Math.max(220, Math.round(usableHeight * 0.34)));
+  const heroHeight = Math.min(350, Math.max(220, Math.round(usableHeight * 0.4)));
   const foxVerticalOffset = Math.min(32, Math.max(24, Math.round(usableHeight * 0.038)));
   const copyTopSpacing = Math.min(30, Math.max(18, Math.round(usableHeight * 0.032)));
   const groupTopInset = Math.min(34, Math.max(18, Math.round(usableHeight * 0.038)));
@@ -50,10 +50,6 @@ export default function WelcomeScreen() {
           <View style={[styles.copy, { paddingTop: copyTopSpacing }]}>
             <Text style={styles.eyebrow}>Full-body cardio</Text>
             <Text style={styles.title}>Run into another world</Text>
-            <Text style={styles.subtitle}>
-              Real cardio, built like a game. Your camera reads every jump, duck and dodge — no
-              treadmill, no equipment.
-            </Text>
           </View>
 
           <View style={styles.footer}>
@@ -124,13 +120,6 @@ const styles = StyleSheet.create({
   title: {
     ...type.display,
     color: colors.text,
-    textAlign: 'center',
-  },
-  subtitle: {
-    ...type.body,
-    color: colors.textDim,
-    marginTop: spacing.md,
-    maxWidth: 400,
     textAlign: 'center',
   },
   footer: {

@@ -21,26 +21,25 @@ const TICKS = 36;
 const TICK_WIDTH = 3;
 const TICK_LENGTH = 10;
 
-const SWEEP_MS = 900;
-/** Gap between gauges, so the row populates in sequence rather than at once. */
-export const RING_STAGGER_MS = 150;
+/**
+ * Gauges run strictly one after another, so the sweep is far shorter than a
+ * lone gauge would want: four of these plus their gaps have to land inside the
+ * couple of seconds a user will give a screen that stands between them and the
+ * app. `ringSequenceMs` is the single source of truth for when the set ends.
+ */
+const SWEEP_MS = 420;
+const GAP_MS = 110;
+const ENTER_MS = 160;
 
-export function PlanRingGauge({
-  ring,
-  index,
-  size = 100,
-}: {
-  ring: PlanRing;
-  index: number;
-  size?: number;
-}) {
-  // Two drivers with identical timing: the native one animates tick opacity off
-  // the UI thread, the JS one feeds the counter, which needs a listener.
-  const sweep = useRef(new Animated.Value(0)).current;
-  const counter = useRef(new Animated.Value(0)).current;
+/** Milliseconds from the first gauge starting to the last one finishing. */
+export function ringSequenceMs(count: number): number {
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  return count * SWEEP_MS + (count - 1) * GAP_MS;
+}
+
+/** Shared so the gauges and whatever waits on them agree on the setting. */
+export function useReduceMotion(): boolean {
   const [reduceMotion, setReduceMotion] = useState(false);
-  const [display, setDisplay] = useState(ring.countTo === null ? null : 0);
-  const lastDisplayRef = useRef(0);
 
   useEffect(() => {
     let mounted = true;
@@ -54,9 +53,32 @@ export function PlanRingGauge({
     };
   }, []);
 
+  return reduceMotion;
+}
+
+export function PlanRingGauge({
+  ring,
+  index,
+  size = 100,
+}: {
+  ring: PlanRing;
+  index: number;
+  size?: number;
+}) {
+  // Two drivers with identical timing: the native one animates tick opacity off
+  // the UI thread, the JS one feeds the counter, which needs a listener. A
+  // third fades the whole gauge in, so a cell is empty until its turn comes.
+  const sweep = useRef(new Animated.Value(0)).current;
+  const counter = useRef(new Animated.Value(0)).current;
+  const enter = useRef(new Animated.Value(0)).current;
+  const reduceMotion = useReduceMotion();
+  const [display, setDisplay] = useState(ring.countTo === null ? null : 0);
+  const lastDisplayRef = useRef(0);
+
   useEffect(() => {
     const target = ring.countTo;
     if (reduceMotion) {
+      enter.setValue(1);
       sweep.setValue(ring.fraction);
       counter.setValue(1);
       if (target !== null) setDisplay(target);
@@ -76,12 +98,20 @@ export function PlanRingGauge({
       });
     }
 
+    const delay = index * (SWEEP_MS + GAP_MS);
     const config = {
       duration: SWEEP_MS,
-      delay: index * RING_STAGGER_MS,
+      delay,
       easing: Easing.out(Easing.cubic),
     };
     const animation = Animated.parallel([
+      Animated.timing(enter, {
+        toValue: 1,
+        duration: ENTER_MS,
+        delay,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
       Animated.timing(sweep, { ...config, toValue: ring.fraction, useNativeDriver: true }),
       Animated.timing(counter, { ...config, toValue: 1, useNativeDriver: false }),
     ]);
@@ -91,7 +121,7 @@ export function PlanRingGauge({
       animation.stop();
       if (listener) counter.removeListener(listener);
     };
-  }, [counter, index, reduceMotion, ring.countTo, ring.fraction, sweep]);
+  }, [counter, enter, index, reduceMotion, ring.countTo, ring.fraction, sweep]);
 
   const bandRadius = size / 2 - TICK_LENGTH / 2;
   const litCount = Math.ceil(ring.fraction * TICKS);
@@ -103,11 +133,11 @@ export function PlanRingGauge({
     ring.countTo === null || display === null ? ring.value : `${display}${ring.suffix}`;
 
   return (
-    <View
+    <Animated.View
       accessible
       accessibilityRole="text"
       accessibilityLabel={`${ring.label}: ${ring.value}, ${ring.denominator}.`}
-      style={styles.wrap}
+      style={[styles.wrap, { opacity: enter }]}
     >
       <View style={[styles.gauge, { width: size, height: size }]}>
         {Array.from({ length: TICKS }, (_, tick) => (
@@ -140,7 +170,7 @@ export function PlanRingGauge({
       </View>
       <Text style={styles.label} numberOfLines={2}>{ring.label}</Text>
       <Text style={styles.denominator} numberOfLines={1}>{ring.denominator}</Text>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -171,7 +201,7 @@ function tickOpacity(sweep: Animated.Value, tick: number) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { alignItems: 'center', flex: 1 },
+  wrap: { alignItems: 'center' },
   gauge: { alignItems: 'center', justifyContent: 'center' },
   tick: {
     position: 'absolute',

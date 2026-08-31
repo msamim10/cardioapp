@@ -25,14 +25,17 @@ import {
 import { onboardingProgress } from '@/lib/onboarding';
 import { colors, spacing, type } from '@/theme';
 
+const EMPTY_HINT = "Optional — tap shuffle for ideas, or continue and we'll pick one.";
+const FORMAT_HINT = 'Lowercase and numbers, 3-20 characters.';
+
 export default function UsernameScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { username, setUsername } = useProgress();
 
-  const [value, setValue] = useState(() => username ?? generateUsername());
+  const [value, setValue] = useState(username ?? '');
   const [status, setStatus] = useState<UsernameStatus>('empty');
-  const [hint, setHint] = useState('Lowercase and numbers, 3-20 characters. Tap shuffle for a suggestion.');
+  const [hint, setHint] = useState(EMPTY_HINT);
 
   // Track the most recent value so an in-flight availability check can't apply a
   // stale result after the user keeps typing.
@@ -42,8 +45,13 @@ export default function UsernameScreen() {
   useEffect(() => {
     const check = validateUsername(value);
     if (!check.valid) {
-      setStatus(value.length === 0 ? 'empty' : 'invalid');
-      setHint(check.reason && check.reason !== 'empty' ? check.reason : 'Lowercase and numbers, 3-20 characters.');
+      if (value.length === 0) {
+        setStatus('empty');
+        setHint(EMPTY_HINT);
+        return;
+      }
+      setStatus('invalid');
+      setHint(check.reason ?? FORMAT_HINT);
       return;
     }
     setStatus('checking');
@@ -69,9 +77,15 @@ export default function UsernameScreen() {
   const onChangeText = (text: string) => setValue(normalizeUsername(text));
   const onRandomize = () => setValue(generateUsername());
 
+  // An untouched field is treated as "no preference" rather than an error, so
+  // continuing is never blocked on typing. Keyed off `value` and not `status`
+  // so a pending availability check can't gate the empty fast path.
+  const isEmpty = value.length === 0;
+  const canContinue = isEmpty || status === 'valid';
+
   const onContinue = () => {
-    if (status !== 'valid') return;
-    setUsername(value);
+    if (!canContinue) return;
+    setUsername(isEmpty ? generateUsername() : value);
     router.push('/(onboarding)/climb');
   };
 
@@ -109,8 +123,8 @@ export default function UsernameScreen() {
         <GradientButton
           label="CONTINUE"
           accent="lime"
-          onPress={status === 'valid' ? onContinue : undefined}
-          style={status !== 'valid' ? styles.disabled : undefined}
+          onPress={canContinue ? onContinue : undefined}
+          style={!canContinue ? styles.disabled : undefined}
         />
       </View>
     </View>

@@ -9,26 +9,24 @@
  *    the user recognising their own input, so filler would be worse than
  *    nothing. `answeredCount` reports how much is real, and `shouldShowPlan`
  *    suppresses the screen when there is nothing to reflect.
- * 2. No physiological outcome claims. The figures are session volume and the
- *    reward multiplier the chosen tier already applies — arithmetic on the
- *    user's own stated commitment, not promised results.
+ * 2. No physiological outcome claims. The figures are session volume, the
+ *    reward multiplier the chosen tier already applies, and the coins that
+ *    multiplier pays out across the stated week — arithmetic on the user's own
+ *    stated commitment, not promised results.
  * 3. Every gauge states the denominator it fills against, and that denominator
  *    is a real ceiling (days in a week, the largest weekly option the app
- *    offers, the highest tier multiplier) rather than a number picked to make
- *    the arc look good.
+ *    offers, the highest tier multiplier, and what those two together would
+ *    pay) rather than a number picked to make the arc look good.
  */
 
-import type { IconName } from '@/lib/gameData';
-import type {
-  GoalKey,
-  MotivationKey,
-  OnboardingAnswers,
-} from '@/lib/onboarding';
+import { modes } from '@/lib/gameData';
+import type { GoalKey, OnboardingAnswers } from '@/lib/onboarding';
 import { weeklyGoalOptions } from '@/lib/onboarding';
 import {
   CLASS_META,
   CLASS_ORDER,
   classForMover,
+  rewardForRun,
   type ClassKey,
 } from '@/lib/progression';
 
@@ -41,31 +39,32 @@ const WEEKS_PER_MONTH = 4;
 /** Largest weekly commitment the goal picker offers, so ring two has a real ceiling. */
 const MAX_SESSIONS_PER_WEEK = Math.max(...weeklyGoalOptions.map((option) => option.runs));
 
-/** Highest reward multiplier any tier applies, so ring three has a real ceiling. */
-const MAX_CLASS_MULTIPLIER = Math.max(
-  ...CLASS_ORDER.map((key) => CLASS_META[key].multiplier),
+/** Highest-paying tier, so rings three and four fill against real ceilings. */
+const TOP_CLASS: ClassKey = CLASS_ORDER.reduce((top, key) =>
+  CLASS_META[key].multiplier > CLASS_META[top].multiplier ? key : top,
 );
 
-/** Short, goal-derived framing. Deliberately no supporting sentence. */
-const GOAL_EYEBROW: Record<GoalKey, string> = {
-  lose: 'BUILT FOR CALORIE BURN',
-  habit: 'BUILT FOR CONSISTENCY',
-  active: 'BUILT FOR CONDITIONING',
-  fun: 'BUILT TO NOT FEEL LIKE TRAINING',
-};
+const MAX_CLASS_MULTIPLIER = CLASS_META[TOP_CLASS].multiplier;
+
+/**
+ * Median length of the maps actually shipped in the catalogue. Ring four is a
+ * per-run reward scaled by the user's own weekly count and tier, so the run it
+ * scales has to be a real one rather than a round number chosen for the figure.
+ */
+const RUN_MINUTES = modes
+  .flatMap((mode) => mode.levels.map((level) => level.durationMin))
+  .sort((a, b) => a - b);
+const TYPICAL_RUN_MIN = RUN_MINUTES[Math.floor(RUN_MINUTES.length / 2)] ?? 5;
+
+/** What the top tier at the largest weekly commitment would earn. */
+const MAX_WEEKLY_COINS =
+  MAX_SESSIONS_PER_WEEK * rewardForRun(TYPICAL_RUN_MIN, TOP_CLASS).coins;
 
 const GOAL_HEADLINE: Record<GoalKey, string> = {
   lose: 'Your burn program',
   habit: 'Your consistency program',
   active: 'Your conditioning program',
   fun: 'Your no-grind program',
-};
-
-const MOTIVATION_CHIP: Record<MotivationKey, { label: string; icon: IconName }> = {
-  compete: { label: 'Leaderboards on', icon: 'podium' },
-  streaks: { label: 'Streak tracking on', icon: 'flame' },
-  rewards: { label: 'Progression on', icon: 'diamond' },
-  chill: { label: 'Pressure off', icon: 'leaf' },
 };
 
 export type PlanRing = {
@@ -85,22 +84,14 @@ export type PlanRing = {
   fromAnswer: boolean;
 };
 
-export type PlanChip = {
-  key: string;
-  label: string;
-  icon: IconName;
-  fromAnswer: boolean;
-};
-
 export type OnboardingPlan = {
-  eyebrow: string;
   headline: string;
   handle: string | null;
   classKey: ClassKey;
   sessionsPerWeek: number;
   firstMonthSessions: number;
+  weeklyCoins: number;
   rings: PlanRing[];
-  chips: PlanChip[];
   /** How many of the four personalisation answers were actually stored. */
   answeredCount: number;
 };
@@ -117,6 +108,7 @@ export function buildOnboardingPlan(
   const firstMonthSessions = sessionsPerWeek * WEEKS_PER_MONTH;
   const maxFirstMonthSessions = MAX_SESSIONS_PER_WEEK * WEEKS_PER_MONTH;
   const hasWeeklyGoal = answers.daysPerWeek !== null;
+  const weeklyCoins = sessionsPerWeek * rewardForRun(TYPICAL_RUN_MIN, classKey).coins;
 
   const rings: PlanRing[] = [
     {
@@ -149,36 +141,26 @@ export function buildOnboardingPlan(
       fraction: clampFraction(classMeta.multiplier / MAX_CLASS_MULTIPLIER),
       fromAnswer: answers.mover !== null,
     },
-  ];
-
-  const motivation = answers.motivation
-    ? MOTIVATION_CHIP[answers.motivation]
-    : MOTIVATION_CHIP.streaks;
-
-  const chips: PlanChip[] = [
     {
-      key: 'motivation',
-      label: motivation.label,
-      icon: motivation.icon,
-      fromAnswer: answers.motivation !== null,
-    },
-    {
-      key: 'reminders',
-      label: answers.reminders ? 'Reminders on' : 'Reminders off',
-      icon: answers.reminders ? 'notifications' : 'notifications-off',
-      fromAnswer: true,
+      key: 'coins',
+      value: String(weeklyCoins),
+      countTo: weeklyCoins,
+      suffix: '',
+      label: 'Coins / week',
+      denominator: `of ${MAX_WEEKLY_COINS} max`,
+      fraction: clampFraction(weeklyCoins / MAX_WEEKLY_COINS),
+      fromAnswer: hasWeeklyGoal && answers.mover !== null,
     },
   ];
 
   return {
-    eyebrow: answers.goal ? GOAL_EYEBROW[answers.goal] : 'YOUR STARTING SETUP',
     headline: answers.goal ? GOAL_HEADLINE[answers.goal] : 'Your program',
     handle: username,
     classKey,
     sessionsPerWeek,
     firstMonthSessions,
+    weeklyCoins,
     rings,
-    chips,
     answeredCount: [
       answers.goal,
       answers.mover,
@@ -190,7 +172,7 @@ export function buildOnboardingPlan(
 
 /**
  * Whether the plan beat is worth showing. With nothing stored the screen would
- * be three default gauges presented as personalisation, which undercuts the
+ * be four default gauges presented as personalisation, which undercuts the
  * offer that follows it, so the caller falls through to the paywall instead.
  */
 export function shouldShowPlan(plan: OnboardingPlan): boolean {

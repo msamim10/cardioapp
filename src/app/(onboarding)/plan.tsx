@@ -1,9 +1,15 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  Animated,
+  Easing,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { PlanRingGauge } from '@/components/PlanRingGauge';
+import { PlanRingGauge, ringSequenceMs, useReduceMotion } from '@/components/PlanRingGauge';
 import { GradientButton, OnboardingTopBar } from '@/components/ui';
 import { useAuth } from '@/lib/AuthContext';
 import { markPlanReviewed } from '@/lib/funnelStore';
@@ -13,15 +19,26 @@ import { buildOnboardingPlan } from '@/lib/onboardingPlan';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import { useProgress } from '@/lib/ProgressContext';
 import { useSubscription } from '@/lib/SubscriptionContext';
-import { colors, radius, spacing, type } from '@/theme';
+import { colors, spacing, type } from '@/theme';
+
+/** Fade for the footer once the last gauge has landed. */
+const FOOTER_FADE_MS = 240;
+
+/**
+ * Ceiling on how long the footer can stay hidden, whatever the gauges do. The
+ * offer is mandatory, so an un-tappable CTA is a dead end rather than a
+ * cosmetic bug: this fires independently of the sequence length.
+ */
+const FOOTER_SAFETY_MS = 4000;
 
 /**
  * The plan hand-off, shown between account creation and the offer.
  *
  * Deliberately a readout rather than a written summary: the gauges are computed
- * from the user's own answers (see `buildOnboardingPlan`) and sweep in on mount,
- * so the screen reads as output the app produced rather than copy someone wrote.
- * That is what has to carry credibility immediately before a price.
+ * from the user's own answers (see `buildOnboardingPlan`) and sweep in one at a
+ * time on mount, so the screen reads as output the app is producing rather than
+ * copy someone wrote. That is what has to carry credibility immediately before
+ * a price, and it is why the footer waits for the last gauge.
  *
  * The offer is still presented by the shared `presentOnboardingOffer` helper, so
  * ATT ordering and the one-time paywall claim behave exactly as they do on the
@@ -38,16 +55,54 @@ export default function PlanScreen() {
   const { isPremium, presentPaywall } = useSubscription();
   const [busy, setBusy] = useState(false);
   const mountedRef = useRef(true);
+  const reduceMotion = useReduceMotion();
 
   const plan = useMemo(() => buildOnboardingPlan(answers, username), [answers, username]);
 
-  // Three gauges share the row, so the diameter has to come off the real width
-  // rather than a fixed guess that overflows its cell on the smallest phones.
+  // Two gauges share each grid row, so the diameter has to come off the real
+  // width rather than a fixed guess that overflows its cell on small phones.
   const { width } = useWindowDimensions();
   const gaugeSize = useMemo(() => {
-    const cell = (width - spacing.lg * 2 - spacing.sm * 2) / plan.rings.length;
-    return Math.max(72, Math.min(104, Math.floor(cell - spacing.sm)));
-  }, [plan.rings.length, width]);
+    const cell = (width - spacing.lg * 2) / 2;
+    return Math.max(84, Math.min(120, Math.floor(cell - spacing.md)));
+  }, [width]);
+
+  const reveal = useRef(new Animated.Value(0)).current;
+  const revealAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const footerShownRef = useRef(false);
+  const [footerShown, setFooterShown] = useState(false);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      footerShownRef.current = true;
+      reveal.setValue(1);
+      setFooterShown(true);
+      return;
+    }
+
+    const show = () => {
+      if (footerShownRef.current) return;
+      footerShownRef.current = true;
+      setFooterShown(true);
+      revealAnimRef.current = Animated.timing(reveal, {
+        toValue: 1,
+        duration: FOOTER_FADE_MS,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      });
+      revealAnimRef.current.start();
+    };
+
+    const timers = [
+      setTimeout(show, ringSequenceMs(plan.rings.length)),
+      setTimeout(show, FOOTER_SAFETY_MS),
+    ];
+
+    return () => {
+      timers.forEach(clearTimeout);
+      revealAnimRef.current?.stop();
+    };
+  }, [plan.rings.length, reduceMotion, reveal]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -81,35 +136,44 @@ export default function PlanScreen() {
       <OnboardingTopBar progress={onboardingProgress('plan')} topInset={insets.top} />
 
       <View style={styles.content}>
-        <Text style={styles.eyebrow}>{plan.eyebrow}</Text>
         <Text style={styles.title}>
           {plan.handle ? `${plan.handle}, your plan is ready` : plan.headline}
         </Text>
 
         <View style={styles.gauges}>
           {plan.rings.map((ring, index) => (
-            <PlanRingGauge key={ring.key} ring={ring} index={index} size={gaugeSize} />
-          ))}
-        </View>
-
-        <View style={styles.chips}>
-          {plan.chips.map((chip) => (
-            <View key={chip.key} style={styles.chip}>
-              <Ionicons name={chip.icon} size={14} color={colors.lime} />
-              <Text style={styles.chipText}>{chip.label}</Text>
+            <View key={ring.key} style={styles.gaugeCell}>
+              <PlanRingGauge ring={ring} index={index} size={gaugeSize} />
             </View>
           ))}
         </View>
       </View>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <Animated.View
+        pointerEvents={footerShown ? 'auto' : 'none'}
+        style={[
+          styles.footer,
+          {
+            paddingBottom: insets.bottom + spacing.md,
+            opacity: reveal,
+            transform: [
+              {
+                translateY: reveal.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [12, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
         <Text style={styles.footnote}>Adjustable any time in your profile.</Text>
         <GradientButton
           label={busy ? 'One moment…' : 'Start my plan'}
           accent="lime"
           onPress={continueToOffer}
         />
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -122,40 +186,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xxl,
   },
-  eyebrow: { ...type.label, color: colors.lime, textAlign: 'center' },
   title: {
     ...type.h1,
     color: colors.text,
     fontSize: 32,
     lineHeight: 36,
-    marginTop: spacing.sm,
     textAlign: 'center',
   },
   gauges: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    marginTop: spacing.xxxl,
-  },
-  chips: {
-    flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: spacing.sm,
+    alignItems: 'flex-start',
+    rowGap: spacing.xl,
     marginTop: spacing.xxl,
   },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  chipText: { ...type.micro, color: colors.text },
+  gaugeCell: { width: '50%', paddingHorizontal: spacing.xs },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,

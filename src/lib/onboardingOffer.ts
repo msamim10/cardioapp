@@ -47,18 +47,53 @@ export async function presentOnboardingOffer({
   presentPaywall: (opts?: { ifNeeded?: boolean }) => Promise<PaywallUIResult>;
   isMounted: () => boolean;
 }): Promise<void> {
-  if (isPremium || allowsUnpaidAccess()) return;
-  if (!(await claimOnboardingPaywall())) return;
+  if (isPremium || allowsUnpaidAccess()) {
+    console.info(
+      isPremium
+        ? '[onboarding] end-of-onboarding paywall skipped — this account already holds the ' +
+            'premium entitlement, so there is nothing to present.'
+        : '[onboarding] end-of-onboarding paywall skipped — RevenueCat has no real key for ' +
+            'this build, so unpaid access is allowed and runs are never gated.'
+    );
+    return;
+  }
+  if (!(await claimOnboardingPaywall())) {
+    console.warn(
+      '[onboarding] end-of-onboarding paywall SUPPRESSED — the one-shot claim is already ' +
+        'spent, so the paywall has been shown once on this install and will never be ' +
+        'presented by onboarding again. Expected on any onboarding replay after a logout. ' +
+        'Runs stay gated by the level screen. To see it again while testing, clear the flag ' +
+        'with Reset on the Profile → "Analytics funnel (debug)" screen, or reinstall.'
+    );
+    return;
+  }
   let presented = false;
   try {
     await requestTrackingAuthorization();
-    if (!isMounted()) return;
+    if (!isMounted()) {
+      console.warn(
+        '[onboarding] end-of-onboarding paywall ABANDONED while awaiting the ATT request — ' +
+          'the presenting screen unmounted mid-offer. This happens when the root gate ' +
+          'redirects to the tabs because onboarding was already marked complete before this ' +
+          'sign-in resolved. The claim is released, so a later run can still present it.'
+      );
+      return;
+    }
     // Keyed to the Firebase UID before presenting, so a purchase made on the
     // hosted paywall lands on this account rather than an anonymous one. This
     // also configures the SDK; `presentHostedPaywall` then waits for offerings.
     if (userId) await synchronizePurchasesIdentity(userId);
     await wait(PAYWALL_AFTER_ATT_DELAY_MS);
-    if (!isMounted()) return;
+    if (!isMounted()) {
+      console.warn(
+        '[onboarding] end-of-onboarding paywall ABANDONED just before presenting — the ' +
+          'presenting screen unmounted during the RevenueCat identity sync or the post-ATT ' +
+          'delay. This happens when the root gate redirects to the tabs because onboarding ' +
+          'was already marked complete before this sign-in resolved. The claim is released, ' +
+          'so a later run can still present it.'
+      );
+      return;
+    }
     presented = (await requestOnboardingSubscriptionAccess(presentPaywall)) !== 'not_shown';
     if (!presented) {
       console.error(
