@@ -115,8 +115,8 @@ export const worldOptions = modes.map((mode) => ({
 }));
 
 /**
- * Six recognizable canonical levels, led by the same three objects shown by
- * Home's "Popular this week" row. Selection still persists the existing
+ * Six recognizable canonical levels, led by the same three maps shown in
+ * Home's "Recommended for you" row. Selection still persists the existing
  * mode/level id, while the cover resolves through the exact helper used by
  * Home, Levels, and All Maps.
  */
@@ -174,14 +174,18 @@ export type StepId =
  */
 export const ONBOARDING_SCREENS = [
   'attribution',
+  'gameplay-showcase',
   'questions',
+  'how-you-play',
+  'where-you-play',
+  'pick-first-run',
   'username',
-  'climb',
   'goal',
   'notifications',
-  'gameplay-showcase',
   'create-account',
   'plan',
+  'make-it-real',
+  'first-run-ready',
 ] as const;
 
 export type OnboardingScreenId = (typeof ONBOARDING_SCREENS)[number];

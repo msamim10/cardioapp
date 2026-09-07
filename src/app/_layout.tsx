@@ -1,10 +1,14 @@
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { type Href, Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
-import { OnboardingProvider, useOnboarding } from '@/lib/OnboardingContext';
+import {
+  OnboardingProvider,
+  useOnboarding,
+  type OnboardingCheckpoint,
+} from '@/lib/OnboardingContext';
 import { ProgressProvider, useProgress } from '@/lib/ProgressContext';
 import { SubscriptionProvider } from '@/lib/SubscriptionContext';
 import { initAnalytics } from '@/lib/analytics';
@@ -41,8 +45,22 @@ export default function RootLayout() {
   );
 }
 
+/**
+ * Routes outside the `(onboarding)` group that the first-run ceremony passes
+ * through before onboarding is marked complete: calibration, the "first run is
+ * ready" offer screen, and the run itself. The gate must treat them as part of
+ * onboarding, or it would bounce the user back to welcome mid-ceremony.
+ */
+const FIRST_RUN_ROUTES = new Set(['preflight', 'first-run-ready', 'workout', 'summary']);
+
+const CHECKPOINT_ROUTES: Record<OnboardingCheckpoint, Href> = {
+  plan: '/(onboarding)/plan',
+  'make-it-real': '/(onboarding)/make-it-real' as Href,
+  'first-run-ready': '/first-run-ready' as Href,
+};
+
 function RootNavigator() {
-  const { hydrated: onboardingHydrated, completed, answers } = useOnboarding();
+  const { hydrated: onboardingHydrated, completed, answers, checkpoint } = useOnboarding();
   const { hydrated: authHydrated, user } = useAuth();
   const { hydrated: progressHydrated, streak } = useProgress();
   const segments = useSegments();
@@ -53,30 +71,36 @@ function RootNavigator() {
   // or progress state is still unknown.
   const hydrated = onboardingHydrated && authHydrated && progressHydrated;
   const inOnboarding = segments[0] === '(onboarding)';
+  const inOnboardingFlow = inOnboarding || FIRST_RUN_ROUTES.has(segments[0] ?? '');
   const onCreateAccount = inOnboarding && segments[1] === 'create-account';
   const destination = decideAuthGate({
     hydrated,
     onboardingCompleted: completed,
     authenticated: user !== null,
+    checkpoint,
   });
   const routeMatchesGate =
     destination === 'loading' ||
     (destination === 'tabs' && !inOnboarding) ||
     (destination === 'create-account' && onCreateAccount) ||
-    (destination === 'welcome' && inOnboarding);
+    (destination === 'welcome' && inOnboardingFlow) ||
+    (destination === 'resume' && inOnboardingFlow);
 
   // Tabs require both a completed onboarding flow and Firebase user. Legacy
-  // installs that completed local onboarding are sent to account creation.
+  // installs that completed local onboarding are sent to account creation. A
+  // signed-in user with a first-run checkpoint resumes there after a kill.
   useEffect(() => {
     if (destination === 'loading') return;
     if (destination === 'tabs' && inOnboarding) {
       router.replace('/(tabs)');
     } else if (destination === 'create-account' && !onCreateAccount) {
       router.replace('/(onboarding)/create-account');
-    } else if (destination === 'welcome' && !inOnboarding) {
+    } else if (destination === 'resume' && !inOnboardingFlow) {
+      router.replace(CHECKPOINT_ROUTES[checkpoint ?? 'plan']);
+    } else if (destination === 'welcome' && !inOnboardingFlow) {
       router.replace('/(onboarding)/welcome');
     }
-  }, [destination, inOnboarding, onCreateAccount, router]);
+  }, [checkpoint, destination, inOnboarding, inOnboardingFlow, onCreateAccount, router]);
 
   // Reschedule local reminders on cold start (and whenever the opt-in, weekly
   // goal, or streak changes) so recurring notifications reflect the latest
@@ -146,6 +170,10 @@ function RootStack() {
       <Stack.Screen name="paywall" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       <Stack.Screen
         name="preflight"
+        options={{ animation: 'fade', gestureEnabled: false }}
+      />
+      <Stack.Screen
+        name="first-run-ready"
         options={{ animation: 'fade', gestureEnabled: false }}
       />
       <Stack.Screen name="workout" options={{ animation: 'fade', gestureEnabled: false }} />

@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { type Href, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
@@ -11,14 +11,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PlanRingGauge, ringSequenceMs, useReduceMotion } from '@/components/PlanRingGauge';
 import { GradientButton, OnboardingTopBar } from '@/components/ui';
-import { useAuth } from '@/lib/AuthContext';
 import { markPlanReviewed } from '@/lib/funnelStore';
 import { onboardingProgress } from '@/lib/onboarding';
-import { presentOnboardingOffer } from '@/lib/onboardingOffer';
 import { buildOnboardingPlan } from '@/lib/onboardingPlan';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import { useProgress } from '@/lib/ProgressContext';
-import { useSubscription } from '@/lib/SubscriptionContext';
 import { colors, spacing, type } from '@/theme';
 
 /** Fade for the footer once the last gauge has landed. */
@@ -26,35 +23,30 @@ const FOOTER_FADE_MS = 240;
 
 /**
  * Ceiling on how long the footer can stay hidden, whatever the gauges do. The
- * offer is mandatory, so an un-tappable CTA is a dead end rather than a
+ * ceremony has to continue, so an un-tappable CTA is a dead end rather than a
  * cosmetic bug: this fires independently of the sequence length.
  */
 const FOOTER_SAFETY_MS = 4000;
 
 /**
- * The plan hand-off, shown between account creation and the offer.
+ * The plan hand-off, shown right after account creation.
  *
  * Deliberately a readout rather than a written summary: the gauges are computed
  * from the user's own answers (see `buildOnboardingPlan`) and sweep in one at a
  * time on mount, so the screen reads as output the app is producing rather than
- * copy someone wrote. That is what has to carry credibility immediately before
- * a price, and it is why the footer waits for the last gauge.
+ * copy someone wrote. That is what has to carry credibility on the way to a
+ * price, and it is why the footer waits for the last gauge.
  *
- * The offer is still presented by the shared `presentOnboardingOffer` helper, so
- * ATT ordering and the one-time paywall claim behave exactly as they do on the
- * auth screen, and `completeOnboarding` stays off the mount path — flipping it
- * here would make the root gate redirect straight to the tabs.
+ * The offer itself is no longer presented here: it moved to the "first run is
+ * ready" screen after calibration, so the user has felt the controls before
+ * they see a price. `completeOnboarding` stays off this path entirely.
  */
 export default function PlanScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ userId?: string }>();
-  const { answers, completeOnboarding } = useOnboarding();
+  const { answers, setCheckpoint } = useOnboarding();
   const { username } = useProgress();
-  const { user } = useAuth();
-  const { isPremium, presentPaywall } = useSubscription();
   const [busy, setBusy] = useState(false);
-  const mountedRef = useRef(true);
   const reduceMotion = useReduceMotion();
 
   const plan = useMemo(() => buildOnboardingPlan(answers, username), [answers, username]);
@@ -105,30 +97,17 @@ export default function PlanScreen() {
   }, [plan.rings.length, reduceMotion, reveal]);
 
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
     void markPlanReviewed();
-  }, []);
+    setCheckpoint('plan');
+  }, [setCheckpoint]);
 
-  const continueToOffer = async () => {
+  const continueToRecap = () => {
     if (busy) return;
     setBusy(true);
-    try {
-      await presentOnboardingOffer({
-        userId: params.userId ?? user?.id ?? null,
-        isPremium,
-        presentPaywall,
-        isMounted: () => mountedRef.current,
-      });
-    } finally {
-      completeOnboarding();
-      router.replace('/(tabs)');
-    }
+    setCheckpoint('make-it-real');
+    router.push('/(onboarding)/make-it-real' as Href);
+    // Re-arm in case the user swipes back to this screen.
+    setTimeout(() => setBusy(false), 600);
   };
 
   return (
@@ -169,9 +148,10 @@ export default function PlanScreen() {
       >
         <Text style={styles.footnote}>Adjustable any time in your profile.</Text>
         <GradientButton
-          label={busy ? 'One moment…' : 'Start my plan'}
+          label="Start my plan"
+          icon="arrow-forward"
           accent="lime"
-          onPress={continueToOffer}
+          onPress={continueToRecap}
         />
       </Animated.View>
     </View>

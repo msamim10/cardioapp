@@ -86,7 +86,7 @@ export default function UsernameScreen() {
   const onContinue = () => {
     if (!canContinue) return;
     setUsername(isEmpty ? generateUsername() : value);
-    router.push('/(onboarding)/climb');
+    router.push('/(onboarding)/goal');
   };
 
   return (

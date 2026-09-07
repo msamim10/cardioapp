@@ -389,10 +389,12 @@ export function rewardForRun(durationMin: number, classKey: ClassKey): { coins: 
 
 /**
  * MET-based calorie estimate: kcal = MET × weightKg × hours, where MET scales
- * with the class speed so faster classes burn more.
+ * with the class speed so faster classes burn more. `effort` is the per-run
+ * intensity multiplier (Light / Active / Intense playback), default neutral.
  */
-export function caloriesForRun(durationMin: number, classKey: ClassKey): number {
-  const met = BASE_MET * CLASS_META[classKey].speedFactor;
+export function caloriesForRun(durationMin: number, classKey: ClassKey, effort = 1): number {
+  const factor = Number.isFinite(effort) && effort > 0 ? effort : 1;
+  const met = BASE_MET * CLASS_META[classKey].speedFactor * factor;
   return Math.round(met * DEFAULT_WEIGHT_KG * (durationMin / 60));
 }
 

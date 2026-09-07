@@ -36,7 +36,7 @@ const POPULAR_CHALLENGES = POPULAR_CHALLENGE_IDS.flatMap((id) => {
         {
           id,
           mode,
-          cornerLabel: id === 'neon-rails' ? 'MOST POPULAR' : undefined,
+          cornerLabel: id === 'neon-rails' ? 'FEATURED' : undefined,
           participantCount: getSimulatedRunnerCount(id),
         },
       ]
@@ -276,7 +276,7 @@ export default function HomeScreen() {
         </Card>
 
         <View style={styles.challengesSection}>
-          <Text style={styles.sectionTitle}>Popular this week</Text>
+          <Text style={styles.sectionTitle}>Recommended for you</Text>
           <ScrollView
             horizontal
             nestedScrollEnabled

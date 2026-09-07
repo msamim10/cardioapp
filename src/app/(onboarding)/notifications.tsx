@@ -34,9 +34,7 @@ export default function NotificationsScreen() {
   const { streak } = useProgress();
   const [busy, setBusy] = useState(false);
 
-  // The route is new in this working tree, so the generated typed-route cache
-  // may not include it until Metro next restarts.
-  const goNext = () => router.push('/(onboarding)/gameplay-showcase' as Href);
+  const goNext = () => router.push('/(onboarding)/create-account' as Href);
 
   const onEnable = async () => {
     if (busy) return;

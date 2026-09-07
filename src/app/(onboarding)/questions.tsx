@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { type Href, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AccessibilityInfo,
@@ -55,7 +55,7 @@ export default function QuestionsScreen() {
 
   const goNext = () => {
     if (index >= STEPS.length - 1) {
-      router.push('/(onboarding)/username');
+      router.push('/(onboarding)/how-you-play' as Href);
       return;
     }
     setIndex((i) => i + 1);

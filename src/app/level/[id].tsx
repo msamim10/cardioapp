@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { VideoAirPlayButton } from 'expo-video';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -14,10 +14,20 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RunSettingsSheet } from '@/components/RunSettingsSheet';
 import { OptionCard, SectionHeader } from '@/components/ui';
 import { discoveryClassForMode } from '@/lib/dailyRecommendations';
 import { getMode, modes } from '@/lib/gameData';
 import { getModeCover } from '@/lib/modeCovers';
+import { useOnboarding } from '@/lib/OnboardingContext';
+import {
+  INTENSITY_META,
+  loadPlaySetup,
+  resolveRunSettings,
+  savePlayScreen,
+  saveRunSettings,
+  type RunSettings,
+} from '@/lib/playSetup';
 import { useProgress } from '@/lib/ProgressContext';
 import {
   caloriesForRun,
@@ -51,9 +61,36 @@ export default function LevelDetailScreen() {
   const insets = useSafeAreaInsets();
   const mode = getMode(id);
   const { classData } = useProgress();
+  const { answers } = useOnboarding();
   const { hydrated: subscriptionHydrated, isPremium, presentPaywall } = useSubscription();
   const [playbackDestination, setPlaybackDestination] = useState<PlaybackDestination>('phone');
   const [starting, setStarting] = useState(false);
+  // Per-run settings: last-used from AsyncStorage, otherwise derived from the
+  // onboarding baseline answer. Edited through the sheet, persisted on save.
+  const [runSettings, setRunSettings] = useState<RunSettings>(() =>
+    resolveRunSettings(null, answers),
+  );
+  const [editOpen, setEditOpen] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    loadPlaySetup().then((setup) => {
+      if (!mounted) return;
+      setRunSettings(resolveRunSettings(setup, answers));
+      if (setup.screen) setPlaybackDestination(setup.screen);
+    });
+    return () => {
+      mounted = false;
+    };
+    // Only the initial resolve should read answers; later edits are explicit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const intensityMeta = INTENSITY_META[runSettings.intensity];
+  const sessionLabel = useMemo(
+    () => `${intensityMeta.label} · ${runSettings.durationMin} min`,
+    [intensityMeta.label, runSettings.durationMin],
+  );
   const campaignClass = parseOptionalClassKeyParam(classKeyParam);
   const displayClass =
     campaignClass ?? (id ? discoveryClassForMode(id, modes) : 'beginner');
@@ -80,14 +117,23 @@ export default function LevelDetailScreen() {
   const level = mode.levels[0];
   const cover = getModeCover(mode.id);
   const classMeta = CLASS_META[displayClass];
-  const calories = caloriesForRun(level.durationMin, displayClass);
+  const calories = caloriesForRun(runSettings.durationMin, displayClass, intensityMeta.effort);
 
+  // Intensity is the playback rate: the user's explicit choice replaces the
+  // class speed factor, so a Light run is genuinely slower on any class.
   const preflightParams: Record<string, string> = {
     level: level.id,
     name: level.name,
-    speed: String(classMeta.speedFactor),
-    duration: String(level.durationMin),
+    speed: String(intensityMeta.playbackRate),
+    duration: String(runSettings.durationMin),
+    intensity: runSettings.intensity,
     ...(campaignClass ? { classKey: campaignClass } : {}),
+  };
+
+  const saveEdits = (next: RunSettings) => {
+    setRunSettings(next);
+    setEditOpen(false);
+    void saveRunSettings(next);
   };
 
   const goPreflight = () => {
@@ -180,15 +226,60 @@ export default function LevelDetailScreen() {
             <View
               style={styles.heroSummaryRow}
               accessible
-              accessibilityLabel={`${classMeta.label}, ${level.durationMin} minutes, approximately ${calories} calories, ${classMeta.speedFactor.toFixed(1)} times intensity`}
+              accessibilityLabel={`${classMeta.label}, ${runSettings.durationMin} minutes, approximately ${calories} calories, ${intensityMeta.playbackRate.toFixed(2)} times speed`}
             >
               <HeroSummaryItem icon={classMeta.icon} value={classMeta.label} />
-              <HeroSummaryItem icon="time-outline" value={`${level.durationMin} min`} />
+              <HeroSummaryItem icon="time-outline" value={`${runSettings.durationMin} min`} />
               <HeroSummaryItem icon="flame-outline" value={`~${calories} kcal`} />
               <HeroSummaryItem
                 icon="speedometer-outline"
-                value={`${classMeta.speedFactor.toFixed(1)}x`}
+                value={`${intensityMeta.playbackRate.toFixed(2)}x`}
               />
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <SectionHeader
+            title="Your session"
+            action={
+              <Pressable
+                onPress={() => setEditOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit intensity and duration. Currently ${sessionLabel}`}
+                hitSlop={8}
+                style={({ pressed }) => [styles.editBtn, pressed && styles.pressed]}
+              >
+                <Ionicons name="options-outline" size={15} color={colors.lime} />
+                <Text style={styles.editBtnText}>Edit</Text>
+              </Pressable>
+            }
+          />
+          <View style={styles.sessionCard}>
+            <View style={styles.sessionCell}>
+              <View style={styles.sessionIcon}>
+                <Ionicons name={intensityMeta.icon} size={18} color={colors.lime} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sessionLabel}>Intensity</Text>
+                <Text style={styles.sessionValue}>{intensityMeta.label}</Text>
+                <Text style={styles.sessionDetail}>{intensityMeta.blurb}</Text>
+              </View>
+            </View>
+            <View style={styles.sessionRule} />
+            <View style={styles.sessionCell}>
+              <View style={styles.sessionIcon}>
+                <Ionicons name="timer-outline" size={18} color={colors.lime} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sessionLabel}>Duration</Text>
+                <Text style={styles.sessionValue}>{runSettings.durationMin} min</Text>
+                <Text style={styles.sessionDetail}>
+                  {runSettings.durationMin > level.durationMin
+                    ? 'The map loops until time is up.'
+                    : 'Ends into your results on the clock.'}
+                </Text>
+              </View>
             </View>
           </View>
         </View>
@@ -241,7 +332,10 @@ export default function LevelDetailScreen() {
                 desc="Play on this device"
                 icon="phone-portrait-outline"
                 selected={playbackDestination === 'phone'}
-                onPress={() => setPlaybackDestination('phone')}
+                onPress={() => {
+                  setPlaybackDestination('phone');
+                  void savePlayScreen('phone');
+                }}
               />
               <View
                 style={styles.tvAirplayCardWrap}
@@ -266,7 +360,10 @@ export default function LevelDetailScreen() {
                   tint="#00000000"
                   activeTint="#00000000"
                   prioritizeVideoDevices
-                  onBeginPresentingRoutes={() => setPlaybackDestination('tv')}
+                  onBeginPresentingRoutes={() => {
+                    setPlaybackDestination('tv');
+                    void savePlayScreen('tv');
+                  }}
                   accessibilityRole="button"
                   accessibilityLabel="Choose an AirPlay display"
                   accessibilityHint="Opens the system AirPlay route picker"
@@ -313,6 +410,12 @@ export default function LevelDetailScreen() {
         </Pressable>
       </View>
 
+      <RunSettingsSheet
+        visible={editOpen}
+        value={runSettings}
+        onClose={() => setEditOpen(false)}
+        onSave={saveEdits}
+      />
     </View>
   );
 }
@@ -416,6 +519,39 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   section: { gap: spacing.sm },
+  editBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 7,
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(215,255,62,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(215,255,62,0.3)',
+  },
+  editBtnText: { color: colors.lime, fontSize: 12, fontWeight: font.heavy, letterSpacing: 0.6 },
+  sessionCard: {
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    gap: spacing.md,
+  },
+  sessionCell: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  sessionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(215,255,62,0.1)',
+  },
+  sessionLabel: { ...type.micro, color: colors.textFaint },
+  sessionValue: { ...type.h3, color: colors.text, marginTop: 2 },
+  sessionDetail: { ...type.bodySm, color: colors.textDim },
+  sessionRule: { height: StyleSheet.hairlineWidth, backgroundColor: colors.borderStrong },
   prepRow: {
     flexDirection: 'row',
     flexWrap: 'nowrap',

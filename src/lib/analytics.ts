@@ -43,6 +43,7 @@ import {
   markCalibrationAttempt,
   markCalibrationFailure,
   markCalibrationSuccess,
+  markFirstRunLaunched,
   markOnboardingComplete,
   markOnboardingStart,
   markPaidConversion,
@@ -228,6 +229,15 @@ export function logRunComplete(attrs: { durationMin: number; score: number }): v
     if (count === 1) singularEvent(EVENTS.firstRunComplete);
     await bumpConversionValueForRunCount(count);
   });
+}
+
+/**
+ * Onboarding launched the user's selected first run directly after the offer.
+ * Local funnel only (no Singular event — the account is near its registered
+ * event limit and the run itself still fires `run_complete`).
+ */
+export function logFirstRunLaunched(): void {
+  safely('logFirstRunLaunched', () => markFirstRunLaunched());
 }
 
 /** The paywall was shown (hosted RevenueCat UI OR the custom fallback). */

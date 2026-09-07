@@ -29,6 +29,12 @@ import {
   PoseTrackingMode,
   totalWorkoutScore,
 } from '@/lib/poseTracking';
+import {
+  INTENSITY_META,
+  isIntensityKey,
+  targetSecondsForRun,
+  wallClockElapsed,
+} from '@/lib/playSetup';
 import { useProgress } from '@/lib/ProgressContext';
 import { CLASS_META, caloriesForRun } from '@/lib/progression';
 import {
@@ -36,7 +42,14 @@ import {
   consumeTrackingHandoff,
 } from '@/lib/trackingSession';
 import { getVideoSource } from '@/lib/videoSources';
-import { colors, font, radius, spacing } from '@/theme';
+import { colors, font, metric, radius, spacing, type } from '@/theme';
+
+/**
+ * How close to the end of the video the last position must have been for a
+ * backwards jump to count as the loop wrapping (vs. a seek). timeUpdate fires
+ * every 0.5s and the fastest rate is 1.2x, so a real wrap always lands inside.
+ */
+const LOOP_WRAP_WINDOW_S = 3;
 
 /** mm:ss from a seconds value (clamped, non-negative). */
 function formatClock(seconds: number): string {
@@ -62,13 +75,19 @@ function safe(fn: () => void): void {
 }
 
 export default function WorkoutScreen() {
-  const { level, speed, tracking, trackingRunId } = useLocalSearchParams<{
-    level: string;
-    name?: string;
-    speed?: string;
-    tracking?: 'calibrated' | 'off';
-    trackingRunId?: string;
-  }>();
+  const { level, speed, duration: durationParam, intensity: intensityParam, tracking, trackingRunId, fromOnboarding } =
+    useLocalSearchParams<{
+      level: string;
+      name?: string;
+      speed?: string;
+      /** Target run length in minutes. The map loops until it is reached. */
+      duration?: string;
+      intensity?: string;
+      tracking?: 'calibrated' | 'off';
+      trackingRunId?: string;
+      /** Set when launched from the onboarding ceremony; forwarded to the summary. */
+      fromOnboarding?: string;
+    }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
@@ -77,17 +96,35 @@ export default function WorkoutScreen() {
 
   const source = getVideoSource(level, 'vertical');
 
-  // Additive: class-driven playback speed passed via route param (default 1x).
+  // Playback speed comes from the run's intensity (0.85 / 1.0 / 1.2x), passed
+  // as a route param so the level screen stays the single place that decides.
   const playbackRate = Number(speed) > 0 ? Number(speed) : 1;
+  const intensityMeta = isIntensityKey(intensityParam) ? INTENSITY_META[intensityParam] : null;
+
+  // Wall-clock target. When set, the map loops until the target is reached and
+  // the run ends on the clock rather than at the end of the video. Without it
+  // (legacy callers) the run ends when the video plays to its end, as before.
+  const targetSeconds =
+    Number(durationParam) > 0 ? targetSecondsForRun(Number(durationParam)) : 0;
+  const timedRun = targetSeconds > 0;
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   // Additive (AirPlay): tracks whether playback is routed to an external screen.
   const [onExternalScreen, setOnExternalScreen] = useState(false);
-  // Additive (AirPlay): playback position used only by the companion dashboard.
+  // Wall-clock seconds of the run actually played (loops included, playback
+  // rate divided out). This is what the HUD, calories, and the summary use.
   const [elapsed, setElapsed] = useState(0);
-  const [duration, setDuration] = useState(0);
+  // The run's total length in seconds: the target for timed runs, else the
+  // video's natural duration once known.
+  const [duration, setDuration] = useState(targetSeconds);
   const elapsedRef = useRef(0);
-  const durationRef = useRef(0);
+  const durationRef = useRef(targetSeconds);
+  // Video-seconds accumulated across loops, and the last position seen, so a
+  // wrap back to 0 is counted as progress rather than a rewind.
+  const videoPlayedRef = useRef(0);
+  const lastPositionRef = useRef(0);
+  const videoLengthRef = useRef(0);
+  const finishedRef = useRef(false);
   const [screenFocused, setScreenFocused] = useState(false);
   // This preference lasts for this workout. AirPlay always shows the companion
   // camera; returning to the phone restores the user's prior PiP choice.
@@ -156,8 +193,9 @@ export default function WorkoutScreen() {
   const classMeta = CLASS_META[classKey];
   const levelInfo = getLevel(level);
   const worldInfo = getMode(level);
-  const progress = duration > 0 ? elapsed / duration : 0;
-  const calories = caloriesForRun(elapsed / 60, classKey);
+  const progress = duration > 0 ? Math.min(1, elapsed / duration) : 0;
+  const remaining = duration > 0 ? Math.max(0, duration - elapsed) : 0;
+  const calories = caloriesForRun(elapsed / 60, classKey, intensityMeta?.effort ?? 1);
 
   useEffect(() => {
     if (trackingMode !== 'unavailable') return;
@@ -212,7 +250,10 @@ export default function WorkoutScreen() {
   }, []);
 
   const finish = useCallback(() => {
-    // playToEnd is the only path that may mark a run finished for campaign unlock.
+    // Reaching the target (timed run) or playToEnd (untimed) are the only paths
+    // that may mark a run finished for campaign unlock.
+    if (finishedRef.current) return;
+    finishedRef.current = true;
     clearTrackingHandoff();
     router.replace({
       pathname: '/summary',
@@ -228,21 +269,30 @@ export default function WorkoutScreen() {
             durationRef.current,
           ),
         ),
+        ...(fromOnboarding === '1' ? { fromOnboarding: '1' } : {}),
       },
     });
-  }, [router, trackingRunId]);
+  }, [fromOnboarding, router, trackingRunId]);
 
   const exitEarly = useCallback(() => {
     clearTrackingHandoff();
     // Backing out must not clear the map or unlock the next campaign step.
     abandonRun(typeof trackingRunId === 'string' ? trackingRunId : undefined);
-    router.back();
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      // The onboarding launch replaces the whole stack, so there is nothing to
+      // pop back to; Home is the honest destination.
+      router.replace('/(tabs)');
+    }
   }, [abandonRun, router, trackingRunId]);
 
   useEffect(() => () => clearTrackingHandoff(), []);
 
   const player = useVideoPlayer(source, (p) => {
-    p.loop = false;
+    // Timed runs loop the map seamlessly until the wall-clock target; untimed
+    // runs still end on playToEnd.
+    p.loop = timedRun;
     p.playbackRate = playbackRate;
     // Additive (AirPlay): route video (not just audio) to the selected TV.
     p.allowsExternalPlayback = true;
@@ -297,18 +347,22 @@ export default function WorkoutScreen() {
           if (replacementGenerationRef.current !== generation) return;
           safe(() => {
             player.playbackRate = playbackRate;
+            player.loop = timedRun;
             if (resumeAt > 0) player.currentTime = resumeAt;
             if (wasPlaying) player.play();
           });
         })
         .catch(() => {});
     },
-    [level, playbackRate, player],
+    [level, playbackRate, player, timedRun],
   );
 
   useEffect(() => {
     if (!source) return;
     const endSub = player.addListener('playToEnd', () => {
+      // Timed runs loop (player.loop = true): the end of a pass is not the end
+      // of the run. The timeUpdate listener credits the wrap, so nothing to do.
+      if (timedRun) return;
       safe(() => {
         elapsedRef.current = Math.max(elapsedRef.current, player.currentTime || 0);
       });
@@ -322,7 +376,7 @@ export default function WorkoutScreen() {
       endSub.remove();
       statusSub.remove();
     };
-  }, [finish, player, source]);
+  }, [finish, player, source, timedRun]);
 
   // Subscribe before reading the current value so a route selected on the
   // recap screen is handled even if it was active before this screen mounted.
@@ -338,24 +392,57 @@ export default function WorkoutScreen() {
     return () => sub.remove();
   }, [player, source, syncExternalPlayback]);
 
-  // Capture actual playback time for every workout. It drives the companion UI
-  // when casting and is persisted only after expo-video emits playToEnd.
+  // Capture actual playback time for every workout. For timed runs the video
+  // position is folded into a wall-clock total across loops (rate divided out);
+  // for untimed runs it is the position itself. Either way it drives the HUD,
+  // the companion dashboard and the value persisted at completion.
   useEffect(() => {
     if (!source) return;
     player.timeUpdateEventInterval = 0.5;
-    elapsedRef.current = player.currentTime || 0;
-    durationRef.current = player.duration || 0;
-    setElapsed(elapsedRef.current);
-    setDuration(durationRef.current);
+    const startPosition = player.currentTime || 0;
+    lastPositionRef.current = startPosition;
+    videoLengthRef.current = player.duration || 0;
+    if (timedRun) {
+      durationRef.current = targetSeconds;
+      setDuration(targetSeconds);
+    } else {
+      elapsedRef.current = startPosition;
+      durationRef.current = player.duration || 0;
+      setElapsed(startPosition);
+      setDuration(durationRef.current);
+    }
     const sub = player.addListener('timeUpdate', ({ currentTime }) => {
-      elapsedRef.current = Math.max(0, currentTime);
-      setElapsed(currentTime);
+      const position = Math.max(0, currentTime);
       safe(() => {
-        if (player.duration > 0) {
-          durationRef.current = player.duration;
-          setDuration(player.duration);
-        }
+        if (player.duration > 0) videoLengthRef.current = player.duration;
       });
+      if (!timedRun) {
+        elapsedRef.current = position;
+        setElapsed(position);
+        if (videoLengthRef.current > 0) {
+          durationRef.current = videoLengthRef.current;
+          setDuration(videoLengthRef.current);
+        }
+        return;
+      }
+      const last = lastPositionRef.current;
+      const length = videoLengthRef.current;
+      let delta = position - last;
+      if (delta < 0) {
+        // Either the loop wrapped (we were within a beat of the end: credit the
+        // tail of the previous pass plus the head of this one) or a seek —
+        // e.g. the AirPlay source swap briefly reporting 0 before it resumes —
+        // which must not count as time moved.
+        const nearEnd = length > 0 && length - last < LOOP_WRAP_WINDOW_S;
+        delta = nearEnd ? length - last + position : 0;
+      }
+      // Ignore absurd jumps; a legitimate delta is never more than a few s.
+      if (delta > 0 && delta < 30) videoPlayedRef.current += delta;
+      lastPositionRef.current = position;
+      const wall = wallClockElapsed(videoPlayedRef.current, playbackRate);
+      elapsedRef.current = wall;
+      setElapsed(wall);
+      if (wall >= targetSeconds) finish();
     });
     return () => {
       sub.remove();
@@ -365,7 +452,7 @@ export default function WorkoutScreen() {
         player.timeUpdateEventInterval = 0;
       });
     };
-  }, [player, source]);
+  }, [finish, playbackRate, player, source, targetSeconds, timedRun]);
 
   // No streamable source configured: let the flow continue to results.
   if (!source) {
@@ -427,14 +514,17 @@ export default function WorkoutScreen() {
 
                 <View style={styles.companionPills}>
                   <Pill icon={classMeta.icon} accent={classMeta.accent} label={classMeta.label} />
-                  <SpeedPill speedFactor={classMeta.speedFactor} />
+                  {intensityMeta ? (
+                    <Pill icon={intensityMeta.icon} accent="lime" label={intensityMeta.label} />
+                  ) : null}
+                  <SpeedPill speedFactor={playbackRate} />
                 </View>
 
                 <View style={styles.companionStats}>
                   <StatReadout value={formatClock(elapsed)} label="Elapsed" />
                   <StatReadout value={`${calories}`} label="Calories" icon="flame" accent="orange" />
                   <StatReadout
-                    value={duration > 0 ? `-${formatClock(duration - elapsed)}` : '--:--'}
+                    value={duration > 0 ? `-${formatClock(remaining)}` : '--:--'}
                     label="Remaining"
                   />
                 </View>
@@ -537,6 +627,30 @@ export default function WorkoutScreen() {
         <Ionicons name="close" size={22} color={colors.white} />
       </Pressable>
 
+      {/* HUD: time remaining on the wall clock + run progress. On the phone it
+          sits top-centre over the map; the companion dashboard carries its own
+          readout when the run is on the TV. */}
+      {!onExternalScreen && status === 'ready' && duration > 0 ? (
+        <View
+          pointerEvents="none"
+          accessible
+          accessibilityRole="timer"
+          accessibilityLabel={`${formatClock(remaining)} remaining`}
+          style={[styles.hud, { top: insets.top + spacing.sm }]}
+        >
+          <View style={styles.hudRow}>
+            <Ionicons name="timer-outline" size={13} color={colors.lime} />
+            <Text style={styles.hudTime}>-{formatClock(remaining)}</Text>
+            {intensityMeta ? (
+              <Text style={styles.hudMeta}>· {intensityMeta.label}</Text>
+            ) : null}
+          </View>
+          <View style={styles.hudTrack}>
+            <View style={[styles.hudFill, { width: `${Math.round(progress * 100)}%` }]} />
+          </View>
+        </View>
+      ) : null}
+
       {/* Additive (AirPlay): AirPlay control + on-TV status pill. */}
       {Platform.OS === 'ios' ? (
         <View style={[styles.tvControls, { top: insets.top + spacing.sm }]} pointerEvents="box-none">
@@ -578,6 +692,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  hud: {
+    position: 'absolute',
+    alignSelf: 'center',
+    left: 72,
+    right: 72,
+    alignItems: 'center',
+    gap: 6,
+  },
+  hudRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 38,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  hudTime: { ...metric, color: colors.white, fontSize: 15, fontWeight: font.heavy, letterSpacing: -0.2 },
+  hudMeta: { ...type.micro, color: 'rgba(255,255,255,0.72)' },
+  hudTrack: {
+    width: 120,
+    height: 3,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    overflow: 'hidden',
+  },
+  hudFill: { height: '100%', backgroundColor: colors.lime },
   tvControls: {
     position: 'absolute',
     right: spacing.lg,

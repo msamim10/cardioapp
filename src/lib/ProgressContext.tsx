@@ -39,6 +39,7 @@ import {
   type CohortMember,
   type LevelProgress,
 } from '@/lib/progression';
+import { INTENSITY_META, isIntensityKey, type IntensityKey } from '@/lib/playSetup';
 import {
   mergeRuns,
   newerState,
@@ -68,6 +69,8 @@ export type ActiveRun = {
   durationMin: number;
   /** Set only when the run was opened from a mode campaign path. */
   classKey?: ClassKey;
+  /** Per-run intensity chosen on the level screen; scales the calorie estimate. */
+  intensity?: IntensityKey;
   startedAt: number;
 };
 
@@ -127,7 +130,13 @@ type ProgressContextValue = {
   /** Advance simulated competitors/entrants in a class and persist the cohort. */
   advanceLiveCompetition: (classKey?: ClassKey) => void;
   /** Mark a run as in-flight before launching the player. */
-  startRun: (run: { runId?: string; levelId: string; durationMin: number; classKey?: ClassKey }) => void;
+  startRun: (run: {
+    runId?: string;
+    levelId: string;
+    durationMin: number;
+    classKey?: ClassKey;
+    intensity?: IntensityKey;
+  }) => void;
   /**
    * Drop an in-flight run without recording progress. Used when the player
    * backs out / exits early so the active campaign step is not cleared.
@@ -262,6 +271,9 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
               startedAt: loadedActiveRun.startedAt,
               ...(isClassKey(loadedActiveRun.classKey)
                 ? { classKey: loadedActiveRun.classKey }
+                : {}),
+              ...(isIntensityKey(loadedActiveRun.intensity)
+                ? { intensity: loadedActiveRun.intensity }
                 : {}),
             }
           : null;
@@ -468,7 +480,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   );
 
   const startRun = useCallback<ProgressContextValue['startRun']>(
-    ({ runId, levelId, durationMin, classKey }) => {
+    ({ runId, levelId, durationMin, classKey, intensity }) => {
       // Only an explicit campaign classKey is stored. Do not fall back to
       // activeClass — that would attribute Recommended / Featured / Popular
       // plays as mode-path unlocks.
@@ -480,6 +492,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         levelId,
         durationMin,
         ...(campaignClass ? { classKey: campaignClass } : {}),
+        ...(isIntensityKey(intensity) ? { intensity } : {}),
         startedAt: Date.now(),
       };
       setActiveRun(next);
@@ -527,7 +540,10 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       // XP/coins/calories math only and omit classKey from the persisted record.
       const rewardClass = campaignClass ?? stateRef.current.activeClass ?? 'beginner';
       const { coins, xp } = rewardForRun(durationMin, rewardClass);
-      const calories = caloriesForRun(durationMin, rewardClass);
+      // Intensity scales the burn estimate only; XP/coins stay class-driven so
+      // the leaderboard economy is not inflated by a playback-rate toggle.
+      const effort = pending.intensity ? INTENSITY_META[pending.intensity].effort : 1;
+      const calories = caloriesForRun(durationMin, rewardClass, effort);
       const record: RunRecord = {
         runId: pending.runId,
         levelId: pending.levelId,

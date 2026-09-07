@@ -67,7 +67,7 @@ export default function AttributionScreen() {
         <GradientButton
           label="CONTINUE"
           accent="lime"
-          onPress={selected ? () => router.push('/(onboarding)/questions') : undefined}
+          onPress={selected ? () => router.push('/(onboarding)/gameplay-showcase') : undefined}
           style={!selected ? styles.disabled : undefined}
         />
       </View>

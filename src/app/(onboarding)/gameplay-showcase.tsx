@@ -54,7 +54,7 @@ const CLIPS: ShowcaseClip[] = [
     id: 'dodge-and-sidestep',
     video: require('../../../assets/onboarding/dodge-and-sidestep.mp4'),
     poster: require('../../../assets/onboarding/dodge-and-sidestep-poster.jpg'),
-    accessibilityLabel: 'A player dodging and side-stepping to steer a subway running game.',
+    accessibilityLabel: 'A player dodging and side-stepping to steer a running game.',
   },
   {
     id: 'ditch-the-treadmill',
@@ -66,7 +66,7 @@ const CLIPS: ShowcaseClip[] = [
     id: 'overalls-subway-run',
     video: require('../../../assets/onboarding/overalls-subway-run.mp4'),
     poster: require('../../../assets/onboarding/overalls-subway-run-poster.jpg'),
-    accessibilityLabel: 'A player running in place to control a subway running game.',
+    accessibilityLabel: 'A player running in place to control a running game.',
   },
   {
     id: 'high-jump-run',
@@ -90,13 +90,13 @@ const CLIPS: ShowcaseClip[] = [
     id: 'duck',
     video: require('../../../assets/onboarding/duck-and-weave.mp4'),
     poster: require('../../../assets/onboarding/duck-and-weave-poster.jpg'),
-    accessibilityLabel: 'A player crouching and ducking with their whole body to control a subway running game.',
+    accessibilityLabel: 'A player crouching and ducking with their whole body to control a running game.',
   },
   {
     id: 'brother-subway-run',
     video: require('../../../assets/onboarding/brother-subway-run.mp4'),
     poster: require('../../../assets/onboarding/brother-subway-run-poster.jpg'),
-    accessibilityLabel: 'A player sprinting in place to play a subway running game.',
+    accessibilityLabel: 'A player sprinting in place to play a running game.',
   },
   {
     id: 'level-one-run',
@@ -512,7 +512,10 @@ export default function GameplayShowcaseScreen() {
       <OnboardingTopBar progress={onboardingProgress('gameplay-showcase')} topInset={insets.top} onBack={() => router.back()} />
 
       <View style={styles.header}>
-        <Text style={styles.title}>{'Everyone\u2019s already running'}</Text>
+        <Text style={styles.title}>Your body is the controller</Text>
+        <Text style={styles.subtitle}>
+          Run, dodge, duck and jump in your living room. The camera reads every move.
+        </Text>
       </View>
 
       <View onLayout={handleRailLayout} style={styles.rail}>
@@ -575,7 +578,7 @@ export default function GameplayShowcaseScreen() {
         <GradientButton
           accent="lime"
           label="CONTINUE"
-          onPress={() => router.push('/(onboarding)/create-account' as Href)}
+          onPress={() => router.push('/(onboarding)/questions' as Href)}
         />
       </View>
     </View>
@@ -596,6 +599,13 @@ const styles = StyleSheet.create({
     letterSpacing: -0.6,
     lineHeight: 33,
     textAlign: 'center',
+  },
+  subtitle: {
+    ...typeScale.body,
+    color: colors.textDim,
+    marginTop: spacing.sm,
+    textAlign: 'center',
+    maxWidth: 340,
   },
   rail: {
     flex: 1,

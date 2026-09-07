@@ -42,6 +42,8 @@ type Counters = {
   paywallViewed: number;
   trialStarted: number;
   paidConversion: number;
+  /** Times the onboarding "first run is ready" step launched straight into a run. */
+  firstRunLaunched: number;
 };
 
 type FunnelState = {
@@ -88,6 +90,7 @@ function emptyState(): FunnelState {
       paywallViewed: 0,
       trialStarted: 0,
       paidConversion: 0,
+      firstRunLaunched: 0,
     },
     failureByReason: {
       no_person: 0,
@@ -229,6 +232,17 @@ export async function markRunComplete(now = Date.now()): Promise<number> {
     count = state.counters.runComplete;
   });
   return count;
+}
+
+/**
+ * Onboarding handed straight into the selected first run (entitlement active
+ * after the offer). Local-only, like `markPlanReviewed`: a step-completion
+ * signal for the on-device funnel, not a registered Singular event.
+ */
+export function markFirstRunLaunched(): Promise<void> {
+  return mutate((state) => {
+    state.counters.firstRunLaunched += 1;
+  });
 }
 
 export function markPaywallViewed(): Promise<void> {

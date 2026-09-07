@@ -36,6 +36,18 @@ export const PAYWALL_AFTER_ATT_DELAY_MS = 450;
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/**
+ * How the offer step ended.
+ *
+ *   `entitled`  — access is active: the user purchased/restored on the hosted
+ *                 paywall, or already held the entitlement (or this build has
+ *                 no RevenueCat key, so runs are never gated).
+ *   `dismissed` — the paywall was shown and closed without a purchase.
+ *   `not_shown` — nothing could be presented (claim already spent, SDK not
+ *                 ready, screen unmounted). Runs stay gated by the level screen.
+ */
+export type OnboardingOfferOutcome = 'entitled' | 'dismissed' | 'not_shown';
+
 export async function presentOnboardingOffer({
   userId,
   isPremium,
@@ -46,7 +58,7 @@ export async function presentOnboardingOffer({
   isPremium: boolean;
   presentPaywall: (opts?: { ifNeeded?: boolean }) => Promise<PaywallUIResult>;
   isMounted: () => boolean;
-}): Promise<void> {
+}): Promise<OnboardingOfferOutcome> {
   if (isPremium || allowsUnpaidAccess()) {
     console.info(
       isPremium
@@ -55,7 +67,7 @@ export async function presentOnboardingOffer({
         : '[onboarding] end-of-onboarding paywall skipped — RevenueCat has no real key for ' +
             'this build, so unpaid access is allowed and runs are never gated.'
     );
-    return;
+    return 'entitled';
   }
   if (!(await claimOnboardingPaywall())) {
     console.warn(
@@ -65,9 +77,10 @@ export async function presentOnboardingOffer({
         'Runs stay gated by the level screen. To see it again while testing, clear the flag ' +
         'with Reset on the Profile → "Analytics funnel (debug)" screen, or reinstall.'
     );
-    return;
+    return 'not_shown';
   }
   let presented = false;
+  let outcome: OnboardingOfferOutcome = 'not_shown';
   try {
     await requestTrackingAuthorization();
     if (!isMounted()) {
@@ -77,7 +90,7 @@ export async function presentOnboardingOffer({
           'redirects to the tabs because onboarding was already marked complete before this ' +
           'sign-in resolved. The claim is released, so a later run can still present it.'
       );
-      return;
+      return 'not_shown';
     }
     // Keyed to the Firebase UID before presenting, so a purchase made on the
     // hosted paywall lands on this account rather than an anonymous one. This
@@ -92,9 +105,11 @@ export async function presentOnboardingOffer({
           'was already marked complete before this sign-in resolved. The claim is released, ' +
           'so a later run can still present it.'
       );
-      return;
+      return 'not_shown';
     }
-    presented = (await requestOnboardingSubscriptionAccess(presentPaywall)) !== 'not_shown';
+    const result = await requestOnboardingSubscriptionAccess(presentPaywall);
+    presented = result !== 'not_shown';
+    outcome = result === 'granted' ? 'entitled' : result === 'dismissed' ? 'dismissed' : 'not_shown';
     if (!presented) {
       console.error(
         '[onboarding] end-of-onboarding RevenueCat paywall was NOT presented — see the ' +
@@ -109,4 +124,5 @@ export async function presentOnboardingOffer({
   } finally {
     if (!presented) void releaseOnboardingPaywall();
   }
+  return outcome;
 }

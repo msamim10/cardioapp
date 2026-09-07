@@ -3,7 +3,7 @@ import { isCardioSurfPoseAvailable } from 'cardiosurf-pose';
 import { useCameraPermissions } from 'expo-camera';
 import * as Device from 'expo-device';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -17,12 +17,20 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { TvSetupGuide } from '@/components/TvSetupGuide';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import {
   logCalibrationAttempt,
   logCalibrationFailure,
   logCalibrationSuccess,
 } from '@/lib/analytics';
+import { useOnboarding } from '@/lib/OnboardingContext';
+import {
+  isIntensityKey,
+  loadPlaySetup,
+  saveFirstRunTrackingOff,
+  type PlayScreen,
+} from '@/lib/playSetup';
 import {
   loadCalibrationProfile,
   proportionsFromBaseline,
@@ -85,12 +93,24 @@ export default function PreflightScreen() {
     name?: string;
     speed?: string;
     duration?: string;
+    intensity?: string;
     classKey?: string | string[];
+    /**
+     * Set by the onboarding recap. Calibration is the first-time ceremony: on
+     * lock it hands off to the "first run is ready" screen (where the offer is
+     * presented) instead of launching the player directly.
+     */
+    firstRun?: string;
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { startRun } = useProgress();
+  const { setCheckpoint } = useOnboarding();
   const campaignClass = parseOptionalClassKeyParam(params.classKey);
+  const intensity = isIntensityKey(params.intensity) ? params.intensity : undefined;
+  const isFirstRun = params.firstRun === '1';
+  const [playScreen, setPlayScreen] = useState<PlayScreen | null>(null);
+  const [tvGuideOpen, setTvGuideOpen] = useState(false);
   const [permission, requestPermission, getPermission] = useCameraPermissions();
   const [state, setState] = useState(INITIAL_PREFLIGHT_STATE);
   const [poseFrame, setPoseFrame] = useState<PoseFrame | null>(null);
@@ -139,6 +159,11 @@ export default function PreflightScreen() {
         if (!active) return;
         storedProportionsRef.current = profile.proportions;
         setGuided(shouldGuideCalibration(profile));
+      })
+      .catch(() => {});
+    loadPlaySetup()
+      .then((setup) => {
+        if (active) setPlayScreen(setup.screen);
       })
       .catch(() => {});
     return () => {
@@ -205,6 +230,18 @@ export default function PreflightScreen() {
   const launchWorkout = useCallback(
     (tracking: 'calibrated' | 'off') => {
       if (launchedRef.current) return;
+      if (isFirstRun) {
+        // First-time ceremony: calibration is complete (onboarding_complete has
+        // fired above), so hand off to the offer screen. The run launches from
+        // there once access is granted; the in-run analyzer re-acquires the
+        // body, since a snapshot would be stale by the time the paywall closes.
+        launchedRef.current = true;
+        clearTrackingHandoff();
+        void saveFirstRunTrackingOff(tracking === 'off');
+        setCheckpoint('first-run-ready');
+        router.replace('/first-run-ready' as Href);
+        return;
+      }
       const capturedAt = Date.now();
       if (tracking === 'calibrated') {
         const snapshot = analyzerRef.current.calibrationSnapshot(capturedAt);
@@ -226,6 +263,7 @@ export default function PreflightScreen() {
         levelId: params.level,
         durationMin: Number(params.duration) || 1,
         ...(campaignClass ? { classKey: campaignClass } : {}),
+        ...(intensity ? { intensity } : {}),
       });
       router.replace({
         pathname: '/workout',
@@ -233,12 +271,14 @@ export default function PreflightScreen() {
           level: params.level,
           name: params.name,
           speed: params.speed,
+          duration: params.duration,
+          intensity,
           tracking,
           trackingRunId: runIdRef.current,
         },
       });
     },
-    [campaignClass, dispatch, params, router, startRun],
+    [campaignClass, dispatch, intensity, isFirstRun, params, router, setCheckpoint, startRun],
   );
 
   useEffect(() => {
@@ -356,7 +396,13 @@ export default function PreflightScreen() {
 
   const cancel = () => {
     clearTrackingHandoff();
-    router.back();
+    if (router.canGoBack()) {
+      router.back();
+    } else if (isFirstRun) {
+      router.replace('/(onboarding)/make-it-real' as Href);
+    } else {
+      router.replace('/(tabs)');
+    }
   };
 
   const cameraActive =
@@ -419,10 +465,24 @@ export default function PreflightScreen() {
 
       <View style={[styles.header, { top: insets.top + spacing.md }]}>
         <Text style={styles.eyebrow}>
-          {guided ? 'ONE-TIME SETUP' : 'SENSOR CHECK'}
+          {isFirstRun ? 'CALIBRATION' : guided ? 'ONE-TIME SETUP' : 'SENSOR CHECK'}
         </Text>
         <Text style={styles.runName} numberOfLines={1}>{params.name ?? 'Your run'}</Text>
       </View>
+
+      {playScreen === 'tv' ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="TV setup help"
+          hitSlop={8}
+          onPress={() => setTvGuideOpen(true)}
+          style={[styles.tvHelp, { top: insets.top + spacing.sm }]}
+        >
+          <Ionicons name="tv-outline" size={15} color={colors.white} />
+          <Text style={styles.tvHelpText}>Having trouble?</Text>
+        </Pressable>
+      ) : null}
+      <TvSetupGuide visible={tvGuideOpen} onClose={() => setTvGuideOpen(false)} />
 
       {state.phase === 'permission' ? (
         <SetupCard
@@ -610,6 +670,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
   header: { position: 'absolute', left: 76, right: 76, alignItems: 'center' },
+  tvHelp: {
+    position: 'absolute',
+    right: spacing.lg,
+    zIndex: 10,
+    height: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  tvHelpText: { color: colors.white, fontSize: 12, fontWeight: font.bold },
   eyebrow: { ...type.micro, color: colors.lime, letterSpacing: 1.7 },
   runName: { ...type.h3, color: colors.white, marginTop: 3 },
   centerGuide: {

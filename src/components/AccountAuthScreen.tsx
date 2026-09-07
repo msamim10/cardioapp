@@ -48,7 +48,7 @@ export function AccountAuthScreen({ mode }: { mode: Mode }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const auth = useAuth();
-  const { answers, completeOnboarding } = useOnboarding();
+  const { answers, completeOnboarding, setCheckpoint } = useOnboarding();
   const { username } = useProgress();
   const { isPremium, presentPaywall } = useSubscription();
   const emailRef = useRef<TextInput>(null);
@@ -102,10 +102,14 @@ export function AccountAuthScreen({ mode }: { mode: Mode }) {
   };
 
   /**
-   * A new account with personalisation answers on file goes to the plan screen,
-   * which presents the offer itself once the user has seen what their answers
-   * produced. Sign-in, and any create path with nothing to reflect, keeps the
-   * original behaviour and presents the offer straight from here.
+   * A new account continues into the first-run ceremony: plan readout, recap,
+   * calibration, then the "first run is ready" screen, which is where the offer
+   * is presented. The checkpoint is written here so an app kill anywhere after
+   * this point resumes inside the ceremony rather than at welcome.
+   *
+   * Sign-in (a returning user) keeps the original behaviour: present the offer
+   * straight from here and land on the tabs, since they already have progress
+   * and a first-run ceremony would be noise.
    *
    * The ATT sheet is unaffected either way: it is scheduled on mount, and
    * `presentOnboardingOffer` awaits the same one-shot request before presenting,
@@ -118,12 +122,13 @@ export function AccountAuthScreen({ mode }: { mode: Mode }) {
     }
     if (result.status !== 'signed-in') return;
 
-    if (mode === 'create' && shouldShowPlan(buildOnboardingPlan(answers, username))) {
-      // The id travels as a param so the plan screen keys RevenueCat to the
-      // same account this sign-in produced, without waiting on auth state to
-      // propagate through context first.
+    if (mode === 'create') {
+      const showPlan = shouldShowPlan(buildOnboardingPlan(answers, username));
+      setCheckpoint(showPlan ? 'plan' : 'make-it-real');
       router.replace(
-        `/(onboarding)/plan?userId=${encodeURIComponent(result.user.id)}` as Href,
+        showPlan
+          ? ('/(onboarding)/plan' as Href)
+          : ('/(onboarding)/make-it-real' as Href),
       );
       return;
     }

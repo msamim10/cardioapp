@@ -19,7 +19,7 @@
  *    pay) rather than a number picked to make the arc look good.
  */
 
-import { modes } from '@/lib/gameData';
+import { getLevel, modes } from '@/lib/gameData';
 import type { GoalKey, OnboardingAnswers } from '@/lib/onboarding';
 import { weeklyGoalOptions } from '@/lib/onboarding';
 import {
@@ -177,4 +177,73 @@ export function buildOnboardingPlan(
  */
 export function shouldShowPlan(plan: OnboardingPlan): boolean {
   return plan.answeredCount > 0;
+}
+
+// ---------------------------------------------------------------------------
+// First-run recommendations
+// ---------------------------------------------------------------------------
+
+/**
+ * Three maps per training objective, in display order. The first entry is the
+ * lead recommendation. Every id here is a real map in `gameData`; the resolver
+ * below drops anything that stops existing rather than throwing at import.
+ *
+ * The groupings follow the map's character rather than its clip length, since
+ * the run's duration is set separately (5 / 10 / 15 minutes, looped).
+ */
+const FIRST_RUN_BY_GOAL: Record<GoalKey, readonly string[]> = {
+  lose: ['wild-city-rush', 'neon-beat-hunters', 'red-light-rush'],
+  habit: ['neon-rails', 'wild-city', 'block-world-dash'],
+  active: ['dino-escape', 'metro-zombie-escape', 'prison-escape-run'],
+  fun: ['pixel-kingdom', 'critter-chase', 'drumline-dash'],
+};
+
+const FIRST_RUN_FALLBACK: readonly string[] = ['neon-rails', 'wild-city', 'dino-escape'];
+
+/** Competitive users get the featured leaderboard map surfaced first. */
+const COMPETE_LEAD = 'neon-rails';
+
+export type FirstRunRecommendation = {
+  levelId: string;
+  /** Why this map was picked, in one short line the user recognises. */
+  reason: string;
+  /** True for the single lead recommendation. */
+  lead: boolean;
+};
+
+const REASON_BY_GOAL: Record<GoalKey, string> = {
+  lose: 'High-tempo cues for a steady burn',
+  habit: 'Short, clear rhythm to build the routine',
+  active: 'Balanced pace to hold your base',
+  fun: 'Big set pieces that hold your attention',
+};
+
+/**
+ * Three recommended first maps derived from the stored answers. Deterministic,
+ * so the screen shows the same trio if the user backs up and returns.
+ */
+export function recommendFirstRuns(answers: OnboardingAnswers): FirstRunRecommendation[] {
+  const base = answers.goal ? FIRST_RUN_BY_GOAL[answers.goal] : FIRST_RUN_FALLBACK;
+  const ordered = [...base];
+  if (answers.motivation === 'compete') {
+    const index = ordered.indexOf(COMPETE_LEAD);
+    if (index > 0) ordered.splice(index, 1);
+    if (index !== 0) ordered.unshift(COMPETE_LEAD);
+  }
+  const reason = answers.goal ? REASON_BY_GOAL[answers.goal] : 'A strong first map';
+  const seen = new Set<string>();
+  const picks: FirstRunRecommendation[] = [];
+  for (const levelId of [...ordered, ...FIRST_RUN_FALLBACK]) {
+    if (picks.length >= 3 || seen.has(levelId) || !getLevel(levelId)) continue;
+    seen.add(levelId);
+    picks.push({
+      levelId,
+      reason:
+        picks.length === 0 && answers.motivation === 'compete' && levelId === COMPETE_LEAD
+          ? 'The featured leaderboard map'
+          : reason,
+      lead: picks.length === 0,
+    });
+  }
+  return picks;
 }

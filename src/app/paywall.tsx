@@ -67,6 +67,7 @@ export default function PaywallScreen() {
     name?: string | string[];
     speed?: string | string[];
     duration?: string | string[];
+    intensity?: string | string[];
     classKey?: string | string[];
   }>();
   const insets = useSafeAreaInsets();
@@ -109,6 +110,7 @@ export default function PaywallScreen() {
           name: param('name') ?? '',
           speed: param('speed') ?? '',
           duration: param('duration') ?? '',
+          ...(param('intensity') ? { intensity: param('intensity')! } : {}),
           ...(param('classKey') ? { classKey: param('classKey')! } : {}),
         },
       });
