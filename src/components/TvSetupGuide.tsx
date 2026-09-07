@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { VideoAirPlayButton } from 'expo-video';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   Animated,
   Easing,
@@ -13,9 +13,11 @@ import {
   Text,
   useWindowDimensions,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GhostButton, GradientButton } from '@/components/ui';
+import { GradientButton } from '@/components/ui';
 import type { ExternalDisplayStatus } from '@/lib/externalDisplay';
 import { colors, font, radius, spacing, type } from '@/theme';
 
@@ -52,17 +54,39 @@ const STEPS: GuideStep[] = [
   },
 ];
 
+const NOTES: { icon: keyof typeof Ionicons.glyphMap; title: string; detail: string }[] = [
+  {
+    icon: 'options-outline',
+    title: 'No Screen Mirroring tile?',
+    detail:
+      'Add it in Settings → Control Center → tap the green + next to Screen Mirroring. Then try again.',
+  },
+  {
+    icon: 'wifi',
+    title: 'Which TVs work',
+    detail:
+      'An Apple TV, or a TV that supports AirPlay 2 (most recent Samsung, LG, Sony, Vizio and Roku sets). Both the TV and your phone must be on the same Wi-Fi network.',
+  },
+];
+
 export function TvSetupGuide({
   visible,
   onClose,
+  detection,
 }: {
   visible: boolean;
   onClose: () => void;
+  /**
+   * Live detector status from the calling screen's `useExternalDisplay()`. Pass
+   * it so the sheet shows the same connection state as the screen beneath.
+   */
+  detection?: ExternalDisplayStatus;
 }) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const imageWidth = Math.min(180, Math.round(width * 0.36));
   const imageHeight = Math.round(imageWidth * 1.5);
+  const connected = detection?.supported === true && detection.connected;
 
   return (
     <Modal
@@ -89,13 +113,23 @@ export function TvSetupGuide({
         </View>
 
         <ScrollView
-          contentContainerStyle={[styles.sheetContent, { paddingBottom: insets.bottom + spacing.xxl }]}
+          contentContainerStyle={[styles.sheetContent, { paddingBottom: insets.bottom + spacing.xl }]}
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.intro}>
             Mirror your phone to the TV, then keep the phone propped up facing you. The
             camera keeps reading your body while the map plays on the big screen.
           </Text>
+
+          {detection?.supported ? (
+            <TvStatusLine connected={connected} supported style={styles.sheetStatus} />
+          ) : null}
+
+          <AirPlayPickerRow
+            title="Fastest way: pick your TV here"
+            detail="Tap the AirPlay icon and choose your TV from the list."
+            prominent
+          />
 
           {STEPS.map((step, index) => (
             <View key={step.key} style={styles.step}>
@@ -117,67 +151,91 @@ export function TvSetupGuide({
             </View>
           ))}
 
-          {Platform.OS === 'ios' ? (
-            <View style={styles.airplayBlock}>
-              <Text style={styles.airplayTitle}>Have an AirPlay TV?</Text>
-              <Text style={styles.airplayDetail}>
-                You can also pick it here. During a run, the map video streams to the TV
-                and your phone becomes the camera and dashboard.
-              </Text>
-              <View style={styles.airplayRow}>
-                <Text style={styles.airplayRowLabel}>Tap the AirPlay icon to pick a display</Text>
-                <VideoAirPlayButton
-                  style={styles.airplayNative}
-                  tint={colors.lime}
-                  activeTint={colors.lime}
-                  prioritizeVideoDevices
-                  accessibilityRole="button"
-                  accessibilityLabel="Choose an AirPlay display"
-                />
+          {NOTES.map((note) => (
+            <View key={note.title} style={styles.note}>
+              <View style={styles.noteIcon}>
+                <Ionicons name={note.icon} size={18} color={colors.lime} />
+              </View>
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text style={styles.noteTitle}>{note.title}</Text>
+                <Text style={styles.noteDetail}>{note.detail}</Text>
               </View>
             </View>
-          ) : null}
+          ))}
 
-          <GradientButton label="Got it" accent="lime" onPress={onClose} style={{ marginTop: spacing.lg }} />
+          <GradientButton
+            label={connected ? 'Done' : 'Got it'}
+            icon={connected ? 'checkmark' : undefined}
+            accent="lime"
+            onPress={onClose}
+            style={{ marginTop: spacing.sm }}
+          />
         </ScrollView>
       </View>
     </Modal>
   );
 }
 
-export type TvConnectionState = 'waiting' | 'confirmed';
+/**
+ * The native AirPlay route picker, framed as a full-width row so it is obvious
+ * what the icon does. iOS only: the row renders nothing elsewhere, and callers
+ * keep the Control Center instructions visible regardless.
+ */
+export function AirPlayPickerRow({
+  title,
+  detail,
+  prominent = false,
+  style,
+}: {
+  title: string;
+  detail: string;
+  prominent?: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
+  if (Platform.OS !== 'ios') return null;
+  return (
+    <View
+      style={[styles.airplayRow, prominent && styles.airplayRowProminent, style]}
+      accessible
+      accessibilityLabel={`${title}. ${detail}`}
+    >
+      <View style={[styles.airplayWell, prominent && styles.airplayWellProminent]}>
+        <VideoAirPlayButton
+          style={styles.airplayNative}
+          tint={prominent ? colors.black : colors.lime}
+          activeTint={prominent ? colors.black : colors.lime}
+          prioritizeVideoDevices
+          accessibilityRole="button"
+          accessibilityLabel="Choose an AirPlay display"
+        />
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={styles.airplayTitle}>{title}</Text>
+        <Text style={styles.airplayDetail}>{detail}</Text>
+      </View>
+    </View>
+  );
+}
 
 /**
- * The "Waiting for TV…" card.
- *
- * On iOS native builds the local `external-display` module watches
- * `UIScreen` connect/disconnect notifications, so AirPlay screen mirroring and
- * wired adapters are detected for real: pass `detection` and the card flips to
- * "TV connected" on its own, with no manual confirm button. Where detection is
- * unsupported (Expo Go, Android, web) the card falls back to the honest
- * behaviour: it pulses while the user sets up and the user confirms when the
- * TV shows this screen. Nothing is ever faked in either mode.
+ * Plain status line (deliberately not a box): pulsing dot + "Waiting for your
+ * TV…" until the display connects, then a check + "TV connected". Where
+ * detection is unsupported the copy asks for confirmation instead of implying
+ * the app can see the TV.
  */
-export function TvConnectionCard({
-  state,
-  detection,
-  onConfirm,
-  onHelp,
-  onUsePhone,
+export function TvStatusLine({
+  connected,
+  supported,
+  style,
 }: {
-  state: TvConnectionState;
-  /** Live detector status; omit or pass `supported: false` for manual mode. */
-  detection?: ExternalDisplayStatus;
-  onConfirm: () => void;
-  onHelp: () => void;
-  onUsePhone?: () => void;
+  connected: boolean;
+  supported: boolean;
+  style?: StyleProp<ViewStyle>;
 }) {
   const pulse = useRef(new Animated.Value(0)).current;
-  const [elapsedTick, setElapsedTick] = useState(0);
-  const autoDetect = detection?.supported === true;
 
   useEffect(() => {
-    if (state !== 'waiting') return;
+    if (connected) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
@@ -185,75 +243,34 @@ export function TvConnectionCard({
       ]),
     );
     loop.start();
-    const tick = setInterval(() => setElapsedTick((t) => t + 1), 1000);
-    return () => {
-      loop.stop();
-      clearInterval(tick);
-    };
-  }, [pulse, state]);
+    return () => loop.stop();
+  }, [connected, pulse]);
 
-  const confirmed = state === 'confirmed';
-  const showNudge = !confirmed && elapsedTick >= 12;
-
-  const detail = confirmed
-    ? autoDetect
-      ? 'Your phone is mirroring to the TV. Keep it propped up facing you and the run plays on the big screen.'
-      : 'Keep the phone propped up facing you. The run plays on the TV.'
-    : autoDetect
-      ? 'Mirror your screen now. This flips to connected the moment your TV picks it up.'
-      : 'Mirror your screen now. When this screen shows on your TV, confirm below.';
+  const label = connected
+    ? 'TV connected ✓'
+    : supported
+      ? 'Waiting for your TV…'
+      : 'Set up your TV, then confirm below';
 
   return (
     <View
       accessibilityLiveRegion="polite"
-      style={[styles.connection, confirmed && styles.connectionConfirmed]}
+      accessibilityLabel={label}
+      style={[styles.statusRow, style]}
     >
-      <View style={styles.connectionRow}>
-        <View style={styles.connectionIcon}>
-          {confirmed ? (
-            <Ionicons name="checkmark" size={18} color={colors.black} />
-          ) : (
-            <Animated.View
-              style={[
-                styles.connectionPulse,
-                { opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] }) },
-              ]}
-            />
-          )}
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.connectionTitle}>
-            {confirmed ? 'TV connected' : 'Waiting for TV…'}
-          </Text>
-          <Text style={styles.connectionDetail}>{detail}</Text>
-        </View>
-      </View>
-
-      {!confirmed ? (
-        <View style={styles.connectionActions}>
-          {autoDetect ? null : (
-            <GradientButton
-              label="My TV shows this"
-              icon="tv"
-              accent="lime"
-              onPress={onConfirm}
-            />
-          )}
-          <View style={styles.connectionLinks}>
-            <Pressable onPress={onHelp} hitSlop={8} style={styles.linkBtn}>
-              <Ionicons name="help-circle-outline" size={16} color={colors.lime} />
-              <Text style={styles.linkText}>Having trouble?</Text>
-            </Pressable>
-            {showNudge && onUsePhone ? (
-              <Pressable onPress={onUsePhone} hitSlop={8} style={styles.linkBtn}>
-                <Text style={styles.linkTextDim}>Use my phone for now</Text>
-              </Pressable>
-            ) : null}
-          </View>
+      {connected ? (
+        <View style={styles.statusCheck}>
+          <Ionicons name="checkmark" size={12} color={colors.black} />
         </View>
       ) : (
-        <GhostButton label="Setup guide" icon="help-circle-outline" onPress={onHelp} style={styles.changeBtn} />
+        <Animated.View
+          style={[
+            styles.statusDot,
+            { opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) },
+          ]}
+        />
       )}
+      <Text style={[styles.statusText, connected && styles.statusTextConnected]}>{label}</Text>
     </View>
   );
 }
@@ -284,6 +301,7 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.72 },
   sheetContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.lg },
   intro: { ...type.body, color: colors.textDim },
+  sheetStatus: { marginTop: -spacing.sm },
   step: {
     flexDirection: 'row',
     gap: spacing.lg,
@@ -312,21 +330,30 @@ const styles = StyleSheet.create({
   stepBadgeText: { color: colors.black, fontSize: 13, fontWeight: font.heavy },
   stepTitle: { ...type.h3, color: colors.text },
   stepDetail: { ...type.bodySm, color: colors.textDim },
-  airplayBlock: {
-    padding: spacing.lg,
-    gap: spacing.sm,
+  note: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    padding: spacing.md,
     borderRadius: radius.lg,
     backgroundColor: colors.bgElevated,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  airplayTitle: { ...type.h3, color: colors.text },
-  airplayDetail: { ...type.bodySm, color: colors.textDim },
+  noteIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(215,255,62,0.1)',
+  },
+  noteTitle: { ...type.h3, color: colors.text, fontSize: 15 },
+  noteDetail: { ...type.bodySm, color: colors.textDim },
+
   airplayRow: {
-    marginTop: spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: spacing.md,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
@@ -335,45 +362,30 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderStrong,
   },
-  airplayRowLabel: { ...type.bodySm, color: colors.text, flex: 1, fontWeight: font.semibold },
-  airplayNative: { width: 44, height: 44 },
-
-  connection: {
-    padding: spacing.lg,
-    gap: spacing.lg,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
+  airplayRowProminent: { borderColor: colors.lime, backgroundColor: colors.surface3 },
+  airplayWell: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface2,
   },
-  connectionConfirmed: { borderColor: colors.lime },
-  connectionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  connectionIcon: {
-    width: 40,
-    height: 40,
+  airplayWellProminent: { backgroundColor: colors.lime },
+  airplayNative: { width: 44, height: 44 },
+  airplayTitle: { ...type.body, color: colors.text, fontWeight: font.bold },
+  airplayDetail: { ...type.bodySm, color: colors.textDim },
+
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 22 },
+  statusDot: { width: 10, height: 10, borderRadius: radius.pill, backgroundColor: colors.lime },
+  statusCheck: {
+    width: 18,
+    height: 18,
     borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.lime,
   },
-  connectionPulse: {
-    width: 12,
-    height: 12,
-    borderRadius: radius.pill,
-    backgroundColor: colors.black,
-  },
-  connectionTitle: { ...type.h3, color: colors.text },
-  connectionDetail: { ...type.bodySm, color: colors.textDim, marginTop: 3 },
-  connectionActions: { gap: spacing.sm },
-  connectionLinks: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: spacing.lg,
-    flexWrap: 'wrap',
-  },
-  linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: spacing.sm },
-  linkText: { color: colors.lime, fontSize: 14, fontWeight: font.bold },
-  linkTextDim: { color: colors.textDim, fontSize: 14, fontWeight: font.bold },
-  changeBtn: { alignSelf: 'flex-start', minHeight: 40, paddingVertical: 8, paddingHorizontal: spacing.lg },
+  statusText: { ...type.body, color: colors.textDim, fontWeight: font.semibold },
+  statusTextConnected: { color: colors.lime },
 });

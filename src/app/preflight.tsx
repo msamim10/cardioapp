@@ -493,7 +493,7 @@ export default function PreflightScreen() {
           </Text>
         </Pressable>
       ) : null}
-      <TvSetupGuide visible={tvGuideOpen} onClose={() => setTvGuideOpen(false)} />
+      <TvSetupGuide visible={tvGuideOpen} onClose={() => setTvGuideOpen(false)} detection={display} />
 
       {state.phase === 'permission' ? (
         <SetupCard

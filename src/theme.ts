@@ -80,6 +80,25 @@ export const spacing = {
   xxxl: 44,
 } as const;
 
+/**
+ * Pinned-footer geometry shared by every onboarding screen, so the primary
+ * button sits the same distance above the home indicator everywhere.
+ *
+ * The footer is laid out in flow below the scroll view (never overlaid), so
+ * the scroll content only needs a small breathing gap above it — not a guess at
+ * the footer's height.
+ */
+export const layout = {
+  /** Bottom padding for scroll content that sits above a pinned footer. */
+  scrollAboveFooter: spacing.xl,
+  /**
+   * Bottom padding for the pinned footer itself: clear the home indicator, and
+   * on flat-bottomed phones (iPhone SE) keep a minimum gap so the button never
+   * kisses the screen edge.
+   */
+  footerBottom: (insetBottom: number): number => Math.max(insetBottom, spacing.md) + spacing.sm,
+} as const;
+
 // Tight, structural radii. Large radii are the strongest single "friendly app"
 // signal, so cards sit at 14 and hero artwork at 18 (Zwift/Whoop territory).
 // `pill` is reserved for chips, badges, tracks and pips — never for buttons.

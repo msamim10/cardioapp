@@ -3,7 +3,7 @@ import { type Href, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TvConnectionCard, TvSetupGuide } from '@/components/TvSetupGuide';
+import { AirPlayPickerRow, TvSetupGuide, TvStatusLine } from '@/components/TvSetupGuide';
 import { GradientButton, OnboardingTopBar } from '@/components/ui';
 import { useExternalDisplay } from '@/lib/externalDisplay';
 import { onboardingProgress } from '@/lib/onboarding';
@@ -13,13 +13,12 @@ import {
   type PlayScreen,
   savePlayScreen,
 } from '@/lib/playSetup';
-import { colors, font, radius, spacing, type } from '@/theme';
+import { colors, font, layout, radius, spacing, type } from '@/theme';
 
 type ScreenOption = {
   key: PlayScreen;
   title: string;
   tagline: string;
-  detail: string;
   icon: keyof typeof Ionicons.glyphMap;
   badge?: string;
 };
@@ -28,21 +27,28 @@ const OPTIONS: ScreenOption[] = [
   {
     key: 'tv',
     title: 'On your TV',
-    tagline: 'Full-size map, phone as the camera.',
-    detail:
-      'Mirror your phone to the TV. Bigger picture, further back from the phone, better tracking.',
+    tagline: 'Full-size map. Phone stays the camera.',
     icon: 'tv',
     badge: 'Recommended',
   },
   {
     key: 'phone',
     title: 'On your phone',
-    tagline: 'Prop it up and go.',
-    detail: 'Works anywhere with a stand or a shelf at chest height.',
+    tagline: 'Prop it up at chest height and go.',
     icon: 'phone-portrait',
   },
 ];
 
+/**
+ * "Where will you play?"
+ *
+ * Two selectable cards and nothing else that looks like one. Choosing the TV
+ * expands that card with the setup steps inline: the native AirPlay picker, the
+ * Control Center route, a plain status line and the help link. Continue stays
+ * disabled until the TV is actually detected (or, where detection is
+ * unsupported, until the user explicitly confirms), with a secondary link to
+ * fall back to the phone so nobody is ever stuck here.
+ */
 export default function WhereYouPlayScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -51,10 +57,13 @@ export default function WhereYouPlayScreen() {
   // Real detection on iOS native builds (UIScreen connect/disconnect via the
   // local external-display module). Where unsupported (Expo Go, Android, web)
   // we fall back to the user's own confirmation and never claim to have
-  // detected the TV ourselves.
+  // detected the TV ourselves. One hook instance feeds both this screen and
+  // the guide sheet, so a connection made while the sheet is open is reflected
+  // here the moment it closes.
   const display = useExternalDisplay();
   const [tvConfirmed, setTvConfirmed] = useState(false);
   const tvReady = display.supported ? display.connected : tvConfirmed;
+  const canContinue = choice === 'phone' || tvReady;
 
   useEffect(() => {
     let mounted = true;
@@ -72,6 +81,7 @@ export default function WhereYouPlayScreen() {
   };
 
   const onContinue = () => {
+    if (!canContinue) return;
     void savePlayScreen(choice);
     router.push('/(onboarding)/pick-first-run' as Href);
   };
@@ -85,7 +95,7 @@ export default function WhereYouPlayScreen() {
       />
 
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 140 }]}
+        contentContainerStyle={[styles.content, { paddingBottom: layout.scrollAboveFooter }]}
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.eyebrow}>Setup</Text>
@@ -95,86 +105,138 @@ export default function WhereYouPlayScreen() {
           shown.
         </Text>
 
-        <View style={styles.stack}>
+        <View style={styles.stack} accessibilityRole="radiogroup">
           {OPTIONS.map((option) => {
             const selected = option.key === choice;
             const primary = option.key === 'tv';
+            const expanded = primary && selected;
             return (
-              <Pressable
+              <View
                 key={option.key}
-                accessibilityRole="radio"
-                accessibilityState={{ selected }}
-                accessibilityLabel={`${option.title}. ${option.tagline}`}
-                onPress={() => select(option.key)}
-                style={({ pressed }) => [
+                style={[
                   styles.option,
                   primary && styles.optionPrimary,
                   selected && styles.optionSelected,
-                  pressed && styles.pressed,
                 ]}
               >
-                <View style={[styles.optionIcon, selected && styles.optionIconSelected]}>
-                  <Ionicons
-                    name={option.icon}
-                    size={primary ? 30 : 24}
-                    color={selected ? colors.black : colors.text}
-                  />
-                </View>
-                <View style={styles.optionText}>
-                  <View style={styles.optionHead}>
-                    <Text style={[styles.optionTitle, primary && styles.optionTitlePrimary]}>
-                      {option.title}
-                    </Text>
-                    {option.badge ? (
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>{option.badge}</Text>
-                      </View>
+                <Pressable
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`${option.title}. ${option.tagline}`}
+                  onPress={() => select(option.key)}
+                  style={({ pressed }) => [styles.optionRow, pressed && styles.pressed]}
+                >
+                  <View style={[styles.optionIcon, selected && styles.optionIconSelected]}>
+                    <Ionicons
+                      name={option.icon}
+                      size={primary ? 28 : 24}
+                      color={selected ? colors.black : colors.text}
+                    />
+                  </View>
+                  <View style={styles.optionText}>
+                    <View style={styles.optionHead}>
+                      <Text style={[styles.optionTitle, primary && styles.optionTitlePrimary]}>
+                        {option.title}
+                      </Text>
+                      {option.badge ? (
+                        <View style={styles.badge}>
+                          <Text style={styles.badgeText}>{option.badge}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={styles.optionTagline}>{option.tagline}</Text>
+                  </View>
+                  <View style={[styles.radio, selected && styles.radioSelected]}>
+                    {selected ? (
+                      <Ionicons name="checkmark" size={14} color={colors.black} />
                     ) : null}
                   </View>
-                  <Text style={styles.optionTagline}>{option.tagline}</Text>
-                  <Text style={styles.optionDetail}>{option.detail}</Text>
-                </View>
-                <View style={[styles.radio, selected && styles.radioSelected]}>
-                  {selected ? <Ionicons name="checkmark" size={14} color={colors.black} /> : null}
-                </View>
-              </Pressable>
+                </Pressable>
+
+                {expanded ? (
+                  <View style={styles.setup}>
+                    <View style={styles.divider} />
+
+                    <Text style={styles.setupLabel}>Connect your TV</Text>
+                    <AirPlayPickerRow
+                      title="Choose your TV"
+                      detail="Tap the AirPlay icon and pick your TV"
+                      prominent
+                    />
+                    <Text style={styles.setupHint}>
+                      Or open Control Center → Screen Mirroring → choose your TV.
+                    </Text>
+
+                    <TvStatusLine
+                      connected={tvReady}
+                      supported={display.supported}
+                      style={styles.status}
+                    />
+
+                    {!display.supported && !tvReady ? (
+                      <Pressable
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: tvConfirmed }}
+                        accessibilityLabel="My TV is showing this screen"
+                        onPress={() => setTvConfirmed((v) => !v)}
+                        hitSlop={6}
+                        style={({ pressed }) => [styles.confirmRow, pressed && styles.pressed]}
+                      >
+                        <View style={[styles.checkbox, tvConfirmed && styles.checkboxOn]}>
+                          {tvConfirmed ? (
+                            <Ionicons name="checkmark" size={14} color={colors.black} />
+                          ) : null}
+                        </View>
+                        <Text style={styles.confirmText}>My TV is showing this screen</Text>
+                      </Pressable>
+                    ) : null}
+
+                    <Pressable
+                      onPress={() => setGuideOpen(true)}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      style={({ pressed }) => [styles.helpRow, pressed && styles.pressed]}
+                    >
+                      <Ionicons name="help-circle-outline" size={16} color={colors.lime} />
+                      <Text style={styles.helpText}>Having trouble?</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
             );
           })}
         </View>
-
-        {choice === 'tv' ? (
-          <View style={styles.connectionWrap}>
-            <TvConnectionCard
-              state={tvReady ? 'confirmed' : 'waiting'}
-              detection={display}
-              onConfirm={() => setTvConfirmed(true)}
-              onHelp={() => setGuideOpen(true)}
-              onUsePhone={() => select('phone')}
-            />
-          </View>
-        ) : (
-          <Pressable
-            onPress={() => setGuideOpen(true)}
-            hitSlop={8}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.helpRow, pressed && styles.pressed]}
-          >
-            <Ionicons name="help-circle-outline" size={18} color={colors.lime} />
-            <Text style={styles.helpText}>Having trouble connecting to a TV?</Text>
-          </Pressable>
-        )}
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: layout.footerBottom(insets.bottom) }]}>
         <Text style={styles.footnote}>
           {choice === 'tv' && !tvReady
-            ? 'Not set up yet? Continue anyway and connect before your run.'
+            ? 'Continue unlocks once your TV shows this screen.'
             : 'You can switch any time from the run screen.'}
         </Text>
-        <GradientButton label="CONTINUE" accent="lime" onPress={onContinue} />
+        <GradientButton
+          label="CONTINUE"
+          accent="lime"
+          onPress={canContinue ? onContinue : undefined}
+          style={!canContinue ? styles.disabled : undefined}
+        />
+        {choice === 'tv' && !tvReady ? (
+          <Pressable
+            onPress={() => select('phone')}
+            hitSlop={8}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.altRow, pressed && styles.pressed]}
+          >
+            <Text style={styles.altText}>Continue with phone instead</Text>
+          </Pressable>
+        ) : null}
       </View>
 
-      <TvSetupGuide visible={guideOpen} onClose={() => setGuideOpen(false)} />
+      <TvSetupGuide
+        visible={guideOpen}
+        onClose={() => setGuideOpen(false)}
+        detection={display}
+      />
     </View>
   );
 }
@@ -187,20 +249,20 @@ const styles = StyleSheet.create({
   sub: { ...type.body, color: colors.textDim, marginTop: spacing.sm },
   stack: { gap: spacing.md, marginTop: spacing.xl },
   option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.lg,
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
+    overflow: 'hidden',
   },
-  optionPrimary: {
-    paddingVertical: spacing.xl,
-    backgroundColor: colors.surface2,
-  },
+  optionPrimary: { backgroundColor: colors.surface2 },
   optionSelected: { borderColor: colors.lime },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.lg,
+  },
   optionIcon: {
     width: 52,
     height: 52,
@@ -214,8 +276,7 @@ const styles = StyleSheet.create({
   optionHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
   optionTitle: { ...type.h3, color: colors.text },
   optionTitlePrimary: { ...type.h2, color: colors.text },
-  optionTagline: { ...type.body, color: colors.text, fontWeight: font.semibold },
-  optionDetail: { ...type.bodySm, color: colors.textDim },
+  optionTagline: { ...type.bodySm, color: colors.textDim },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -233,16 +294,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   radioSelected: { backgroundColor: colors.lime, borderColor: colors.lime },
-  connectionWrap: { marginTop: spacing.xl },
+
+  // Inline TV setup, inside the selected card. Deliberately no inner boxes:
+  // one divider, then rows, so nothing reads as a third option.
+  setup: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, gap: spacing.sm },
+  divider: { height: 1, backgroundColor: colors.border, marginBottom: spacing.sm },
+  setupLabel: { ...type.label, color: colors.textDim, marginBottom: spacing.xs },
+  setupHint: { ...type.bodySm, color: colors.textDim },
+  status: { marginTop: spacing.xs },
+  confirmRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: radius.sm,
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxOn: { backgroundColor: colors.lime, borderColor: colors.lime },
+  confirmText: { ...type.body, color: colors.text, fontWeight: font.semibold },
   helpRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: spacing.xl,
-    paddingVertical: spacing.sm,
+    gap: 5,
+    alignSelf: 'flex-start',
+    paddingVertical: spacing.xs,
   },
   helpText: { color: colors.lime, fontSize: 14, fontWeight: font.bold },
+
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
@@ -252,5 +337,8 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   footnote: { ...type.bodySm, color: colors.textFaint, textAlign: 'center' },
+  altRow: { alignSelf: 'center', paddingVertical: spacing.xs, paddingHorizontal: spacing.lg },
+  altText: { color: colors.textDim, fontSize: 14, fontWeight: font.bold },
+  disabled: { opacity: 0.4 },
   pressed: { opacity: 0.8 },
 });
