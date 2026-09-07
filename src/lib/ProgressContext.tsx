@@ -198,6 +198,12 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     stateUpdatedAt,
   };
 
+  // Read through a ref so the cloud-sync effects need not re-run on every
+  // questionnaire change; the attribution answer predates account creation, so
+  // it is already in place when the first sync fires after login.
+  const answersRef = useRef(answers);
+  answersRef.current = answers;
+
   const snapshot = useCallback(
     (over: Partial<PersistedShape> = {}): PersistedShape => ({
       runs: stateRef.current.runs,
@@ -380,6 +386,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
           username: selected.username,
           runs: mergedRuns,
           state: selectedState,
+          acquisitionSource: answersRef.current.attribution,
         });
         if (active) setSyncStatus('synced');
       } catch (error) {
@@ -413,6 +420,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
             username: current.username,
             stateUpdatedAt: current.stateUpdatedAt,
           },
+          acquisitionSource: answersRef.current.attribution,
         });
         setSyncStatus('synced');
       } catch (error) {

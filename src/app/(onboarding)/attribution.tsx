@@ -3,9 +3,10 @@ import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GradientButton, OnboardingTopBar } from '@/components/ui';
+import { recordAttributionSurvey } from '@/lib/attributionSurvey';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import { attributionOptions, onboardingProgress, type AttributionKey } from '@/lib/onboarding';
-import { colors, font, radius, spacing } from '@/theme';
+import { colors, font, layout, radius, spacing } from '@/theme';
 
 const CHANNEL_STYLE: Record<AttributionKey, { color: string; background: string }> = {
   instagram: { color: '#E4405F', background: 'rgba(228,64,95,0.13)' },
@@ -23,12 +24,21 @@ export default function AttributionScreen() {
 
   const selected = answers.attribution;
 
+  // Persist locally (OnboardingContext), then fan out to RevenueCat, Singular
+  // and — once an account exists — the Firestore user doc. Sent on Continue so
+  // a user who changes their mind while on the screen reports once.
+  const onContinue = () => {
+    if (!selected) return;
+    recordAttributionSurvey(selected);
+    router.push('/(onboarding)/gameplay-showcase');
+  };
+
   return (
     <View style={styles.root}>
       <OnboardingTopBar progress={onboardingProgress('attribution')} topInset={insets.top} onBack={() => router.back()} />
 
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}
+        contentContainerStyle={[styles.content, { paddingBottom: layout.scrollAboveFooter }]}
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>Where did you hear about us?</Text>
@@ -63,11 +73,11 @@ export default function AttributionScreen() {
         </View>
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: layout.footerBottom(insets.bottom) }]}>
         <GradientButton
           label="CONTINUE"
           accent="lime"
-          onPress={selected ? () => router.push('/(onboarding)/gameplay-showcase') : undefined}
+          onPress={selected ? onContinue : undefined}
           style={!selected ? styles.disabled : undefined}
         />
       </View>

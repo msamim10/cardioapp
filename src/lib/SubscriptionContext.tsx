@@ -26,6 +26,7 @@ import {
   type PurchaseOutcome,
 } from './purchases';
 import { syncAnalyticsIdentity } from './analytics';
+import { reapplyAttributionAttribute } from './attributionSurvey';
 import type { PurchasesOffering } from 'react-native-purchases';
 
 /**
@@ -95,6 +96,9 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     (async () => {
       const info = await synchronizePurchasesIdentity(user?.id ?? null);
       if (active && info) setIsPremium(hasPremium(info));
+      // The survey answer was set on the pre-login anonymous user; make sure the
+      // identified customer carries it too.
+      if (user?.id) void reapplyAttributionAttribute();
     })();
     return () => {
       active = false;

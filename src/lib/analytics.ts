@@ -71,6 +71,9 @@ export const EVENTS = {
   firstRunComplete: 'first_run_complete',
   runComplete: 'run_complete',
   paywallViewed: 'paywall_viewed',
+  // "Where did you hear about us?" answer, so self-reported acquisition can be
+  // compared against Singular's measured attribution per install.
+  attributionSurvey: 'attribution_survey',
   // Singular's canonical conversion events (Events.js sngStartTrial /
   // sngSubscribe), sent only when this client owns revenue reporting.
   startTrial: 'sng_start_trial',
@@ -238,6 +241,15 @@ export function logRunComplete(attrs: { durationMin: number; score: number }): v
  */
 export function logFirstRunLaunched(): void {
   safely('logFirstRunLaunched', () => markFirstRunLaunched());
+}
+
+/**
+ * The user answered "Where did you hear about us?". `source` is the option key
+ * (instagram, tiktok, …). Singular only; the same answer is also written as a
+ * RevenueCat subscriber attribute and to the Firestore user doc elsewhere.
+ */
+export function logAttributionSurvey(source: string): void {
+  safely('logAttributionSurvey', () => singularEvent(EVENTS.attributionSurvey, { source }));
 }
 
 /** The paywall was shown (hosted RevenueCat UI OR the custom fallback). */

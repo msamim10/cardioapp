@@ -391,6 +391,28 @@ export async function getCustomerInfoSafe(): Promise<CustomerInfo | null> {
   }
 }
 
+/**
+ * Set RevenueCat subscriber attributes on the current app user. They show in
+ * the RevenueCat dashboard under the customer's profile → Attributes, so this
+ * is where survey-style answers (acquisition source etc.) become inspectable.
+ * Waits for `configure` so an early caller (onboarding) is never dropped, and
+ * no-ops where RevenueCat is unavailable. Returns whether the write happened.
+ */
+export async function setPurchasesAttributes(
+  attributes: Record<string, string | null>,
+): Promise<boolean> {
+  if (!(await configurePurchases())) return false;
+  const Purchases = getPurchases();
+  if (!Purchases) return false;
+  try {
+    await Purchases.setAttributes(attributes);
+    return true;
+  } catch (e) {
+    console.warn('[purchases] setAttributes failed:', e);
+    return false;
+  }
+}
+
 /** Check current premium status (null when unavailable). */
 export async function checkPremium(): Promise<boolean | null> {
   const info = await getCustomerInfoSafe();

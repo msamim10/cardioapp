@@ -42,6 +42,12 @@ export async function syncCloudProgress(input: {
   username: string | null;
   runs: RunRecord[];
   state: CloudProgressState;
+  /**
+   * Self-reported "Where did you hear about us?" answer (option key). Written to
+   * the user document as `acquisitionSource`; omitted when never answered so a
+   * later answer is not clobbered by an older device.
+   */
+  acquisitionSource?: string | null;
 }): Promise<void> {
   const db = getFirebaseDb();
   await setDoc(
@@ -51,6 +57,7 @@ export async function syncCloudProgress(input: {
       displayName: input.user.name,
       photoURL: input.user.photo,
       username: input.username,
+      ...(input.acquisitionSource ? { acquisitionSource: input.acquisitionSource } : {}),
       updatedAt: serverTimestamp(),
     },
     { merge: true }
