@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TvConnectionCard, TvSetupGuide } from '@/components/TvSetupGuide';
 import { GradientButton, OnboardingTopBar } from '@/components/ui';
+import { useExternalDisplay } from '@/lib/externalDisplay';
 import { onboardingProgress } from '@/lib/onboarding';
 import {
   DEFAULT_PLAY_SCREEN,
@@ -47,9 +48,13 @@ export default function WhereYouPlayScreen() {
   const insets = useSafeAreaInsets();
   const [choice, setChoice] = useState<PlayScreen>(DEFAULT_PLAY_SCREEN);
   const [guideOpen, setGuideOpen] = useState(false);
-  // User-confirmed only. Screen mirroring is not observable from JS in a
-  // managed build, so this never claims to have detected the TV itself.
+  // Real detection on iOS native builds (UIScreen connect/disconnect via the
+  // local external-display module). Where unsupported (Expo Go, Android, web)
+  // we fall back to the user's own confirmation and never claim to have
+  // detected the TV ourselves.
+  const display = useExternalDisplay();
   const [tvConfirmed, setTvConfirmed] = useState(false);
+  const tvReady = display.supported ? display.connected : tvConfirmed;
 
   useEffect(() => {
     let mounted = true;
@@ -140,7 +145,8 @@ export default function WhereYouPlayScreen() {
         {choice === 'tv' ? (
           <View style={styles.connectionWrap}>
             <TvConnectionCard
-              state={tvConfirmed ? 'confirmed' : 'waiting'}
+              state={tvReady ? 'confirmed' : 'waiting'}
+              detection={display}
               onConfirm={() => setTvConfirmed(true)}
               onHelp={() => setGuideOpen(true)}
               onUsePhone={() => select('phone')}
@@ -161,7 +167,7 @@ export default function WhereYouPlayScreen() {
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
         <Text style={styles.footnote}>
-          {choice === 'tv' && !tvConfirmed
+          {choice === 'tv' && !tvReady
             ? 'Not set up yet? Continue anyway and connect before your run.'
             : 'You can switch any time from the run screen.'}
         </Text>

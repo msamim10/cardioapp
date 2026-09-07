@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GhostButton, GradientButton } from '@/components/ui';
+import type { ExternalDisplayStatus } from '@/lib/externalDisplay';
 import { colors, font, radius, spacing, type } from '@/theme';
 
 type GuideStep = {
@@ -147,28 +148,33 @@ export function TvSetupGuide({
 export type TvConnectionState = 'waiting' | 'confirmed';
 
 /**
- * The honest "Waiting for TV…" card.
+ * The "Waiting for TV…" card.
  *
- * Expo managed builds cannot observe screen mirroring: there is no JS access to
- * the OS display list without a native module, and expo-video's external
- * playback flag only flips while a video is actually AirPlaying. So this card
- * does not claim to detect anything. It pulses while the user sets up, and the
- * user confirms when the TV shows this screen. During the run itself the "On
- * TV" pill IS real, because expo-video reports AirPlay routing for the player.
+ * On iOS native builds the local `external-display` module watches
+ * `UIScreen` connect/disconnect notifications, so AirPlay screen mirroring and
+ * wired adapters are detected for real: pass `detection` and the card flips to
+ * "TV connected" on its own, with no manual confirm button. Where detection is
+ * unsupported (Expo Go, Android, web) the card falls back to the honest
+ * behaviour: it pulses while the user sets up and the user confirms when the
+ * TV shows this screen. Nothing is ever faked in either mode.
  */
 export function TvConnectionCard({
   state,
+  detection,
   onConfirm,
   onHelp,
   onUsePhone,
 }: {
   state: TvConnectionState;
+  /** Live detector status; omit or pass `supported: false` for manual mode. */
+  detection?: ExternalDisplayStatus;
   onConfirm: () => void;
   onHelp: () => void;
   onUsePhone?: () => void;
 }) {
   const pulse = useRef(new Animated.Value(0)).current;
   const [elapsedTick, setElapsedTick] = useState(0);
+  const autoDetect = detection?.supported === true;
 
   useEffect(() => {
     if (state !== 'waiting') return;
@@ -189,8 +195,19 @@ export function TvConnectionCard({
   const confirmed = state === 'confirmed';
   const showNudge = !confirmed && elapsedTick >= 12;
 
+  const detail = confirmed
+    ? autoDetect
+      ? 'Your phone is mirroring to the TV. Keep it propped up facing you and the run plays on the big screen.'
+      : 'Keep the phone propped up facing you. The run plays on the TV.'
+    : autoDetect
+      ? 'Mirror your screen now. This flips to connected the moment your TV picks it up.'
+      : 'Mirror your screen now. When this screen shows on your TV, confirm below.';
+
   return (
-    <View style={[styles.connection, confirmed && styles.connectionConfirmed]}>
+    <View
+      accessibilityLiveRegion="polite"
+      style={[styles.connection, confirmed && styles.connectionConfirmed]}
+    >
       <View style={styles.connectionRow}>
         <View style={styles.connectionIcon}>
           {confirmed ? (
@@ -208,22 +225,20 @@ export function TvConnectionCard({
           <Text style={styles.connectionTitle}>
             {confirmed ? 'TV connected' : 'Waiting for TV…'}
           </Text>
-          <Text style={styles.connectionDetail}>
-            {confirmed
-              ? 'Keep the phone propped up facing you. The run plays on the TV.'
-              : 'Mirror your screen now. When this screen shows on your TV, confirm below.'}
-          </Text>
+          <Text style={styles.connectionDetail}>{detail}</Text>
         </View>
       </View>
 
       {!confirmed ? (
         <View style={styles.connectionActions}>
-          <GradientButton
-            label="My TV shows this"
-            icon="tv"
-            accent="lime"
-            onPress={onConfirm}
-          />
+          {autoDetect ? null : (
+            <GradientButton
+              label="My TV shows this"
+              icon="tv"
+              accent="lime"
+              onPress={onConfirm}
+            />
+          )}
           <View style={styles.connectionLinks}>
             <Pressable onPress={onHelp} hitSlop={8} style={styles.linkBtn}>
               <Ionicons name="help-circle-outline" size={16} color={colors.lime} />

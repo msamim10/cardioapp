@@ -24,6 +24,7 @@ import {
   logCalibrationFailure,
   logCalibrationSuccess,
 } from '@/lib/analytics';
+import { useExternalDisplay } from '@/lib/externalDisplay';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import {
   isIntensityKey,
@@ -111,6 +112,10 @@ export default function PreflightScreen() {
   const isFirstRun = params.firstRun === '1';
   const [playScreen, setPlayScreen] = useState<PlayScreen | null>(null);
   const [tvGuideOpen, setTvGuideOpen] = useState(false);
+  // Real on iOS native builds; `supported: false` elsewhere (then the pill is
+  // just the help affordance and never claims a connection).
+  const display = useExternalDisplay();
+  const tvConnected = display.supported && display.connected;
   const [permission, requestPermission, getPermission] = useCameraPermissions();
   const [state, setState] = useState(INITIAL_PREFLIGHT_STATE);
   const [poseFrame, setPoseFrame] = useState<PoseFrame | null>(null);
@@ -473,13 +478,19 @@ export default function PreflightScreen() {
       {playScreen === 'tv' ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="TV setup help"
+          accessibilityLabel={tvConnected ? 'TV connected. Open TV setup guide' : 'TV setup help'}
           hitSlop={8}
           onPress={() => setTvGuideOpen(true)}
-          style={[styles.tvHelp, { top: insets.top + spacing.sm }]}
+          style={[styles.tvHelp, tvConnected && styles.tvHelpConnected, { top: insets.top + spacing.sm }]}
         >
-          <Ionicons name="tv-outline" size={15} color={colors.white} />
-          <Text style={styles.tvHelpText}>Having trouble?</Text>
+          <Ionicons
+            name={tvConnected ? 'tv' : 'tv-outline'}
+            size={15}
+            color={tvConnected ? colors.lime : colors.white}
+          />
+          <Text style={[styles.tvHelpText, tvConnected && styles.tvHelpTextConnected]}>
+            {tvConnected ? 'TV connected' : display.supported ? 'Waiting for TV…' : 'Having trouble?'}
+          </Text>
         </Pressable>
       ) : null}
       <TvSetupGuide visible={tvGuideOpen} onClose={() => setTvGuideOpen(false)} />
@@ -682,7 +693,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
+  tvHelpConnected: { borderWidth: 1, borderColor: colors.lime },
   tvHelpText: { color: colors.white, fontSize: 12, fontWeight: font.bold },
+  tvHelpTextConnected: { color: colors.lime },
   eyebrow: { ...type.micro, color: colors.lime, letterSpacing: 1.7 },
   runName: { ...type.h3, color: colors.white, marginTop: 3 },
   centerGuide: {
