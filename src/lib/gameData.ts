@@ -20,10 +20,14 @@ export type Mode = {
 
 /**
  * One world per full-length video (13 total). Stable IDs map to the immutable
- * storage folders in videoSources.ts; display titles intentionally follow the
- * supplied cover/video order.
- * Accent keys cycle through the theme palette for visual variety, and each
- * world carries an Ionicons glyph so the UI stays icon-based (no emoji).
+ * storage folders in videoSources.ts and to the cover art in modeCovers.ts, so
+ * display names can change freely without touching assets or saved progress.
+ *
+ * NAMES are the single source of truth for what the user sees everywhere
+ * (Home, Levels, level detail, onboarding, the run summary). Each is an
+ * original, evocative title that reads straight off its cover — never a
+ * third-party trademark (App Store 5.2.1), even where the art nods at a genre.
+ * Taglines and glyphs describe the cover's scene for the same reason.
  *
  * These are the static content definitions only. Whether a world is locked or
  * completed is derived at runtime from persisted progress (see ProgressContext
@@ -31,22 +35,25 @@ export type Mode = {
  */
 export const modes: Mode[] = [
   {
+    // Daytime city, a fox sprinting the boulevard ahead of the pack.
     id: 'wild-city',
     name: 'Wild City',
-    tagline: 'Outrun what\u2019s behind you',
+    tagline: 'Outrun the pack downtown',
     accent: 'lime',
     icon: 'paw',
     levels: [{ id: 'wild-city', name: 'Wild City', durationMin: 5 }],
   },
   {
+    // Giant mushrooms, floating blocks, coins and waterfalls.
     id: 'pixel-kingdom',
-    name: 'Pixel Kingdom',
-    tagline: 'Titans, chaos, and speed',
+    name: 'Mushroom Falls',
+    tagline: 'Blocks, coins and waterfalls',
     accent: 'violet',
-    icon: 'shield',
-    levels: [{ id: 'pixel-kingdom', name: 'Pixel Kingdom', durationMin: 7 }],
+    icon: 'cube',
+    levels: [{ id: 'pixel-kingdom', name: 'Mushroom Falls', durationMin: 7 }],
   },
   {
+    // Dance crew under a neon skyline with a demon looming overhead.
     id: 'neon-beat-hunters',
     name: 'Neon Beat Hunters',
     tagline: 'Beat drops and dodge cues',
@@ -55,84 +62,94 @@ export const modes: Mode[] = [
     levels: [{ id: 'neon-beat-hunters', name: 'Neon Beat Hunters', durationMin: 6 }],
   },
   {
+    // Jungle trail with a T-rex on your heels.
     id: 'dino-escape',
     name: 'Dino Escape',
-    tagline: 'Classic runner energy',
+    tagline: 'Outrun the T-rex',
     accent: 'cyan',
-    icon: 'train',
+    icon: 'footsteps',
     levels: [{ id: 'dino-escape', name: 'Dino Escape', durationMin: 7 }],
   },
   {
+    // The same city after dark: neon streets, full sprint.
     id: 'wild-city-rush',
-    name: 'Wild City Rush',
-    tagline: 'Glitchy obstacles, big energy',
+    name: 'Wild City Nights',
+    tagline: 'Neon streets, full sprint',
     accent: 'orange',
-    icon: 'sparkles',
-    levels: [{ id: 'wild-city-rush', name: 'Wild City Rush', durationMin: 6 }],
+    icon: 'moon',
+    levels: [{ id: 'wild-city-rush', name: 'Wild City Nights', durationMin: 6 }],
   },
   {
+    // Pink-and-teal arena, a giant doll calling red light, green light.
     id: 'red-light-rush',
     name: 'Red Light Rush',
-    tagline: 'Ice, speed, and survival',
+    tagline: 'Freeze on red, sprint on green',
     accent: 'lime',
-    icon: 'snow',
+    icon: 'stop-circle',
     levels: [{ id: 'red-light-rush', name: 'Red Light Rush', durationMin: 7 }],
   },
   {
+    // Meadow trail with fire, water and leaf critters bounding alongside.
     id: 'critter-chase',
     name: 'Critter Chase',
-    tagline: 'Heat, lava, and lanes',
+    tagline: 'Fire, water and leaf on your heels',
     accent: 'violet',
     icon: 'flame',
     levels: [{ id: 'critter-chase', name: 'Critter Chase', durationMin: 7 }],
   },
   {
+    // Neon glass walkways over a red-lit void, masked guards watching.
     id: 'red-light-rush-2',
-    name: 'Red Light Rush 2',
-    tagline: 'Playtime turned workout',
+    name: 'Glass Maze',
+    tagline: 'Neon glass, one wrong step',
     accent: 'pink',
-    icon: 'rocket',
-    levels: [{ id: 'red-light-rush-2', name: 'Red Light Rush 2', durationMin: 7 }],
+    icon: 'grid',
+    levels: [{ id: 'red-light-rush-2', name: 'Glass Maze', durationMin: 7 }],
   },
   {
+    // Railway tracks, an oncoming train and a shambling horde.
     id: 'metro-zombie-escape',
-    name: 'Metro Zombie Escape',
-    tagline: 'City chase cardio',
+    name: 'Zombie Metro',
+    tagline: 'Down the tracks, ahead of the horde',
     accent: 'cyan',
-    icon: 'navigate',
-    levels: [{ id: 'metro-zombie-escape', name: 'Metro Zombie Escape', durationMin: 5 }],
+    icon: 'skull',
+    levels: [{ id: 'metro-zombie-escape', name: 'Zombie Metro', durationMin: 5 }],
   },
   {
+    // A giant living drum chasing you through a lantern-lit village at night.
     id: 'drumline-dash',
-    name: 'Drumline Dash',
-    tagline: 'Blocks, rails, and speed',
+    name: 'Drum Demon',
+    tagline: 'A beat that chases you',
     accent: 'orange',
-    icon: 'cube',
-    levels: [{ id: 'drumline-dash', name: 'Drumline Dash', durationMin: 6 }],
+    icon: 'musical-note',
+    levels: [{ id: 'drumline-dash', name: 'Drum Demon', durationMin: 6 }],
   },
   {
+    // Brick road through the clouds, green pipes and floating castles.
     id: 'block-world-dash',
-    name: 'Block World Dash',
-    tagline: 'Jump, duck, and dash',
+    name: 'Cloud Kingdom',
+    tagline: 'Brick roads above the clouds',
     accent: 'lime',
-    icon: 'game-controller',
-    levels: [{ id: 'block-world-dash', name: 'Block World Dash', durationMin: 5 }],
+    icon: 'cloud',
+    levels: [{ id: 'block-world-dash', name: 'Cloud Kingdom', durationMin: 5 }],
   },
   {
+    // Hoverboard along graffiti-covered subway tracks, trains either side.
     id: 'neon-rails',
-    name: 'Neon Rails',
-    tagline: 'Dash the rails and dodge fast',
+    name: 'Neon Subway',
+    tagline: 'Board the rails, dodge the trains',
     accent: 'cyan',
-    icon: 'speedometer',
-    levels: [{ id: 'neon-rails', name: 'Neon Rails', durationMin: 2 }],
+    icon: 'train',
+    levels: [{ id: 'neon-rails', name: 'Neon Subway', durationMin: 2 }],
   },
   {
+    // Prison yard under searchlights, guard towers behind.
     id: 'prison-escape-run',
-    name: 'Prison Escape Run',
-    tagline: 'Break free and outrun pursuit',
+    name: 'Prison Escape',
+    tagline: 'Break out under the searchlights',
     accent: 'orange',
-    icon: 'warning',
-    levels: [{ id: 'prison-escape-run', name: 'Prison Escape Run', durationMin: 3 }],
+    icon: 'flashlight',
+    levels: [{ id: 'prison-escape-run', name: 'Prison Escape', durationMin: 3 }],
   },
 ];
 

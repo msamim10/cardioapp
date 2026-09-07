@@ -6,6 +6,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GradientButton } from '@/components/ui';
 import { logPaywallViewed } from '@/lib/analytics';
+import { getMode } from '@/lib/gameData';
 import { useSubscription } from '@/lib/SubscriptionContext';
 import {
   describeIntroTrial,
@@ -52,8 +53,14 @@ type LivePrice = { price: string; sub?: string; trial?: string; amount?: number 
 // map is keyed per plan and monthly is deliberately absent.
 const FALLBACK_TRIAL_LABEL: Partial<Record<PlanKey, string>> = { yearly: '3-day' };
 
+// Named from gameData so the copy can never drift from the catalogue.
+const FEATURED_WORLD_NAMES = ['neon-rails', 'red-light-rush', 'wild-city']
+  .map((id) => getMode(id)?.name)
+  .filter((name): name is string => Boolean(name))
+  .join(', ');
+
 const VALUE_STACK: { icon: keyof typeof Ionicons.glyphMap; title: string; sub: string }[] = [
-  { icon: 'infinite', title: 'Every world unlocked', sub: 'All levels — Neon Rails, Red Light Rush, Wild City & more' },
+  { icon: 'infinite', title: 'Every world unlocked', sub: `All levels — ${FEATURED_WORLD_NAMES} & more` },
   { icon: 'layers', title: 'New worlds every week', sub: 'Fresh video levels added weekly' },
   { icon: 'flash', title: 'Unlimited training', sub: 'No daily caps, no ads' },
   { icon: 'trophy', title: 'Full progression', sub: 'Every badge, coin multiplier & leaderboard' },
