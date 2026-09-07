@@ -112,8 +112,9 @@ export default function PreflightScreen() {
   const isFirstRun = params.firstRun === '1';
   const [playScreen, setPlayScreen] = useState<PlayScreen | null>(null);
   const [tvGuideOpen, setTvGuideOpen] = useState(false);
-  // Real on iOS native builds; `supported: false` elsewhere (then the pill is
-  // just the help affordance and never claims a connection).
+  // Real on iOS native builds (screen mirroring or an AirPlay route both count
+  // as connected); `supported: false` elsewhere (then the pill is just the help
+  // affordance and never claims a connection).
   const display = useExternalDisplay();
   const tvConnected = display.supported && display.connected;
   const [permission, requestPermission, getPermission] = useCameraPermissions();
@@ -489,7 +490,7 @@ export default function PreflightScreen() {
             color={tvConnected ? colors.lime : colors.white}
           />
           <Text style={[styles.tvHelpText, tvConnected && styles.tvHelpTextConnected]}>
-            {tvConnected ? 'TV connected' : display.supported ? 'Waiting for TV…' : 'Having trouble?'}
+            {tvConnected ? 'TV connected' : display.supported ? 'Choose your TV' : 'Having trouble?'}
           </Text>
         </Pressable>
       ) : null}

@@ -3,7 +3,8 @@ import { type Href, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AirPlayPickerRow, TvSetupGuide, TvStatusLine } from '@/components/TvSetupGuide';
+import { AirPlayConnectBox } from '@/components/AirPlayConnectBox';
+import { TvSetupGuide } from '@/components/TvSetupGuide';
 import { GradientButton, OnboardingTopBar } from '@/components/ui';
 import { useExternalDisplay } from '@/lib/externalDisplay';
 import { onboardingProgress } from '@/lib/onboarding';
@@ -43,9 +44,10 @@ const OPTIONS: ScreenOption[] = [
  * "Where will you play?"
  *
  * Two selectable cards and nothing else that looks like one. Choosing the TV
- * expands that card with the setup steps inline: the native AirPlay picker, the
- * Control Center route, a plain status line and the help link. Continue stays
- * disabled until the TV is actually detected (or, where detection is
+ * expands that card with the setup steps inline: the native AirPlay picker box
+ * (whose text doubles as the connection status), the Control Center route and
+ * the help link. Continue stays disabled until the TV is actually detected by
+ * either path, AirPlay route or screen mirroring (or, where detection is
  * unsupported, until the user explicitly confirms), with a secondary link to
  * fall back to the phone so nobody is ever stuck here.
  */
@@ -54,8 +56,9 @@ export default function WhereYouPlayScreen() {
   const insets = useSafeAreaInsets();
   const [choice, setChoice] = useState<PlayScreen>(DEFAULT_PLAY_SCREEN);
   const [guideOpen, setGuideOpen] = useState(false);
-  // Real detection on iOS native builds (UIScreen connect/disconnect via the
-  // local external-display module). Where unsupported (Expo Go, Android, web)
+  // Real detection on iOS native builds (UIScreen connect/disconnect plus
+  // AVAudioSession AirPlay route changes, via the local external-display
+  // module). Where unsupported (Expo Go, Android, web)
   // we fall back to the user's own confirmation and never claim to have
   // detected the TV ourselves. One hook instance feeds both this screen and
   // the guide sheet, so a connection made while the sheet is open is reflected
@@ -158,20 +161,13 @@ export default function WhereYouPlayScreen() {
                     <View style={styles.divider} />
 
                     <Text style={styles.setupLabel}>Connect your TV</Text>
-                    <AirPlayPickerRow
-                      title="Choose your TV"
-                      detail="Tap the AirPlay icon and pick your TV"
-                      prominent
+                    <AirPlayConnectBox
+                      connected={tvReady}
+                      deviceName={display.airPlayDeviceName}
                     />
                     <Text style={styles.setupHint}>
                       Or open Control Center → Screen Mirroring → choose your TV.
                     </Text>
-
-                    <TvStatusLine
-                      connected={tvReady}
-                      supported={display.supported}
-                      style={styles.status}
-                    />
 
                     {!display.supported && !tvReady ? (
                       <Pressable
@@ -211,7 +207,7 @@ export default function WhereYouPlayScreen() {
       <View style={[styles.footer, { paddingBottom: layout.footerBottom(insets.bottom) }]}>
         <Text style={styles.footnote}>
           {choice === 'tv' && !tvReady
-            ? 'Continue unlocks once your TV shows this screen.'
+            ? 'Continue unlocks once your TV is connected.'
             : 'You can switch any time from the run screen.'}
         </Text>
         <GradientButton
@@ -301,7 +297,6 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: colors.border, marginBottom: spacing.sm },
   setupLabel: { ...type.label, color: colors.textDim, marginBottom: spacing.xs },
   setupHint: { ...type.bodySm, color: colors.textDim },
-  status: { marginTop: spacing.xs },
   confirmRow: {
     flexDirection: 'row',
     alignItems: 'center',

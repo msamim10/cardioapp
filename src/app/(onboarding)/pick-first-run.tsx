@@ -10,27 +10,23 @@ import { getMode } from '@/lib/gameData';
 import { getModeCover } from '@/lib/modeCovers';
 import { onboardingProgress } from '@/lib/onboarding';
 import { useOnboarding } from '@/lib/OnboardingContext';
-import { firstRunVariantCount, recommendFirstRuns } from '@/lib/onboardingPlan';
+import { recommendFirstRuns } from '@/lib/onboardingPlan';
 import { loadPlaySetup, saveFirstRunLevel } from '@/lib/playSetup';
-import { colors, font, layout, radius, spacing, type } from '@/theme';
+import { colors, layout, radius, spacing, type } from '@/theme';
 
 export default function PickFirstRunScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { answers } = useOnboarding();
 
-  // The lead is fixed; `variant` rotates the two companions through the pool.
-  const [variant, setVariant] = useState(0);
-  const variantCount = useMemo(() => firstRunVariantCount(answers), [answers]);
-  const picks = useMemo(() => recommendFirstRuns(answers, variant), [answers, variant]);
+  // The lead is fixed and the two companions come straight from the answers.
+  const picks = useMemo(() => recommendFirstRuns(answers), [answers]);
   const [selected, setSelected] = useState<string | null>(null);
 
-  // Restore a persisted choice if it is in the opening trio; otherwise start on
-  // the lead. Keyed off the answers rather than `picks` so a shuffle never
-  // yanks the selection back.
+  // Restore a persisted choice if it is in the trio; otherwise start on the lead.
   useEffect(() => {
     let mounted = true;
-    const opening = recommendFirstRuns(answers, 0);
+    const opening = recommendFirstRuns(answers);
     loadPlaySetup().then((setup) => {
       if (!mounted) return;
       const persisted = setup.firstRunLevelId;
@@ -48,18 +44,6 @@ export default function PickFirstRunScreen() {
   const choose = (levelId: string) => {
     setSelected(levelId);
     void saveFirstRunLevel(levelId);
-  };
-
-  const shuffle = () => {
-    const next = (variant + 1) % variantCount;
-    setVariant(next);
-    // If the selected companion just rotated away, fall back to the lead.
-    const nextPicks = recommendFirstRuns(answers, next);
-    if (selected && !nextPicks.some((p) => p.levelId === selected)) {
-      const lead = nextPicks[0]?.levelId ?? null;
-      setSelected(lead);
-      if (lead) void saveFirstRunLevel(lead);
-    }
   };
 
   const onContinue = () => {
@@ -137,19 +121,6 @@ export default function PickFirstRunScreen() {
             );
           })}
         </View>
-
-        {variantCount > 1 ? (
-          <Pressable
-            onPress={shuffle}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Show two different maps"
-            style={({ pressed }) => [styles.shuffleRow, pressed && styles.pressed]}
-          >
-            <Ionicons name="shuffle" size={16} color={colors.lime} />
-            <Text style={styles.shuffleText}>Show me two others</Text>
-          </Pressable>
-        ) : null}
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: layout.footerBottom(insets.bottom) }]}>
@@ -209,15 +180,6 @@ const styles = StyleSheet.create({
   cardBottom: { gap: 3 },
   cardName: { ...type.h2, color: colors.white },
   cardTagline: { ...type.bodySm, color: 'rgba(247,248,248,0.82)' },
-  shuffleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  shuffleText: { color: colors.lime, fontSize: 14, fontWeight: font.bold },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,

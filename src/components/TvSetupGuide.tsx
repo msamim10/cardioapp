@@ -1,10 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { VideoAirPlayButton } from 'expo-video';
-import { useEffect, useRef } from 'react';
 import {
-  Animated,
-  Easing,
   Modal,
   Platform,
   Pressable,
@@ -13,10 +9,9 @@ import {
   Text,
   useWindowDimensions,
   View,
-  type StyleProp,
-  type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AirPlayConnectBox } from '@/components/AirPlayConnectBox';
 import { GradientButton } from '@/components/ui';
 import type { ExternalDisplayStatus } from '@/lib/externalDisplay';
 import { colors, font, radius, spacing, type } from '@/theme';
@@ -117,19 +112,18 @@ export function TvSetupGuide({
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.intro}>
-            Mirror your phone to the TV, then keep the phone propped up facing you. The
+            Send the run to your TV, then keep the phone propped up facing you. The
             camera keeps reading your body while the map plays on the big screen.
           </Text>
 
-          {detection?.supported ? (
-            <TvStatusLine connected={connected} supported style={styles.sheetStatus} />
-          ) : null}
-
-          <AirPlayPickerRow
-            title="Fastest way: pick your TV here"
-            detail="Tap the AirPlay icon and choose your TV from the list."
-            prominent
+          <AirPlayConnectBox
+            connected={connected}
+            deviceName={detection?.airPlayDeviceName}
           />
+
+          {Platform.OS === 'ios' ? <ConnectedPreview /> : null}
+
+          <Text style={styles.sectionLabel}>Or mirror your whole screen</Text>
 
           {STEPS.map((step, index) => (
             <View key={step.key} style={styles.step}>
@@ -177,100 +171,41 @@ export function TvSetupGuide({
 }
 
 /**
- * The native AirPlay route picker, framed as a full-width row so it is obvious
- * what the icon does. iOS only: the row renders nothing elsewhere, and callers
- * keep the Control Center instructions visible regardless.
+ * "What you'll see when it's connected": plain-language description of the
+ * system AirPlay sheet plus a small original mock of its list (a phone row and a
+ * TV row with a checkmark). Drawn from our own primitives; no platform
+ * screenshots or logos.
  */
-export function AirPlayPickerRow({
-  title,
-  detail,
-  prominent = false,
-  style,
-}: {
-  title: string;
-  detail: string;
-  prominent?: boolean;
-  style?: StyleProp<ViewStyle>;
-}) {
-  if (Platform.OS !== 'ios') return null;
+function ConnectedPreview() {
   return (
-    <View
-      style={[styles.airplayRow, prominent && styles.airplayRowProminent, style]}
-      accessible
-      accessibilityLabel={`${title}. ${detail}`}
-    >
-      <View style={[styles.airplayWell, prominent && styles.airplayWellProminent]}>
-        <VideoAirPlayButton
-          style={styles.airplayNative}
-          tint={prominent ? colors.black : colors.lime}
-          activeTint={prominent ? colors.black : colors.lime}
-          prioritizeVideoDevices
-          accessibilityRole="button"
-          accessibilityLabel="Choose an AirPlay display"
-        />
-      </View>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text style={styles.airplayTitle}>{title}</Text>
-        <Text style={styles.airplayDetail}>{detail}</Text>
-      </View>
-    </View>
-  );
-}
+    <View style={styles.preview}>
+      <Text style={styles.previewTitle}>{"What you'll see when it's connected"}</Text>
+      <Text style={styles.previewText}>
+        Tap the AirPlay icon above and your phone opens a sheet titled AirPlay, with a
+        line about sharing content from your iPhone. Your TV appears in the list. Tap it:
+        a checkmark shows next to its name and the icon at the top of the sheet switches
+        to its connected state. Close the sheet and the box above reads Connected.
+      </Text>
 
-/**
- * Plain status line (deliberately not a box): pulsing dot + "Waiting for your
- * TV…" until the display connects, then a check + "TV connected". Where
- * detection is unsupported the copy asks for confirmation instead of implying
- * the app can see the TV.
- */
-export function TvStatusLine({
-  connected,
-  supported,
-  style,
-}: {
-  connected: boolean;
-  supported: boolean;
-  style?: StyleProp<ViewStyle>;
-}) {
-  const pulse = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (connected) return;
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [connected, pulse]);
-
-  const label = connected
-    ? 'TV connected ✓'
-    : supported
-      ? 'Waiting for your TV…'
-      : 'Set up your TV, then confirm below';
-
-  return (
-    <View
-      accessibilityLiveRegion="polite"
-      accessibilityLabel={label}
-      style={[styles.statusRow, style]}
-    >
-      {connected ? (
-        <View style={styles.statusCheck}>
-          <Ionicons name="checkmark" size={12} color={colors.black} />
+      <View style={styles.mock} accessible accessibilityLabel="Example: a device list with Living Room TV selected">
+        <View style={styles.mockHead}>
+          <Text style={styles.mockTitle}>AirPlay</Text>
+          <Text style={styles.mockSub}>Share content from your phone</Text>
         </View>
-      ) : (
-        <Animated.View
-          style={[
-            styles.statusDot,
-            { opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) },
-          ]}
-        />
-      )}
-      <Text style={[styles.statusText, connected && styles.statusTextConnected]}>{label}</Text>
+        <View style={styles.mockRow}>
+          <View style={styles.mockGlyph}>
+            <Ionicons name="phone-portrait-outline" size={15} color={colors.textDim} />
+          </View>
+          <Text style={styles.mockRowText}>iPhone</Text>
+        </View>
+        <View style={[styles.mockRow, styles.mockRowSelected]}>
+          <View style={[styles.mockGlyph, styles.mockGlyphSelected]}>
+            <Ionicons name="tv-outline" size={15} color={colors.black} />
+          </View>
+          <Text style={[styles.mockRowText, styles.mockRowTextSelected]}>Living Room TV</Text>
+          <Ionicons name="checkmark" size={18} color={colors.lime} />
+        </View>
+      </View>
     </View>
   );
 }
@@ -301,7 +236,49 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.72 },
   sheetContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.lg },
   intro: { ...type.body, color: colors.textDim },
-  sheetStatus: { marginTop: -spacing.sm },
+  sectionLabel: { ...type.label, color: colors.textDim, marginBottom: -spacing.sm },
+
+  preview: { gap: spacing.sm },
+  previewTitle: { ...type.h3, color: colors.text },
+  previewText: { ...type.bodySm, color: colors.textDim },
+  mock: {
+    marginTop: spacing.xs,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  mockHead: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+    gap: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  mockTitle: { ...type.h3, color: colors.text, fontSize: 15 },
+  mockSub: { ...type.micro, color: colors.textFaint },
+  mockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  mockRowSelected: { backgroundColor: colors.surface2 },
+  mockGlyph: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface3,
+  },
+  mockGlyphSelected: { backgroundColor: colors.lime },
+  mockRowText: { ...type.bodySm, color: colors.textDim, flex: 1, fontWeight: font.semibold },
+  mockRowTextSelected: { color: colors.text },
+
   step: {
     flexDirection: 'row',
     gap: spacing.lg,
@@ -350,42 +327,4 @@ const styles = StyleSheet.create({
   },
   noteTitle: { ...type.h3, color: colors.text, fontSize: 15 },
   noteDetail: { ...type.bodySm, color: colors.textDim },
-
-  airplayRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-  },
-  airplayRowProminent: { borderColor: colors.lime, backgroundColor: colors.surface3 },
-  airplayWell: {
-    width: 52,
-    height: 52,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface2,
-  },
-  airplayWellProminent: { backgroundColor: colors.lime },
-  airplayNative: { width: 44, height: 44 },
-  airplayTitle: { ...type.body, color: colors.text, fontWeight: font.bold },
-  airplayDetail: { ...type.bodySm, color: colors.textDim },
-
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 22 },
-  statusDot: { width: 10, height: 10, borderRadius: radius.pill, backgroundColor: colors.lime },
-  statusCheck: {
-    width: 18,
-    height: 18,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.lime,
-  },
-  statusText: { ...type.body, color: colors.textDim, fontWeight: font.semibold },
-  statusTextConnected: { color: colors.lime },
 });

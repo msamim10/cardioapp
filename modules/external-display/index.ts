@@ -7,24 +7,52 @@ export type { ExternalDisplayChangeEvent } from './src/ExternalDisplayModule';
 export type ExternalDisplayStatus = {
   /**
    * The native module is present (iOS build with the local module linked).
-   * When false, `connected` and `mirrored` are always false and mean nothing;
-   * fall back to asking the user.
+   * When false, every other field is false/null and means nothing; fall back
+   * to asking the user.
    */
   supported: boolean;
+  /** A TV is reachable by either path: second screen or AirPlay route. */
   connected: boolean;
+  /** A second screen is mirroring the phone (Control Center → Screen Mirroring). */
   mirrored: boolean;
+  /** The AirPlay route picker has an AirPlay receiver selected. */
+  airPlayActive: boolean;
+  /** Name of the selected AirPlay receiver, when iOS reports one. */
+  airPlayDeviceName: string | null;
 };
 
-const UNSUPPORTED: ExternalDisplayStatus = { supported: false, connected: false, mirrored: false };
+const UNSUPPORTED: ExternalDisplayStatus = {
+  supported: false,
+  connected: false,
+  mirrored: false,
+  airPlayActive: false,
+  airPlayDeviceName: null,
+};
 
 /** True when real detection is available (iOS native build). */
 export const isExternalDisplaySupported = ExternalDisplayModule !== null;
 
+function fromEvent(event: ExternalDisplayChangeEvent): ExternalDisplayStatus {
+  // Older binaries (built before AirPlay routing was observed) omit the last
+  // two fields; treat them as "no route" rather than undefined.
+  const airPlayActive = event.airPlayActive === true;
+  const airPlayDeviceName =
+    typeof event.airPlayDeviceName === 'string' && event.airPlayDeviceName.length > 0
+      ? event.airPlayDeviceName
+      : null;
+  return {
+    supported: true,
+    connected: event.connected === true || airPlayActive,
+    mirrored: event.mirrored === true,
+    airPlayActive,
+    airPlayDeviceName,
+  };
+}
+
 function readStatus(): ExternalDisplayStatus {
   if (!ExternalDisplayModule) return UNSUPPORTED;
   try {
-    const state = ExternalDisplayModule.getState();
-    return { supported: true, connected: state.connected, mirrored: state.mirrored };
+    return fromEvent(ExternalDisplayModule.getState());
   } catch {
     return UNSUPPORTED;
   }
@@ -58,8 +86,9 @@ export function addExternalDisplayListener(
 }
 
 /**
- * Live external-display status. Re-reads on mount (the screen may already be
- * attached) and follows `UIScreen` connect/disconnect notifications.
+ * Live TV-connection status. Re-reads on mount (the screen or route may already
+ * be set up) and follows `UIScreen` connect/disconnect notifications plus
+ * `AVAudioSession` route changes.
  */
 export function useExternalDisplay(): ExternalDisplayStatus {
   const [status, setStatus] = useState<ExternalDisplayStatus>(readStatus);
@@ -68,7 +97,7 @@ export function useExternalDisplay(): ExternalDisplayStatus {
     if (!ExternalDisplayModule) return;
     setStatus(readStatus());
     const subscription = addExternalDisplayListener((event) => {
-      setStatus({ supported: true, connected: event.connected, mirrored: event.mirrored });
+      setStatus(fromEvent(event));
     });
     return () => subscription.remove();
   }, []);
