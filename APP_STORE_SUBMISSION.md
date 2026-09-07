@@ -42,8 +42,8 @@ Every run counts your active minutes and estimated calories, tracks your best co
 CARDIOSURF PRO
 CardioSurf is free to download and try. CardioSurf Pro unlocks every world and level, all intensity classes, unlimited runs and full rewards — with new worlds added regularly.
 
-- Monthly: $9.99 / month
-- Yearly: $69.99 / year, including a 3-day free trial
+- Monthly: $14.99 / month
+- Yearly: $39.99 / year, including a 3-day free trial
 
 Subscriptions are auto-renewable. Payment is charged to your Apple ID at confirmation of purchase. Your subscription automatically renews unless it is canceled at least 24 hours before the end of the current period, and your account will be charged for renewal within 24 hours before the end of the current period. You can manage or cancel your subscription anytime in your App Store account settings; any unused portion of a free trial is forfeited when you purchase a subscription.
 
@@ -123,7 +123,7 @@ GETTING STARTED
 4. The run summary shows calories, XP, coins and combos.
 
 SUBSCRIPTIONS
-CardioSurf Pro is an auto-renewable subscription (Monthly $9.99 / Yearly $69.99 with a 3-day free trial) that unlocks all content. The demo account above is pre-granted Pro so you can review all content without purchasing.
+CardioSurf Pro is an auto-renewable subscription (Monthly $14.99 / Yearly $39.99 with a 3-day free trial) that unlocks all content. The demo account above is pre-granted Pro so you can review all content without purchasing.
 
 TO VIEW AND TEST THE IN-APP PURCHASE / PAYWALL: sign out of the demo account and create a new account with any email (open registration on the sign-up screen). A new account starts as a free user, so attempting to start any locked world will immediately present the paywall showing the Monthly and Yearly subscriptions (Yearly includes a 3-day free trial). You can complete the purchase there via the standard StoreKit flow.
 
@@ -147,8 +147,8 @@ Thanks for playing our very first release. Move more, sit less, and let us know 
 ---
 
 ## Pricing (verify matches App Store Connect exactly)
-- cardiosurf_pro_monthly — $9.99 / month
-- cardiosurf_pro_yearly — $69.99 / year, 3-day free trial
+- cardiosurf_pro_monthly — $14.99 / month
+- cardiosurf_pro_yearly — $39.99 / year, 3-day free trial
 
 ---
 
