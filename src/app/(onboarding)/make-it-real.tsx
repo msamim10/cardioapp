@@ -14,6 +14,7 @@ import { recommendFirstRuns } from '@/lib/onboardingPlan';
 import {
   DEFAULT_PLAY_SCREEN,
   describePlayScreen,
+  firstRunSettings,
   INTENSITY_META,
   loadPlaySetup,
   type PlaySetup,
@@ -72,7 +73,11 @@ export default function MakeItRealScreen() {
   const level = mode?.levels[0];
   const cover = mode ? getModeCover(mode.id) : undefined;
   const screen = setup?.screen ?? DEFAULT_PLAY_SCREEN;
-  const settings: RunSettings = setup?.runSettings ?? resolveRunSettings(setup, answers);
+  // The first run is always 5 minutes; the persisted settings (answer-derived
+  // default, saved above) keep their own duration for every run after it.
+  const settings: RunSettings = firstRunSettings(
+    setup?.runSettings ?? resolveRunSettings(setup, answers),
+  );
   const intensity = INTENSITY_META[settings.intensity];
   const goal = goalOptions.find((o) => o.key === answers.goal);
 

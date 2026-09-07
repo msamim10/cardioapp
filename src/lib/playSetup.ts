@@ -213,6 +213,22 @@ export function resolveRunSettings(
   return setup?.runSettings ?? defaultRunSettings(answers.mover);
 }
 
+/**
+ * The onboarding first run is always the short session, whatever the answers
+ * suggested. Fixed so the ceremony (calibrate → offer → run) ends on a win.
+ */
+export const FIRST_RUN_DURATION_MIN: RunDurationMin = 5;
+
+/**
+ * Settings for the run launched from onboarding: the user's intensity with the
+ * duration pinned to `FIRST_RUN_DURATION_MIN`. Pure; it does not touch the
+ * persisted last-used settings, so the level screen still opens on the
+ * answer-derived (or edited) duration after the first run.
+ */
+export function firstRunSettings(settings: RunSettings): RunSettings {
+  return { ...settings, durationMin: FIRST_RUN_DURATION_MIN };
+}
+
 /** Wall-clock seconds a run lasts, independent of playback rate. */
 export function targetSecondsForRun(durationMin: number): number {
   return Math.max(60, Math.round(durationMin * 60));

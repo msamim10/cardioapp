@@ -16,6 +16,7 @@ import { recommendFirstRuns } from '@/lib/onboardingPlan';
 import {
   DEFAULT_PLAY_SCREEN,
   describePlayScreen,
+  firstRunSettings,
   INTENSITY_META,
   loadPlaySetup,
   type PlaySetup,
@@ -81,7 +82,9 @@ export default function FirstRunReadyScreen() {
   const level = mode?.levels[0];
   const cover = mode ? getModeCover(mode.id) : undefined;
   const screen = setup?.screen ?? DEFAULT_PLAY_SCREEN;
-  const settings = resolveRunSettings(setup, answers);
+  // Same pin as the recap: the onboarding run is 5 minutes regardless of the
+  // answer-derived default, which stays persisted for later runs.
+  const settings = firstRunSettings(resolveRunSettings(setup, answers));
   const intensity = INTENSITY_META[settings.intensity];
   const goal = goalOptions.find((o) => o.key === answers.goal);
   const trackingOff = setup?.firstRunTrackingOff === true;
