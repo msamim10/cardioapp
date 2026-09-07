@@ -1,5 +1,5 @@
 export const REVIEW_REQUESTED_STORAGE_KEY = 'cardiosurf.storeReview.requested.v1';
-export const REVIEW_RUN_MILESTONE = 3;
+export const REVIEW_RUN_MILESTONE = 2;
 
 export type ReviewEligibility = {
   completedRunCount: number;

@@ -1,6 +1,19 @@
 import assert from 'node:assert/strict';
 // @ts-expect-error -- Node type-stripping requires the source extension.
-import { isStoreReviewEligible } from '../src/lib/reviewEligibility.ts';
+import { isStoreReviewEligible, REVIEW_RUN_MILESTONE } from '../src/lib/reviewEligibility.ts';
+
+// The prompt fires on the second completed run. The onboarding first run is
+// recorded like any other, so the first normal run after onboarding qualifies.
+assert.equal(REVIEW_RUN_MILESTONE, 2);
+
+assert.equal(
+  isStoreReviewEligible({
+    completedRunCount: 1,
+    alreadyRequested: false,
+    supported: true,
+  }),
+  false,
+);
 
 assert.equal(
   isStoreReviewEligible({
@@ -8,7 +21,7 @@ assert.equal(
     alreadyRequested: false,
     supported: true,
   }),
-  false,
+  true,
 );
 
 assert.equal(
@@ -22,7 +35,7 @@ assert.equal(
 
 assert.equal(
   isStoreReviewEligible({
-    completedRunCount: 3,
+    completedRunCount: 2,
     alreadyRequested: true,
     supported: true,
   }),
@@ -31,7 +44,7 @@ assert.equal(
 
 assert.equal(
   isStoreReviewEligible({
-    completedRunCount: 3,
+    completedRunCount: 2,
     alreadyRequested: false,
     supported: false,
   }),
