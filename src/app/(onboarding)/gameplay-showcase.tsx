@@ -30,7 +30,15 @@ import {
   shouldPreviewPlay,
   type ShowcasePreviewStatus,
 } from '@/lib/showcaseMedia';
-import { colors, font, metric, radius, spacing, type as typeScale } from '@/theme';
+import {
+  colors,
+  font,
+  layout as screenLayout,
+  metric,
+  radius,
+  spacing,
+  type as typeScale,
+} from '@/theme';
 
 type ShowcaseClip = {
   id: string;
@@ -574,7 +582,7 @@ export default function GameplayShowcaseScreen() {
         </View>
       </View>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: screenLayout.footerBottom(insets.bottom) }]}>
         <GradientButton
           accent="lime"
           label="CONTINUE"

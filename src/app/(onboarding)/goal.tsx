@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Badge, GradientButton, OnboardingTopBar } from '@/components/ui';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import { onboardingProgress, weeklyGoalOptions } from '@/lib/onboarding';
-import { accentColor, colors, radius, spacing, type } from '@/theme';
+import { accentColor, colors, layout, radius, spacing, type } from '@/theme';
 
 const RECOMMENDED = weeklyGoalOptions.find((o) => o.recommended)?.runs ?? 4;
 
@@ -27,7 +27,7 @@ export default function GoalScreen() {
       <OnboardingTopBar progress={onboardingProgress('goal')} topInset={insets.top} onBack={() => router.back()} />
 
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}
+        contentContainerStyle={[styles.content, { paddingBottom: layout.scrollAboveFooter }]}
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>Set your weekly target</Text>
@@ -63,7 +63,7 @@ export default function GoalScreen() {
         </View>
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: layout.footerBottom(insets.bottom) }]}>
         <GradientButton
           label="CONTINUE"
           accent="lime"

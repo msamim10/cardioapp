@@ -23,7 +23,7 @@ import {
   validateUsername,
 } from '@/lib/username';
 import { onboardingProgress } from '@/lib/onboarding';
-import { colors, spacing, type } from '@/theme';
+import { colors, layout, spacing, type } from '@/theme';
 
 const EMPTY_HINT = "Optional — tap shuffle for ideas, or continue and we'll pick one.";
 const FORMAT_HINT = 'Lowercase and numbers, 3-20 characters.';
@@ -98,7 +98,7 @@ export default function UsernameScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}
+          contentContainerStyle={[styles.content, { paddingBottom: layout.scrollAboveFooter }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -119,7 +119,7 @@ export default function UsernameScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: layout.footerBottom(insets.bottom) }]}>
         <GradientButton
           label="CONTINUE"
           accent="lime"

@@ -8,7 +8,7 @@ import { ensureNotificationPermission, scheduleWeeklyReminders } from '@/lib/not
 import { useOnboarding } from '@/lib/OnboardingContext';
 import { useProgress } from '@/lib/ProgressContext';
 import { onboardingProgress } from '@/lib/onboarding';
-import { accentColor, colors, font, radius, spacing, type } from '@/theme';
+import { accentColor, colors, font, layout, radius, spacing, type } from '@/theme';
 
 /**
  * Notifications opt-in.
@@ -67,7 +67,7 @@ export default function NotificationsScreen() {
       <OnboardingTopBar progress={onboardingProgress('notifications')} topInset={insets.top} onBack={() => router.back()} />
 
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 140 }]}
+        contentContainerStyle={[styles.content, { paddingBottom: layout.scrollAboveFooter }]}
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.title}>Never miss a session</Text>
@@ -90,7 +90,7 @@ export default function NotificationsScreen() {
         </View>
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: layout.footerBottom(insets.bottom) }]}>
         <Pressable onPress={onSkip} hitSlop={8} style={styles.skipRow}>
           <Text style={styles.skipText}>Maybe later</Text>
         </Pressable>

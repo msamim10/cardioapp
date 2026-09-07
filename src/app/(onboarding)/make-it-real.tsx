@@ -22,7 +22,7 @@ import {
   saveRunSettings,
   type RunSettings,
 } from '@/lib/playSetup';
-import { colors, font, metric, radius, spacing, type } from '@/theme';
+import { colors, font, layout, metric, radius, spacing, type } from '@/theme';
 
 /**
  * "Let's make it real": the recap between the plan readout and calibration. It
@@ -96,7 +96,7 @@ export default function MakeItRealScreen() {
       <OnboardingTopBar progress={onboardingProgress('make-it-real')} topInset={insets.top} />
 
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 140 }]}
+        contentContainerStyle={[styles.content, { paddingBottom: layout.scrollAboveFooter }]}
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.eyebrow}>Almost there</Text>
@@ -154,11 +154,11 @@ export default function MakeItRealScreen() {
         ) : null}
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: layout.footerBottom(insets.bottom) }]}>
         <View style={styles.headsUp}>
           <Ionicons name="camera-outline" size={14} color={colors.lime} />
-          <Text style={styles.headsUpText}>
-            Next: a 20-second camera calibration. Processed on-device, never recorded.
+          <Text style={styles.headsUpText} numberOfLines={1}>
+            Next: a 20-second camera calibration.
           </Text>
         </View>
         <GradientButton

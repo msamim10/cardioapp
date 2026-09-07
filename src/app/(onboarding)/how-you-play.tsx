@@ -15,7 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GradientButton, OnboardingTopBar } from '@/components/ui';
 import { onboardingProgress } from '@/lib/onboarding';
-import { colors, font, radius, spacing, type } from '@/theme';
+import { colors, font, layout, radius, spacing, type } from '@/theme';
 
 type MoveCard = {
   key: string;
@@ -158,10 +158,7 @@ export default function HowYouPlayScreen() {
         ))}
       </View>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
-        <Text style={styles.footnote}>
-          Phone propped up, camera facing you, about two metres back.
-        </Text>
+      <View style={[styles.footer, { paddingBottom: layout.footerBottom(insets.bottom) }]}>
         <GradientButton
           accent="lime"
           label={isLast ? 'I understand' : 'Next move'}
@@ -248,7 +245,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
-  footnote: { ...type.bodySm, color: colors.textFaint, textAlign: 'center' },
   skipRow: { alignSelf: 'center', paddingVertical: spacing.xs, paddingHorizontal: spacing.lg },
   skipText: { color: colors.textDim, fontSize: 13, fontWeight: font.bold },
 });

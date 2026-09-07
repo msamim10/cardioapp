@@ -24,7 +24,7 @@ import {
 import { useProgress } from '@/lib/ProgressContext';
 import { useSubscription } from '@/lib/SubscriptionContext';
 import { createTrackingRunId } from '@/lib/trackingSession';
-import { colors, font, metric, radius, spacing, type } from '@/theme';
+import { colors, font, layout, metric, radius, spacing, type } from '@/theme';
 
 /**
  * "Your first run is ready." The last screen of onboarding and the one that
@@ -152,7 +152,7 @@ export default function FirstRunReadyScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top + spacing.xl, paddingBottom: insets.bottom + 160 },
+          { paddingTop: insets.top + spacing.xl, paddingBottom: layout.scrollAboveFooter },
         ]}
         showsVerticalScrollIndicator={false}
       >
@@ -210,7 +210,7 @@ export default function FirstRunReadyScreen() {
         </View>
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: layout.footerBottom(insets.bottom) }]}>
         <Pressable
           onPress={onStart}
           disabled={busy || !ready}
@@ -325,11 +325,9 @@ const styles = StyleSheet.create({
   },
   checkDotDone: { backgroundColor: colors.lime },
   checkText: { ...type.bodySm, color: colors.textDim, flex: 1 },
+  // In flow below the scroll view, like every other onboarding footer, so the
+  // scroll content needs no guess at the footer's height.
   footer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     gap: spacing.sm,

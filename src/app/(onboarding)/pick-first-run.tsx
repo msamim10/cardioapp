@@ -10,37 +10,56 @@ import { getMode } from '@/lib/gameData';
 import { getModeCover } from '@/lib/modeCovers';
 import { onboardingProgress } from '@/lib/onboarding';
 import { useOnboarding } from '@/lib/OnboardingContext';
-import { recommendFirstRuns } from '@/lib/onboardingPlan';
+import { firstRunVariantCount, recommendFirstRuns } from '@/lib/onboardingPlan';
 import { loadPlaySetup, saveFirstRunLevel } from '@/lib/playSetup';
-import { colors, font, metric, radius, spacing, type } from '@/theme';
+import { colors, font, layout, radius, spacing, type } from '@/theme';
 
 export default function PickFirstRunScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { answers } = useOnboarding();
 
-  const picks = useMemo(() => recommendFirstRuns(answers), [answers]);
+  // The lead is fixed; `variant` rotates the two companions through the pool.
+  const [variant, setVariant] = useState(0);
+  const variantCount = useMemo(() => firstRunVariantCount(answers), [answers]);
+  const picks = useMemo(() => recommendFirstRuns(answers, variant), [answers, variant]);
   const [selected, setSelected] = useState<string | null>(null);
 
+  // Restore a persisted choice if it is in the opening trio; otherwise start on
+  // the lead. Keyed off the answers rather than `picks` so a shuffle never
+  // yanks the selection back.
   useEffect(() => {
     let mounted = true;
+    const opening = recommendFirstRuns(answers, 0);
     loadPlaySetup().then((setup) => {
       if (!mounted) return;
       const persisted = setup.firstRunLevelId;
-      if (persisted && picks.some((p) => p.levelId === persisted)) {
+      if (persisted && opening.some((p) => p.levelId === persisted)) {
         setSelected(persisted);
       } else {
-        setSelected(picks[0]?.levelId ?? null);
+        setSelected(opening[0]?.levelId ?? null);
       }
     });
     return () => {
       mounted = false;
     };
-  }, [picks]);
+  }, [answers]);
 
   const choose = (levelId: string) => {
     setSelected(levelId);
     void saveFirstRunLevel(levelId);
+  };
+
+  const shuffle = () => {
+    const next = (variant + 1) % variantCount;
+    setVariant(next);
+    // If the selected companion just rotated away, fall back to the lead.
+    const nextPicks = recommendFirstRuns(answers, next);
+    if (selected && !nextPicks.some((p) => p.levelId === selected)) {
+      const lead = nextPicks[0]?.levelId ?? null;
+      setSelected(lead);
+      if (lead) void saveFirstRunLevel(lead);
+    }
   };
 
   const onContinue = () => {
@@ -58,14 +77,14 @@ export default function PickFirstRunScreen() {
       />
 
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 140 }]}
+        contentContainerStyle={[styles.content, { paddingBottom: layout.scrollAboveFooter }]}
         showsVerticalScrollIndicator={false}
       >
         <Text style={styles.eyebrow}>Recommended for you</Text>
         <Text style={styles.title}>Pick your first run</Text>
         <Text style={styles.sub}>
-          Three maps matched to your answers. The full catalogue opens after your first
-          session.
+          Our featured map, plus two matched to your answers. The full catalogue opens after
+          your first session.
         </Text>
 
         <View style={styles.stack}>
@@ -93,8 +112,8 @@ export default function PickFirstRunScreen() {
                   <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface2 }]} />
                 )}
                 <LinearGradient
-                  colors={['rgba(8,9,10,0.10)', 'rgba(8,9,10,0.55)', 'rgba(8,9,10,0.94)']}
-                  locations={[0, 0.5, 1]}
+                  colors={['rgba(8,9,10,0.10)', 'rgba(8,9,10,0.45)', 'rgba(8,9,10,0.92)']}
+                  locations={[0, 0.55, 1]}
                   style={StyleSheet.absoluteFill}
                   pointerEvents="none"
                 />
@@ -113,20 +132,27 @@ export default function PickFirstRunScreen() {
                 <View style={styles.cardBottom}>
                   <Text style={styles.cardName}>{mode.name}</Text>
                   <Text style={styles.cardTagline}>{mode.tagline}</Text>
-                  <View style={styles.metaRow}>
-                    <View style={styles.metaChip}>
-                      <Ionicons name="sparkles" size={12} color={colors.lime} />
-                      <Text style={styles.metaText}>{pick.reason}</Text>
-                    </View>
-                  </View>
                 </View>
               </Pressable>
             );
           })}
         </View>
+
+        {variantCount > 1 ? (
+          <Pressable
+            onPress={shuffle}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Show two different maps"
+            style={({ pressed }) => [styles.shuffleRow, pressed && styles.pressed]}
+          >
+            <Ionicons name="shuffle" size={16} color={colors.lime} />
+            <Text style={styles.shuffleText}>Show me two others</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: layout.footerBottom(insets.bottom) }]}>
         <GradientButton
           label={selected ? 'LOCK IT IN' : 'CONTINUE'}
           accent="lime"
@@ -147,7 +173,7 @@ const styles = StyleSheet.create({
   sub: { ...type.body, color: colors.textDim, marginTop: spacing.sm },
   stack: { gap: spacing.md, marginTop: spacing.xl },
   card: {
-    height: 172,
+    height: 164,
     borderRadius: radius.xl,
     overflow: 'hidden',
     backgroundColor: colors.surface,
@@ -183,17 +209,15 @@ const styles = StyleSheet.create({
   cardBottom: { gap: 3 },
   cardName: { ...type.h2, color: colors.white },
   cardTagline: { ...type.bodySm, color: 'rgba(247,248,248,0.82)' },
-  metaRow: { flexDirection: 'row', marginTop: spacing.xs },
-  metaChip: {
+  shuffleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: radius.sm,
-    backgroundColor: 'rgba(8,9,10,0.62)',
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
   },
-  metaText: { ...metric, color: colors.text, fontSize: 12, fontWeight: font.bold },
+  shuffleText: { color: colors.lime, fontSize: 14, fontWeight: font.bold },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,

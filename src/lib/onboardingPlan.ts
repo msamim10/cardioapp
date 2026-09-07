@@ -184,24 +184,33 @@ export function shouldShowPlan(plan: OnboardingPlan): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Three maps per training objective, in display order. The first entry is the
- * lead recommendation. Every id here is a real map in `gameData`; the resolver
- * below drops anything that stops existing rather than throwing at import.
+ * The featured map is always the lead recommendation, whatever the answers:
+ * it is the one every new player starts on, so the leaderboard and the first
+ * session are shared ground.
+ */
+export const FIRST_RUN_LEAD = 'neon-rails';
+
+/**
+ * Answer-matched companions, in display order, per training objective. Every
+ * id here is a real map in `gameData`; the resolver below drops anything that
+ * stops existing rather than throwing at import.
  *
  * The groupings follow the map's character rather than its clip length, since
  * the run's duration is set separately (5 / 10 / 15 minutes, looped).
  */
 const FIRST_RUN_BY_GOAL: Record<GoalKey, readonly string[]> = {
-  lose: ['wild-city-rush', 'neon-beat-hunters', 'red-light-rush'],
-  habit: ['neon-rails', 'wild-city', 'block-world-dash'],
-  active: ['dino-escape', 'metro-zombie-escape', 'prison-escape-run'],
-  fun: ['pixel-kingdom', 'critter-chase', 'drumline-dash'],
+  lose: ['wild-city-rush', 'neon-beat-hunters', 'red-light-rush', 'metro-zombie-escape'],
+  habit: ['wild-city', 'block-world-dash', 'critter-chase', 'pixel-kingdom'],
+  active: ['dino-escape', 'metro-zombie-escape', 'prison-escape-run', 'wild-city-rush'],
+  fun: ['pixel-kingdom', 'critter-chase', 'drumline-dash', 'block-world-dash'],
 };
 
-const FIRST_RUN_FALLBACK: readonly string[] = ['neon-rails', 'wild-city', 'dino-escape'];
-
-/** Competitive users get the featured leaderboard map surfaced first. */
-const COMPETE_LEAD = 'neon-rails';
+const FIRST_RUN_FALLBACK: readonly string[] = [
+  'wild-city',
+  'dino-escape',
+  'pixel-kingdom',
+  'red-light-rush',
+];
 
 export type FirstRunRecommendation = {
   levelId: string;
@@ -211,6 +220,8 @@ export type FirstRunRecommendation = {
   lead: boolean;
 };
 
+const LEAD_REASON = 'The featured map. Everyone starts here.';
+
 const REASON_BY_GOAL: Record<GoalKey, string> = {
   lose: 'High-tempo cues for a steady burn',
   habit: 'Short, clear rhythm to build the routine',
@@ -219,31 +230,53 @@ const REASON_BY_GOAL: Record<GoalKey, string> = {
 };
 
 /**
- * Three recommended first maps derived from the stored answers. Deterministic,
- * so the screen shows the same trio if the user backs up and returns.
+ * Every map that can accompany the lead, best match first: the objective's own
+ * list, then the general fallbacks, then the rest of the catalogue so a shuffle
+ * can cycle through everything.
  */
-export function recommendFirstRuns(answers: OnboardingAnswers): FirstRunRecommendation[] {
-  const base = answers.goal ? FIRST_RUN_BY_GOAL[answers.goal] : FIRST_RUN_FALLBACK;
-  const ordered = [...base];
-  if (answers.motivation === 'compete') {
-    const index = ordered.indexOf(COMPETE_LEAD);
-    if (index > 0) ordered.splice(index, 1);
-    if (index !== 0) ordered.unshift(COMPETE_LEAD);
-  }
-  const reason = answers.goal ? REASON_BY_GOAL[answers.goal] : 'A strong first map';
-  const seen = new Set<string>();
-  const picks: FirstRunRecommendation[] = [];
-  for (const levelId of [...ordered, ...FIRST_RUN_FALLBACK]) {
-    if (picks.length >= 3 || seen.has(levelId) || !getLevel(levelId)) continue;
+function companionPool(answers: OnboardingAnswers): string[] {
+  const ordered = [
+    ...(answers.goal ? FIRST_RUN_BY_GOAL[answers.goal] : []),
+    ...FIRST_RUN_FALLBACK,
+    ...modes.map((mode) => mode.id),
+  ];
+  const seen = new Set<string>([FIRST_RUN_LEAD]);
+  const pool: string[] = [];
+  for (const levelId of ordered) {
+    if (seen.has(levelId) || !getLevel(levelId)) continue;
     seen.add(levelId);
-    picks.push({
-      levelId,
-      reason:
-        picks.length === 0 && answers.motivation === 'compete' && levelId === COMPETE_LEAD
-          ? 'The featured leaderboard map'
-          : reason,
-      lead: picks.length === 0,
-    });
+    pool.push(levelId);
+  }
+  return pool;
+}
+
+/** How many distinct pairs of companions a shuffle can step through. */
+export function firstRunVariantCount(answers: OnboardingAnswers): number {
+  return Math.max(1, Math.ceil(companionPool(answers).length / 2));
+}
+
+/**
+ * Three recommended first maps: the fixed lead, then two companions derived
+ * from the stored answers. Deterministic for a given `variant`, so the screen
+ * shows the same trio if the user backs up and returns; bumping `variant`
+ * rotates the companions through the rest of the pool.
+ */
+export function recommendFirstRuns(
+  answers: OnboardingAnswers,
+  variant = 0,
+): FirstRunRecommendation[] {
+  const picks: FirstRunRecommendation[] = [];
+  if (getLevel(FIRST_RUN_LEAD)) {
+    picks.push({ levelId: FIRST_RUN_LEAD, reason: LEAD_REASON, lead: true });
+  }
+  const pool = companionPool(answers);
+  if (pool.length === 0) return picks;
+  const offset = ((variant % firstRunVariantCount(answers)) * 2) % pool.length;
+  const rotated = [...pool.slice(offset), ...pool.slice(0, offset)];
+  const reason = answers.goal ? REASON_BY_GOAL[answers.goal] : 'A strong first map';
+  for (const levelId of rotated) {
+    if (picks.length >= 3) break;
+    picks.push({ levelId, reason, lead: picks.length === 0 });
   }
   return picks;
 }

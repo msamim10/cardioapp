@@ -26,7 +26,7 @@ import {
   moverOptions,
   onboardingStepProgress,
 } from '@/lib/onboarding';
-import { colors, font, metric, radius, spacing, type } from '@/theme';
+import { colors, font, layout, metric, radius, spacing, type } from '@/theme';
 
 // Personalization questions. The weekly goal + notifications live on their own
 // dedicated screens, so they're intentionally not part of this step list.
@@ -121,7 +121,7 @@ export default function QuestionsScreen() {
             styles.content,
             {
               paddingTop: spacing.xl,
-              paddingBottom: insets.bottom + 120,
+              paddingBottom: layout.scrollAboveFooter,
             },
           ]}
           keyboardShouldPersistTaps="handled"
@@ -200,7 +200,7 @@ export default function QuestionsScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.footer, { paddingBottom: layout.footerBottom(insets.bottom) }]}>
         <GradientButton
           label="CONTINUE"
           accent="lime"
@@ -214,11 +214,13 @@ export default function QuestionsScreen() {
 
 function WorldChoices() {
   const { width } = useWindowDimensions();
+  // Two columns that fill the content width; tall enough that the three rows
+  // carry the screen instead of leaving a void above the footer.
   const cardWidth = Math.min(
-    220,
+    260,
     Math.max(136, Math.floor((width - spacing.lg * 2 - spacing.md) / 2))
   );
-  const cardHeight = Math.max(94, Math.min(132, Math.round(cardWidth * 0.68)));
+  const cardHeight = Math.max(118, Math.min(168, Math.round(cardWidth * 0.84)));
   const reveals = useRef(featuredWorldOptions.map(() => new Animated.Value(0))).current;
   const moreReveal = useRef(new Animated.Value(0)).current;
   const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
@@ -410,19 +412,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: spacing.md,
     right: spacing.md,
-    bottom: spacing.sm,
+    bottom: spacing.md,
     color: colors.white,
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: font.heavy,
-    letterSpacing: -0.2,
-    lineHeight: 15,
+    letterSpacing: -0.3,
+    lineHeight: 18,
     textShadowColor: 'rgba(0,0,0,0.7)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
   moreWorlds: {
     alignItems: 'center',
-    marginTop: spacing.md,
+    marginTop: spacing.lg,
   },
   moreWorldsText: {
     ...type.bodySm,

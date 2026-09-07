@@ -16,7 +16,7 @@ import { onboardingProgress } from '@/lib/onboarding';
 import { buildOnboardingPlan } from '@/lib/onboardingPlan';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import { useProgress } from '@/lib/ProgressContext';
-import { colors, spacing, type } from '@/theme';
+import { colors, layout, spacing, type } from '@/theme';
 
 /** Fade for the footer once the last gauge has landed. */
 const FOOTER_FADE_MS = 240;
@@ -133,7 +133,7 @@ export default function PlanScreen() {
         style={[
           styles.footer,
           {
-            paddingBottom: insets.bottom + spacing.md,
+            paddingBottom: layout.footerBottom(insets.bottom),
             opacity: reveal,
             transform: [
               {

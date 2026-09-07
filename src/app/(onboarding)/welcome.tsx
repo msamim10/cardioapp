@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GradientButton } from '@/components/ui';
 import { WelcomeWalkingHero } from '@/components/WelcomeWalkingHero';
 import { logOnboardingStart } from '@/lib/analytics';
-import { colors, font, spacing, type } from '@/theme';
+import { colors, font, layout, spacing, type } from '@/theme';
 
 export default function WelcomeScreen() {
   const router = useRouter();
@@ -28,7 +28,7 @@ export default function WelcomeScreen() {
         styles.root,
         {
           paddingTop: insets.top,
-          paddingBottom: insets.bottom + spacing.md,
+          paddingBottom: layout.footerBottom(insets.bottom),
         },
       ]}
     >

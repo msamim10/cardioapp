@@ -26,7 +26,7 @@ import { presentOnboardingOffer } from '@/lib/onboardingOffer';
 import { buildOnboardingPlan, shouldShowPlan } from '@/lib/onboardingPlan';
 import { useProgress } from '@/lib/ProgressContext';
 import { useSubscription } from '@/lib/SubscriptionContext';
-import { colors, font, radius, spacing, type } from '@/theme';
+import { colors, font, layout, radius, spacing, type } from '@/theme';
 
 type Mode = 'create' | 'signin';
 type Busy = 'google' | 'apple' | 'email' | 'reset' | null;
@@ -202,7 +202,11 @@ export function AccountAuthScreen({ mode }: { mode: Mode }) {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top + spacing.md, paddingBottom: insets.bottom + spacing.xl },
+          {
+            paddingTop: insets.top + spacing.md,
+            // In-flow buttons, so add the same footer clearance as pinned ones.
+            paddingBottom: layout.footerBottom(insets.bottom) + spacing.sm,
+          },
         ]}
       >
         <Pressable
