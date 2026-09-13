@@ -212,18 +212,24 @@ base            = rewardForRun(durationMin, classKey)          // duration × cl
 accuracyFactor  = 0.3 + 0.7 × accuracy                          // beatmap level
                 = 0.3 + 0.7 × clamp(movesPerMin / 30, 0, 1)     // no beatmap (30/min ≈ one move every 2 s)
 comboFactor     = 1 + min(0.25, maxCombo / 100)
-total           = round(base × accuracyFactor × comboFactor)    // coins and XP separately
+xpBonusFactor   = 1.25 if the run completes today's daily challenge, else 1
+coins           = round(base.coins × accuracyFactor × comboFactor)
+xp              = round(base.xp × accuracyFactor × comboFactor × xpBonusFactor)
 ```
 
 Standing still earns 30% of base. Calories are unchanged (duration × class
 speed × intensity MET estimate). `RunRecord` stores `perfectCount`,
 `goodCount`, `missCount`, `maxCombo`, `accuracy`, `rewardBreakdown{base,
-accuracyFactor, comboFactor}`; legacy records normalize to factors of 1 with
-`base = stored coins/xp`. The summary screen shows the breakdown card;
-`run_complete` carries accuracy, max_combo, perfect/good/miss, has_beatmap,
-coins, xp.
+accuracyFactor, comboFactor, xpBonusFactor}`; legacy records normalize to
+factors of 1 with `base = stored coins/xp`. The summary screen shows the
+breakdown card; `run_complete` carries accuracy, max_combo, perfect/good/miss,
+has_beatmap, coins, xp.
 
-Replay: `npm run test:progression`.
+Levels (1–50 curve, grandfather floor), level rewards, campaign gates (the
+0.70 accuracy gate only applies to levels with a beatmap), streak freezes and
+the daily challenge are documented in `docs/PROGRESSION.md`.
+
+Replay: `npm run test:progression`, `npm run test:levels`, `npm run test:streaks`.
 
 ## 7. Validating on a device build
 
