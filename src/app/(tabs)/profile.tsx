@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useRouter } from 'expo-router';
+import { type Href, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -241,13 +241,22 @@ export default function ProfileScreen() {
           <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
         </Pressable>
         {__DEV__ ? (
-          <Pressable
-            onPress={() => router.push('/debug-funnel')}
-            style={({ pressed }) => [styles.settingRow, pressed && { opacity: 0.85 }]}
-          >
-            <Text style={styles.settingText}>Analytics funnel (debug)</Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
-          </Pressable>
+          <>
+            <Pressable
+              onPress={() => router.push('/debug-funnel')}
+              style={({ pressed }) => [styles.settingRow, pressed && { opacity: 0.85 }]}
+            >
+              <Text style={styles.settingText}>Analytics funnel (debug)</Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+            </Pressable>
+            <Pressable
+              onPress={() => router.push('/dev-beatmap' as Href)}
+              style={({ pressed }) => [styles.settingRow, pressed && { opacity: 0.85 }]}
+            >
+              <Text style={styles.settingText}>Beatmap authoring (debug)</Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+            </Pressable>
+          </>
         ) : null}
       </View>
 

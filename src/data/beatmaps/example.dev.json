@@ -1,0 +1,20 @@
+{
+  "_comment": "DEV-ONLY EXAMPLE. Not a real level; demonstrates the format for src/lib/beatmapRegistry.ts. Author real maps with the dev Beatmap authoring screen.",
+  "version": 1,
+  "levelId": "example-dev-level",
+  "videoDurationSec": 30,
+  "orientation": "vertical",
+  "cues": [
+    { "t": 2.0, "move": "jump" },
+    { "t": 4.5, "move": "duck" },
+    { "t": 7.0, "move": "left" },
+    { "t": 9.5, "move": "right" },
+    { "t": 12.0, "move": "jump" },
+    { "t": 14.5, "move": "jump" },
+    { "t": 17.0, "move": "duck" },
+    { "t": 19.5, "move": "left" },
+    { "t": 22.0, "move": "right" },
+    { "t": 24.5, "move": "jump" },
+    { "t": 27.0, "move": "duck" }
+  ]
+}

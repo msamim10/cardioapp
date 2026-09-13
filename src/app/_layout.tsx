@@ -179,7 +179,10 @@ function RootStack() {
       <Stack.Screen name="workout" options={{ animation: 'fade', gestureEnabled: false }} />
       <Stack.Screen name="summary" options={{ animation: 'fade', gestureEnabled: false }} />
       {__DEV__ ? (
-        <Stack.Screen name="debug-funnel" options={{ presentation: 'card' }} />
+        <>
+          <Stack.Screen name="debug-funnel" options={{ presentation: 'card' }} />
+          <Stack.Screen name="dev-beatmap" options={{ presentation: 'card' }} />
+        </>
       ) : null}
     </Stack>
   );
