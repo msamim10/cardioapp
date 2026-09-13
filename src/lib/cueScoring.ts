@@ -34,24 +34,35 @@
 
 import { cuesForLoopedPlayback, type Beatmap, type BeatmapMove, type ScheduledCue } from '@/lib/beatmaps';
 import type { Move } from '@/lib/poseTracking';
+import {
+  CUE_LOOKAHEAD_S,
+  CUE_WINDOW_MS,
+  DETECTION_LATENCY_COMPENSATION_MS,
+  GOOD_POINTS,
+  PERFECT_POINTS,
+  comboBonusFactor,
+  cueAccuracy,
+  gradeForDelta,
+  type CueGrade,
+  type JudgeEvent,
+} from '@shared/scoring/grading';
 
-/**
- * Subtracted from a move's video time before matching. Default chosen from the
- * audit's derived floor; TUNE FROM `pose_latency` p50 (total) once measured on
- * a device build — the right value is roughly that p50 plus the analyzer's
- * two-frame evidence delay for ducks.
- */
-export const DETECTION_LATENCY_COMPENSATION_MS = 150;
-/** A cue can be hit within ±this of its time. */
-export const CUE_WINDOW_MS = 400;
-export const PERFECT_MS = 120;
-export const GOOD_MS = 250;
-export const PERFECT_POINTS = 100;
-export const GOOD_POINTS = 50;
-/** Cues are scheduled this far ahead of the clock (also feeds the HUD). */
-export const CUE_LOOKAHEAD_S = 3;
-
-export type CueGrade = 'perfect' | 'good' | 'miss';
+// Grading constants + pure helpers live in the shared package so the server
+// replays a run with the exact same rules; re-exported for existing callers.
+export {
+  CUE_LOOKAHEAD_S,
+  CUE_WINDOW_MS,
+  DETECTION_LATENCY_COMPENSATION_MS,
+  GOOD_MS,
+  GOOD_POINTS,
+  PERFECT_MS,
+  PERFECT_POINTS,
+  comboBonusFactor,
+  cueAccuracy,
+  gradeForDelta,
+  type CueGrade,
+  type JudgeEvent,
+} from '@shared/scoring/grading';
 
 export type CueScore = {
   /** Action points only; compose with playback via `totalWorkoutScore`. */
@@ -103,22 +114,8 @@ export function toBeatmapMove(move: Move): BeatmapMove {
   return MOVE_TO_CUE[move];
 }
 
-export function comboBonusFactor(combo: number): number {
-  return 1 + Math.min(70, Math.max(0, combo - 1) * 5) / 100;
-}
-
-export function gradeForDelta(deltaMs: number): CueGrade {
-  const abs = Math.abs(deltaMs);
-  if (abs <= PERFECT_MS) return 'perfect';
-  if (abs <= GOOD_MS) return 'good';
-  return 'miss';
-}
-
-export function cueAccuracy(score: Pick<CueScore, 'perfect' | 'good' | 'miss'>): number {
-  const total = score.perfect + score.good + score.miss;
-  if (total <= 0) return 0;
-  return (score.perfect + 0.5 * score.good) / total;
-}
+/** Hard cap on the judgement log so a runaway session cannot grow unbounded. */
+export const MAX_JUDGE_EVENTS = 5000;
 
 export type CueJudgeOptions = {
   /** Length of the source actually playing; defaults to the authored duration. */
@@ -137,6 +134,11 @@ export class CueJudge {
   /** Accumulated video time up to which cues have been scheduled. */
   private scheduledTo = 0;
   private state: CueScore = { ...INITIAL_CUE_SCORE };
+  /**
+   * Every judgement in order (hits, misses, expiries, spurious moves) in the
+   * compact wire shape the leaderboard submission replays server-side.
+   */
+  private readonly log: JudgeEvent[] = [];
 
   constructor(beatmap: Beatmap, options: CueJudgeOptions = {}) {
     this.beatmap = beatmap;
@@ -154,6 +156,15 @@ export class CueJudge {
 
   get accuracy(): number {
     return cueAccuracy(this.state);
+  }
+
+  /** Snapshot of the judgement log (see `JudgeEvent`). */
+  get events(): JudgeEvent[] {
+    return this.log.slice();
+  }
+
+  private record(event: JudgeEvent): void {
+    if (this.log.length < MAX_JUDGE_EVENTS) this.log.push(event);
   }
 
   /** Adopt a new source length (AirPlay swap); affects cues not yet scheduled. */
@@ -180,8 +191,10 @@ export class CueJudge {
     let expired = 0;
     const remaining: ScheduledCue[] = [];
     for (const cue of this.active) {
-      if (cue.at < horizon) expired += 1;
-      else remaining.push(cue);
+      if (cue.at < horizon) {
+        expired += 1;
+        this.record({ i: cue.index, l: cue.loop, g: 'm', d: null, t: videoTimeSec });
+      } else remaining.push(cue);
     }
     if (expired) {
       this.active = remaining;
@@ -228,12 +241,20 @@ export class CueJudge {
         lastDeltaMs: null,
         judgements: this.state.judgements + 1,
       };
+      this.record({ i: -1, l: -1, g: 'x', d: null, t: videoTimeSec });
       return { grade: 'miss', cue: null, deltaMs: null, points: 0 };
     }
 
     this.active.splice(match.index, 1);
     const deltaMs = Math.round(match.delta * 1000) || 0; // normalize -0
     const grade: CueGrade = match.cue.move === wanted ? gradeForDelta(deltaMs) : 'miss';
+    this.record({
+      i: match.cue.index,
+      l: match.cue.loop,
+      g: grade === 'perfect' ? 'p' : grade === 'good' ? 'g' : 'm',
+      d: deltaMs,
+      t: videoTimeSec,
+    });
     if (grade === 'miss') {
       this.state = {
         ...this.state,

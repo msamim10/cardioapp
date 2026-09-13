@@ -12,7 +12,7 @@
  * the loader path is exercised in development builds.
  */
 
-import { parseBeatmap, type Beatmap } from '@/lib/beatmaps';
+import { beatmapHash, parseBeatmap, type Beatmap } from '@/lib/beatmaps';
 
 const BEATMAP_SOURCES: unknown[] = [
   // require('../data/beatmaps/neon-rails.json'),
@@ -22,6 +22,12 @@ if (__DEV__) {
 }
 
 export const BEATMAPS: Record<string, Beatmap> = {};
+/**
+ * Content hash per shipped beatmap (`beatmapHash`). Sent with every
+ * leaderboard submission so the server can tell a stale bundle from the
+ * chart it published with `scripts/publish-beatmap.ts`.
+ */
+export const BEATMAP_HASHES: Record<string, string> = {};
 for (const source of BEATMAP_SOURCES) {
   const beatmap = parseBeatmap(source);
   if (!beatmap) {
@@ -29,11 +35,17 @@ for (const source of BEATMAP_SOURCES) {
     continue;
   }
   BEATMAPS[beatmap.levelId] = beatmap;
+  BEATMAP_HASHES[beatmap.levelId] = beatmapHash(beatmap);
 }
 
 export function getBeatmap(levelId: string | undefined): Beatmap | null {
   if (!levelId) return null;
   return BEATMAPS[levelId] ?? null;
+}
+
+export function getBeatmapHash(levelId: string | undefined): string | null {
+  if (!levelId) return null;
+  return BEATMAP_HASHES[levelId] ?? null;
 }
 
 export function hasBeatmap(levelId: string | undefined): boolean {

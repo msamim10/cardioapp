@@ -1,5 +1,14 @@
 import type { Mode } from '@/lib/gameData';
 import type { ClassKey } from '@/lib/progression';
+import {
+  dailyChallengeLevelId,
+  dailyChallengePool,
+  hashSeed,
+  localDateKey,
+} from '@shared/scoring/daily';
+
+/** Local calendar key used to keep one recommendation rotation per day. */
+export { localDateKey } from '@shared/scoring/daily';
 
 export const DAILY_RECOMMENDATION_COUNT = 4;
 export const DAILY_DISCOVERY_COUNT = DAILY_RECOMMENDATION_COUNT + 1;
@@ -8,22 +17,6 @@ const DISCOVERY_CLASS_ORDER: readonly ClassKey[] = [
   'intermediate',
   'hard',
 ];
-
-/** Local calendar key used to keep one recommendation rotation per day. */
-export function localDateKey(date: Date): string {
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-
-function hashSeed(value: string): number {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
 
 function seededRandom(seed: number): () => number {
   let state = seed;
@@ -69,9 +62,6 @@ export function getDailyDiscovery(allModes: readonly Mode[], date: Date): DailyD
 // Daily challenge
 // ---------------------------------------------------------------------------
 
-/** Salt so the challenge pick is independent of the featured/recommended rotation. */
-const DAILY_CHALLENGE_SALT = 'daily-challenge';
-
 export type DailyChallenge = {
   mode: Mode;
   /** Local `YYYY-MM-DD` the pick is valid for. */
@@ -89,6 +79,10 @@ export type DailyChallenge = {
  * beatmap (canonical `modes` order). While the registry ships empty — today's
  * state — the pool falls back to every level and the challenge is flagged
  * `practice`. `hasBeatmap` is injected so this module stays registry-free.
+ *
+ * The pick itself (`dailyChallengePool` + `dailyChallengeLevelId`) lives in
+ * the shared package: the `submitRun` Cloud Function runs the same code to
+ * decide whether a run lands on the daily board.
  */
 export function getDailyChallenge(
   allModes: readonly Mode[],
@@ -97,11 +91,12 @@ export function getDailyChallenge(
 ): DailyChallenge | null {
   const uniqueModes = Array.from(new Map(allModes.map((mode) => [mode.id, mode])).values());
   if (uniqueModes.length === 0) return null;
-  const cued = uniqueModes.filter((mode) => hasBeatmap(mode.id));
-  const pool = cued.length > 0 ? cued : uniqueModes;
+  const { pool, practice } = dailyChallengePool(hasBeatmap, uniqueModes.map((mode) => mode.id));
   const dateKey = localDateKey(date);
-  const index = hashSeed(`${dateKey}:${DAILY_CHALLENGE_SALT}`) % pool.length;
-  return { mode: pool[index], dateKey, practice: cued.length === 0 };
+  const levelId = dailyChallengeLevelId(dateKey, pool);
+  const mode = uniqueModes.find((entry) => entry.id === levelId);
+  if (!mode) return null;
+  return { mode, dateKey, practice };
 }
 
 /**

@@ -1,35 +1,26 @@
 /**
- * Username identity helpers for the "Claim your username" onboarding step.
+ * Username identity helpers for the "Claim your username" onboarding step and
+ * the profile editor.
  *
- * There is no backend yet, so availability is checked against a local blocklist
- * (see AVAILABILITY_BLOCKLIST) — swap `checkUsernameAvailable` for a real network
- * call later without touching the screen. The claimed handle is persisted in
- * ProgressContext and used as the user's leaderboard identity.
+ * Format + reserved-handle rules live in the shared package
+ * (`shared/scoring/username.ts`) so the `reserveUsername` Cloud Function
+ * enforces exactly what the client previews. Uniqueness is only known to the
+ * server: the onboarding step runs before an account exists, so it validates
+ * locally and the handle is reserved lazily on the first authenticated sync
+ * (`ensureUsernameReserved` in `profileSync.ts`); the profile editor reserves
+ * synchronously and surfaces "taken".
  */
 
-export const USERNAME_MIN = 3;
-export const USERNAME_MAX = 20;
+import { isReservedUsername, USERNAME_MAX } from '@shared/scoring/username';
 
-const FORMAT = /^[a-z0-9_]+$/;
-
-export type UsernameCheck = { valid: boolean; reason?: string };
-
-/** Strip anything that isn't a lowercase letter, number or underscore. */
-export function normalizeUsername(raw: string): string {
-  return raw
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, '')
-    .slice(0, USERNAME_MAX);
-}
-
-export function validateUsername(raw: string): UsernameCheck {
-  const u = raw.trim();
-  if (u.length === 0) return { valid: false, reason: 'empty' };
-  if (u.length < USERNAME_MIN) return { valid: false, reason: `Use at least ${USERNAME_MIN} characters` };
-  if (u.length > USERNAME_MAX) return { valid: false, reason: `Keep it under ${USERNAME_MAX} characters` };
-  if (!FORMAT.test(u)) return { valid: false, reason: 'Lowercase letters, numbers & _ only' };
-  return { valid: true };
-}
+export {
+  USERNAME_MAX,
+  USERNAME_MIN,
+  isReservedUsername,
+  normalizeUsername,
+  validateUsername,
+  type UsernameCheck,
+} from '@shared/scoring/username';
 
 const ADJECTIVES = [
   'swift', 'turbo', 'neon', 'cosmic', 'lunar', 'solar', 'rapid', 'blaze',
@@ -55,25 +46,29 @@ export function generateUsername(): string {
   return `${adjective}_${animal}${suffix}`.slice(0, USERNAME_MAX);
 }
 
-// Reserved / obviously-taken handles used to simulate an availability check.
-const AVAILABILITY_BLOCKLIST = new Set([
-  'admin', 'root', 'support', 'cardiosurf', 'test', 'user', 'runner',
-  'moderator', 'null', 'undefined', 'me', 'you',
-]);
+/**
+ * `handle` with a short numeric suffix appended (trimmed to fit) — the retry
+ * shape used when a lazily reserved onboarding handle turns out to be taken.
+ */
+export function suffixedUsername(handle: string, attempt: number): string {
+  const suffix = `${Math.floor(Math.random() * 900) + 100 + attempt}`;
+  return `${handle.slice(0, USERNAME_MAX - suffix.length)}${suffix}`;
+}
 
 /**
- * Simulated availability check. Resolves after a short delay so the UI can show
- * a "checking" state, then reports availability from the local blocklist.
+ * Local pre-check used before an account exists: reserved handles are the only
+ * thing knowable offline. Resolves after a short delay so the UI can show a
+ * "checking" state; real uniqueness is decided by `reserveUsername`.
  */
 export function checkUsernameAvailable(username: string, delayMs = 450): Promise<boolean> {
   return new Promise((resolve) => {
-    setTimeout(() => resolve(!AVAILABILITY_BLOCKLIST.has(username.toLowerCase())), delayMs);
+    setTimeout(() => resolve(!isReservedUsername(username)), delayMs);
   });
 }
 
 // Placeholder rival handles for the onboarding leaderboard-climb finale. Clearly
 // fictional and only used for the celebratory animation, never presented as real
-// users. // simulated until backend
+// users.
 const RIVAL_HANDLES = [
   'camhanes', 'marcus_w', 'alex_t', 'sarahk', 'chris_h', 'emmar',
   'jaydxn', 'priya_runs', 'coach_leo', 'mia_sprints', 'devon_x', 'noah_k',
