@@ -82,7 +82,9 @@
     "test:auth-sync": "node --experimental-strip-types scripts/replay-auth-sync.ts",
     "test:auth-providers": "node --experimental-strip-types scripts/replay-auth-providers.ts",
     "test:showcase": "node --experimental-strip-types scripts/replay-showcase-lifecycle.ts",
-    "test:notifications": "node --experimental-strip-types scripts/replay-notification-schedule.ts"
+    "test:notifications": "node --experimental-strip-types scripts/replay-notification-schedule.ts",
+    "test:pose-latency": "node --experimental-strip-types scripts/replay-pose-latency.ts",
+    "test:run-clock": "node --experimental-strip-types scripts/replay-run-clock.ts"
   },
   "private": true
 }

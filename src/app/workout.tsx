@@ -19,7 +19,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import { Card, GradientButton, Pill, ProgressTrack, SpeedPill, StatReadout } from '@/components/ui';
+import { logPoseLatency } from '@/lib/analytics';
 import { getLevel, getMode } from '@/lib/gameData';
+import { LatencyReservoir, latencyDeltas } from '@/lib/poseLatency';
 import {
   applyRecognizedMove,
   INITIAL_POSE_FEEDBACK,
@@ -33,23 +35,16 @@ import {
   INTENSITY_META,
   isIntensityKey,
   targetSecondsForRun,
-  wallClockElapsed,
 } from '@/lib/playSetup';
 import { useProgress } from '@/lib/ProgressContext';
 import { CLASS_META, caloriesForRun } from '@/lib/progression';
+import { RunClock, TICK_INTERVAL_S } from '@/lib/runClock';
 import {
   clearTrackingHandoff,
   consumeTrackingHandoff,
 } from '@/lib/trackingSession';
 import { getVideoSource } from '@/lib/videoSources';
 import { colors, font, metric, radius, spacing, type } from '@/theme';
-
-/**
- * How close to the end of the video the last position must have been for a
- * backwards jump to count as the loop wrapping (vs. a seek). timeUpdate fires
- * every 0.5s and the fastest rate is 1.2x, so a real wrap always lands inside.
- */
-const LOOP_WRAP_WINDOW_S = 3;
 
 /** mm:ss from a seconds value (clamped, non-negative). */
 function formatClock(seconds: number): string {
@@ -119,11 +114,17 @@ export default function WorkoutScreen() {
   const [duration, setDuration] = useState(targetSeconds);
   const elapsedRef = useRef(0);
   const durationRef = useRef(targetSeconds);
-  // Video-seconds accumulated across loops, and the last position seen, so a
-  // wrap back to 0 is counted as progress rather than a rewind.
-  const videoPlayedRef = useRef(0);
-  const lastPositionRef = useRef(0);
-  const videoLengthRef = useRef(0);
+  // The scoring clock: video-seconds accumulated across loops, seek/wrap/swap
+  // classification and the "scoring active" gate (see runClock.ts). Rate and
+  // loop mode are fixed for the life of this screen.
+  const runClockRef = useRef<RunClock | null>(null);
+  if (!runClockRef.current) {
+    runClockRef.current = new RunClock({ playbackRate, loop: timedRun, tickIntervalS: TICK_INTERVAL_S });
+  }
+  const runClock = runClockRef.current;
+  // Per-run pose latency samples + stale-drop count (bounded; summarized once).
+  const latencyRef = useRef(new LatencyReservoir());
+  const [devLatency, setDevLatency] = useState({ p50: 0, stale: 0, frames: 0 });
   const finishedRef = useRef(false);
   const [screenFocused, setScreenFocused] = useState(false);
   // This preference lasts for this workout. AirPlay always shows the companion
@@ -229,15 +230,26 @@ export default function WorkoutScreen() {
   const handlePoseFrame = useCallback(
     (frame: PoseFrame) => {
       if (frame.origin !== 'native' || trackingMode === 'unavailable') return;
+      // The analyzer always runs so tracking/calibration stay alive even while
+      // the scoring gate is closed (paused, buffering, seeking, AirPlay swap).
       const result = poseAnalyzer.current.process(frame);
+      const classifiedTs = Date.now();
+      const deltas = latencyDeltas(frame, classifiedTs);
+      if (deltas) latencyRef.current.record(deltas);
       setPoseFrame({ ...frame, keypoints: result.keypoints });
       setPoseFeedback(result.feedback);
-      if (result.move) {
-        setPoseScore((current) => applyRecognizedMove(current, result.move!, frame.timestamp));
+      if (result.move && runClock.isScoringActive(classifiedTs)) {
+        // Combos chain on the VIDEO clock, not wall time or frame timestamps.
+        const videoMs = Math.round(runClock.videoTimeSec(classifiedTs) * 1000);
+        setPoseScore((current) => applyRecognizedMove(current, result.move!, videoMs));
       }
     },
-    [trackingMode],
+    [runClock, trackingMode],
   );
+
+  const handleStaleFrame = useCallback(() => {
+    latencyRef.current.recordStaleDrop();
+  }, []);
 
   const handleTrackingStatus = useCallback(() => {
     poseAnalyzer.current.markTrackingLost();
@@ -255,6 +267,8 @@ export default function WorkoutScreen() {
     if (finishedRef.current) return;
     finishedRef.current = true;
     clearTrackingHandoff();
+    const latency = latencyRef.current.summary();
+    logPoseLatency(latency);
     router.replace({
       pathname: '/summary',
       params: {
@@ -269,6 +283,10 @@ export default function WorkoutScreen() {
             durationRef.current,
           ),
         ),
+        maxCombo: String(poseScoreRef.current.maxCombo),
+        latencyP50Ms: String(latency.metrics.total.p50),
+        latencyP95Ms: String(latency.metrics.total.p95),
+        staleFramesDropped: String(latency.staleFramesDropped),
         ...(fromOnboarding === '1' ? { fromOnboarding: '1' } : {}),
       },
     });
@@ -276,6 +294,8 @@ export default function WorkoutScreen() {
 
   const exitEarly = useCallback(() => {
     clearTrackingHandoff();
+    // An abandoned run still reports its pipeline latency (no-op without frames).
+    logPoseLatency(latencyRef.current.summary());
     // Backing out must not clear the map or unlock the next campaign step.
     abandonRun(typeof trackingRunId === 'string' ? trackingRunId : undefined);
     if (router.canGoBack()) {
@@ -334,9 +354,12 @@ export default function WorkoutScreen() {
       try {
         resumeAt = player.currentTime;
         wasPlaying = player.playing;
+        // Ticks during the swap read ~0 from the new source; ignore them all.
+        runClock.beginSwap();
         replacement = player.replaceAsync(nextSource);
       } catch {
         // The native player may already have been released during navigation.
+        runClock.endSwap(runClock.lastPositionSec, runClock.videoLengthSec);
         return;
       }
 
@@ -345,16 +368,24 @@ export default function WorkoutScreen() {
       replacement
         .then(() => {
           if (replacementGenerationRef.current !== generation) return;
+          let newLength = 0;
           safe(() => {
             player.playbackRate = playbackRate;
             player.loop = timedRun;
             if (resumeAt > 0) player.currentTime = resumeAt;
             if (wasPlaying) player.play();
+            newLength = player.duration || 0;
           });
+          // Anchor at resumeAt and adopt the new source's duration BEFORE
+          // crediting resumes, so the first post-swap tick is a natural delta.
+          runClock.endSwap(resumeAt, newLength);
         })
-        .catch(() => {});
+        .catch(() => {
+          if (replacementGenerationRef.current !== generation) return;
+          runClock.endSwap(runClock.lastPositionSec, runClock.videoLengthSec);
+        });
     },
-    [level, playbackRate, player, timedRun],
+    [level, playbackRate, player, runClock, timedRun],
   );
 
   useEffect(() => {
@@ -371,12 +402,29 @@ export default function WorkoutScreen() {
     const statusSub = player.addListener('statusChange', (e) => {
       if (e.status === 'error') setStatus('error');
       else if (e.status === 'readyToPlay') setStatus('ready');
+      // Scoring gate: only `readyToPlay` counts; loading/buffering close it.
+      runClock.setReady(e.status === 'readyToPlay');
+    });
+    // Scoring gate: playing flag from the player itself, so an external pause
+    // (Control Center, lock screen, AirPlay remote) closes it. On resume the
+    // clock re-anchors to the current position to avoid a phantom delta.
+    const playingSub = player.addListener('playingChange', ({ isPlaying }) => {
+      let position = runClock.lastPositionSec;
+      safe(() => {
+        position = player.currentTime || 0;
+      });
+      runClock.setPlaying(isPlaying, position);
+    });
+    safe(() => {
+      runClock.setReady(player.status === 'readyToPlay');
+      runClock.setPlaying(player.playing, player.currentTime || 0);
     });
     return () => {
       endSub.remove();
       statusSub.remove();
+      playingSub.remove();
     };
-  }, [finish, player, source, timedRun]);
+  }, [finish, player, runClock, source, timedRun]);
 
   // Subscribe before reading the current value so a route selected on the
   // recap screen is handled even if it was active before this screen mounted.
@@ -398,10 +446,9 @@ export default function WorkoutScreen() {
   // the companion dashboard and the value persisted at completion.
   useEffect(() => {
     if (!source) return;
-    player.timeUpdateEventInterval = 0.5;
+    player.timeUpdateEventInterval = TICK_INTERVAL_S;
     const startPosition = player.currentTime || 0;
-    lastPositionRef.current = startPosition;
-    videoLengthRef.current = player.duration || 0;
+    runClock.start(startPosition, player.duration || 0);
     if (timedRun) {
       durationRef.current = targetSeconds;
       setDuration(targetSeconds);
@@ -414,32 +461,28 @@ export default function WorkoutScreen() {
     const sub = player.addListener('timeUpdate', ({ currentTime }) => {
       const position = Math.max(0, currentTime);
       safe(() => {
-        if (player.duration > 0) videoLengthRef.current = player.duration;
+        if (player.duration > 0) runClock.setLength(player.duration);
       });
+      // Classify the tick (natural / wrap / seek / stall / ignored-during-swap)
+      // and credit only natural playback and loop wraps. See runClock.ts.
+      runClock.tick(position);
+      if (__DEV__) {
+        setDevLatency({
+          p50: latencyRef.current.p50Total(),
+          stale: latencyRef.current.staleFramesDropped,
+          frames: latencyRef.current.frames,
+        });
+      }
       if (!timedRun) {
         elapsedRef.current = position;
         setElapsed(position);
-        if (videoLengthRef.current > 0) {
-          durationRef.current = videoLengthRef.current;
-          setDuration(videoLengthRef.current);
+        if (runClock.videoLengthSec > 0) {
+          durationRef.current = runClock.videoLengthSec;
+          setDuration(runClock.videoLengthSec);
         }
         return;
       }
-      const last = lastPositionRef.current;
-      const length = videoLengthRef.current;
-      let delta = position - last;
-      if (delta < 0) {
-        // Either the loop wrapped (we were within a beat of the end: credit the
-        // tail of the previous pass plus the head of this one) or a seek —
-        // e.g. the AirPlay source swap briefly reporting 0 before it resumes —
-        // which must not count as time moved.
-        const nearEnd = length > 0 && length - last < LOOP_WRAP_WINDOW_S;
-        delta = nearEnd ? length - last + position : 0;
-      }
-      // Ignore absurd jumps; a legitimate delta is never more than a few s.
-      if (delta > 0 && delta < 30) videoPlayedRef.current += delta;
-      lastPositionRef.current = position;
-      const wall = wallClockElapsed(videoPlayedRef.current, playbackRate);
+      const wall = runClock.wallElapsedSec();
       elapsedRef.current = wall;
       setElapsed(wall);
       if (wall >= targetSeconds) finish();
@@ -452,7 +495,7 @@ export default function WorkoutScreen() {
         player.timeUpdateEventInterval = 0;
       });
     };
-  }, [finish, playbackRate, player, source, targetSeconds, timedRun]);
+  }, [finish, player, runClock, source, targetSeconds, timedRun]);
 
   // No streamable source configured: let the flow continue to results.
   if (!source) {
@@ -492,6 +535,7 @@ export default function WorkoutScreen() {
               <WorkoutCameraPreview
                 active={screenFocused && onExternalScreen}
                 onPoseFrame={handlePoseFrame}
+                onStaleFrame={handleStaleFrame}
                 onTrackingStatus={handleTrackingStatus}
                 onUnavailable={() => setNativePoseUnavailable(true)}
                 permission={cameraPermission}
@@ -552,6 +596,7 @@ export default function WorkoutScreen() {
               <WorkoutCameraPreview
                 active={screenFocused}
                 onPoseFrame={handlePoseFrame}
+                onStaleFrame={handleStaleFrame}
                 onTrackingStatus={handleTrackingStatus}
                 onUnavailable={() => setNativePoseUnavailable(true)}
                 permission={cameraPermission}
@@ -648,6 +693,11 @@ export default function WorkoutScreen() {
           <View style={styles.hudTrack}>
             <View style={[styles.hudFill, { width: `${Math.round(progress * 100)}%` }]} />
           </View>
+          {__DEV__ && devLatency.frames > 0 ? (
+            <Text style={styles.devReadout}>
+              lat p50 {devLatency.p50}ms · stale {devLatency.stale} · {devLatency.frames}f
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -719,6 +769,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   hudFill: { height: '100%', backgroundColor: colors.lime },
+  devReadout: { ...type.micro, color: 'rgba(255,255,255,0.55)' },
   tvControls: {
     position: 'absolute',
     right: spacing.lg,

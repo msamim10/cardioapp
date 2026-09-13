@@ -80,7 +80,13 @@ export type PoseScore = {
   /** Action bonuses only. Compose with playback via `totalWorkoutScore`. */
   score: number;
   combo: number;
+  /** Highest combo reached this run (feeds the reward combo factor). */
+  maxCombo: number;
   latestMove: Move | null;
+  /**
+   * Clock reading of the last scored move, in the same domain the caller
+   * passes to `applyRecognizedMove` (the workout passes accumulated VIDEO ms).
+   */
   latestMoveAt: number;
   counts: Record<Move, number>;
 };
@@ -88,6 +94,7 @@ export type PoseScore = {
 export const INITIAL_POSE_SCORE: PoseScore = {
   score: 0,
   combo: 0,
+  maxCombo: 0,
   latestMove: null,
   latestMoveAt: 0,
   counts: { Jump: 0, Duck: 0, Left: 0, Right: 0 },
@@ -751,14 +758,25 @@ function medianNullable(values: (number | null)[]): number | null {
   return present[Math.floor(present.length / 2)];
 }
 
-export function applyRecognizedMove(state: PoseScore, move: Move, timestamp: number): PoseScore {
-  const combo = timestamp - state.latestMoveAt <= 3_000 ? state.combo + 1 : 1;
+/** Two scored moves within this many clock ms of each other chain a combo. */
+export const COMBO_WINDOW_MS = 3_000;
+
+/**
+ * Free-scoring path (levels without a beatmap). `clockMs` is the scoring
+ * clock: the workout passes accumulated VIDEO milliseconds (`RunClock`), not
+ * wall time, so a paused or buffering video cannot keep a combo alive and a
+ * loop wrap does not reset it. The analyzer's own cooldown/rearm still run on
+ * frame timestamps — those describe physical motion.
+ */
+export function applyRecognizedMove(state: PoseScore, move: Move, clockMs: number): PoseScore {
+  const combo = clockMs - state.latestMoveAt <= COMBO_WINDOW_MS ? state.combo + 1 : 1;
   // Calm HUD scale: base ~30, small combo steps, hard-capped per action.
   return {
     score: state.score + 30 + Math.min(70, (combo - 1) * 5),
     combo,
+    maxCombo: Math.max(state.maxCombo ?? 0, combo),
     latestMove: move,
-    latestMoveAt: timestamp,
+    latestMoveAt: clockMs,
     counts: { ...state.counts, [move]: state.counts[move] + 1 },
   };
 }
