@@ -6,7 +6,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
 import { StatusBar } from 'expo-status-bar';
 import { useVideoPlayer, VideoAirPlayButton, VideoView } from 'expo-video';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -20,10 +20,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import { Card, GradientButton, Pill, ProgressTrack, SpeedPill, StatReadout } from '@/components/ui';
 import { logPoseLatency } from '@/lib/analytics';
+import { getBeatmap } from '@/lib/beatmapRegistry';
+import { beatmapDurationMismatch, type BeatmapMove } from '@/lib/beatmaps';
+import { CueJudge, INITIAL_CUE_SCORE, type CueScore } from '@/lib/cueScoring';
 import { getLevel, getMode } from '@/lib/gameData';
 import { LatencyReservoir, latencyDeltas } from '@/lib/poseLatency';
 import {
   applyRecognizedMove,
+  countRecognizedMove,
   INITIAL_POSE_FEEDBACK,
   INITIAL_POSE_SCORE,
   PoseAnalyzer,
@@ -156,6 +160,17 @@ export default function WorkoutScreen() {
   const [poseScore, setPoseScore] = useState(INITIAL_POSE_SCORE);
   const poseScoreRef = useRef(poseScore);
   poseScoreRef.current = poseScore;
+  // Timing-window scoring when this level ships a beatmap; otherwise null and
+  // the free-scoring `applyRecognizedMove` path above is used unchanged.
+  const beatmap = useMemo(() => getBeatmap(level), [level]);
+  const cueJudgeRef = useRef<CueJudge | null>(null);
+  if (beatmap && !cueJudgeRef.current) cueJudgeRef.current = new CueJudge(beatmap);
+  const cueJudge = cueJudgeRef.current;
+  const [cueScore, setCueScore] = useState<CueScore | null>(beatmap ? INITIAL_CUE_SCORE : null);
+  const cueScoreRef = useRef(cueScore);
+  cueScoreRef.current = cueScore;
+  const [upcomingCue, setUpcomingCue] = useState<{ move: BeatmapMove; inMs: number } | null>(null);
+  const durationWarnedRef = useRef(false);
   const poseAnalyzer = useRef(new PoseAnalyzer());
   const hydratedAnalyzerRef = useRef(false);
   if (initialCalibration && !hydratedAnalyzerRef.current) {
@@ -240,11 +255,20 @@ export default function WorkoutScreen() {
       setPoseFeedback(result.feedback);
       if (result.move && runClock.isScoringActive(classifiedTs)) {
         // Combos chain on the VIDEO clock, not wall time or frame timestamps.
-        const videoMs = Math.round(runClock.videoTimeSec(classifiedTs) * 1000);
-        setPoseScore((current) => applyRecognizedMove(current, result.move!, videoMs));
+        const videoSec = runClock.videoTimeSec(classifiedTs);
+        if (cueJudge) {
+          // Beatmap level: grade against the nearest cue; tally the move only.
+          cueJudge.onMove(result.move, videoSec);
+          setCueScore(cueJudge.score);
+          setPoseScore((current) => countRecognizedMove(current, result.move!));
+        } else {
+          setPoseScore((current) =>
+            applyRecognizedMove(current, result.move!, Math.round(videoSec * 1000)),
+          );
+        }
       }
     },
-    [runClock, trackingMode],
+    [cueJudge, runClock, trackingMode],
   );
 
   const handleStaleFrame = useCallback(() => {
@@ -269,6 +293,10 @@ export default function WorkoutScreen() {
     clearTrackingHandoff();
     const latency = latencyRef.current.summary();
     logPoseLatency(latency);
+    const cue = cueScoreRef.current;
+    // With a beatmap the action points come from the cue judge; the playback
+    // progress component is composed the same way in both modes.
+    const actionScore = cue ? cue.score : poseScoreRef.current.score;
     router.replace({
       pathname: '/summary',
       params: {
@@ -277,13 +305,14 @@ export default function WorkoutScreen() {
         elapsedSeconds: String(elapsedRef.current),
         actionCounts: JSON.stringify(poseScoreRef.current.counts),
         poseScore: String(
-          totalWorkoutScore(
-            poseScoreRef.current.score,
-            elapsedRef.current,
-            durationRef.current,
-          ),
+          totalWorkoutScore(actionScore, elapsedRef.current, durationRef.current),
         ),
-        maxCombo: String(poseScoreRef.current.maxCombo),
+        maxCombo: String(cue ? cue.maxCombo : poseScoreRef.current.maxCombo),
+        hasBeatmap: cue ? '1' : '0',
+        perfectCount: String(cue?.perfect ?? 0),
+        goodCount: String(cue?.good ?? 0),
+        missCount: String(cue?.miss ?? 0),
+        accuracy: String(cueJudgeRef.current?.accuracy ?? 0),
         latencyP50Ms: String(latency.metrics.total.p50),
         latencyP95Ms: String(latency.metrics.total.p95),
         staleFramesDropped: String(latency.staleFramesDropped),
@@ -466,6 +495,26 @@ export default function WorkoutScreen() {
       // Classify the tick (natural / wrap / seek / stall / ignored-during-swap)
       // and credit only natural playback and loop wraps. See runClock.ts.
       runClock.tick(position);
+      if (cueJudge) {
+        // Cues follow the accumulated video clock; expire missed ones and
+        // surface the next cue for the HUD. Loops wrap at the REAL source
+        // length; the vertical map's timings are used even when the AirPlay
+        // cut's duration differs (warned once — known limitation).
+        const length = runClock.videoLengthSec;
+        if (length > 0) {
+          cueJudge.setVideoLength(length);
+          if (!durationWarnedRef.current && beatmapDurationMismatch(cueJudge.beatmap, length)) {
+            durationWarnedRef.current = true;
+            console.warn(
+              `[beatmaps] ${cueJudge.beatmap.levelId}: source is ${length.toFixed(1)}s, beatmap authored for ${cueJudge.beatmap.videoDurationSec.toFixed(1)}s; using vertical timings`,
+            );
+          }
+        }
+        const videoSec = runClock.videoTimeSec();
+        if (cueJudge.onTick(videoSec) > 0) setCueScore(cueJudge.score);
+        const next = cueJudge.upcoming(videoSec)[0];
+        setUpcomingCue(next ? { move: next.move, inMs: Math.round((next.at - videoSec) * 1000) } : null);
+      }
       if (__DEV__) {
         setDevLatency({
           p50: latencyRef.current.p50Total(),
@@ -495,7 +544,7 @@ export default function WorkoutScreen() {
         player.timeUpdateEventInterval = 0;
       });
     };
-  }, [finish, player, runClock, source, targetSeconds, timedRun]);
+  }, [cueJudge, finish, player, runClock, source, targetSeconds, timedRun]);
 
   // No streamable source configured: let the flow continue to results.
   if (!source) {
@@ -544,6 +593,8 @@ export default function WorkoutScreen() {
                 poseFrame={poseFrame}
                 poseFeedback={poseFeedback}
                 poseScore={poseScore}
+                cueScore={cueScore}
+                upcomingCue={upcomingCue}
                 trackingMode={trackingMode}
                 unavailableReason={trackingUnavailableReason}
                 variant="companion"
@@ -605,6 +656,8 @@ export default function WorkoutScreen() {
                 poseFrame={poseFrame}
                 poseFeedback={poseFeedback}
                 poseScore={poseScore}
+                cueScore={cueScore}
+                upcomingCue={upcomingCue}
                 trackingMode={trackingMode}
                 unavailableReason={trackingUnavailableReason}
                 variant="pip"

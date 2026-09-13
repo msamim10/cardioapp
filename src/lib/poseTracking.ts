@@ -781,6 +781,19 @@ export function applyRecognizedMove(state: PoseScore, move: Move, clockMs: numbe
   };
 }
 
+/**
+ * Tally a recognized move without free-scoring it — used when a beatmap is
+ * active and points come from `CueJudge` instead, so the movement breakdown
+ * still reflects every move performed.
+ */
+export function countRecognizedMove(state: PoseScore, move: Move): PoseScore {
+  return {
+    ...state,
+    latestMove: move,
+    counts: { ...state.counts, [move]: state.counts[move] + 1 },
+  };
+}
+
 /** Max points earned purely by watching the workout video to completion. */
 export const PROGRESS_SCORE_CAP = 500;
 

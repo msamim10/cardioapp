@@ -13,7 +13,8 @@ import {
   Text,
   View,
 } from 'react-native';
-import { PoseOverlay } from '@/components/PoseOverlay';
+import { PoseOverlay, type UpcomingCue } from '@/components/PoseOverlay';
+import type { CueScore } from '@/lib/cueScoring';
 import { frameAgeMs, STALE_FRAME_MS } from '@/lib/poseLatency';
 import {
   POSE_JOINTS,
@@ -38,6 +39,10 @@ type WorkoutCameraPreviewProps = {
   poseFrame: PoseFrame | null;
   poseFeedback: PoseFeedback;
   poseScore: PoseScore;
+  /** Timing-window score when the level has a beatmap; null for free scoring. */
+  cueScore?: CueScore | null;
+  /** Next beatmap cue for the HUD indicator. */
+  upcomingCue?: UpcomingCue | null;
   /** Playback elapsed seconds for hybrid progress + action scoring. */
   playbackElapsed?: number;
   /** Playback duration seconds for hybrid progress + action scoring. */
@@ -57,6 +62,8 @@ export function WorkoutCameraPreview({
   poseFrame,
   poseFeedback,
   poseScore,
+  cueScore = null,
+  upcomingCue = null,
   playbackElapsed = 0,
   playbackDuration = 0,
   trackingMode,
@@ -210,6 +217,8 @@ export function WorkoutCameraPreview({
         playbackDuration={playbackDuration}
         playbackElapsed={playbackElapsed}
         score={poseScore}
+        cueScore={cueScore}
+        upcomingCue={upcomingCue}
         variant={variant}
       />
     </View>

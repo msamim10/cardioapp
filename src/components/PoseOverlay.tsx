@@ -1,5 +1,7 @@
-import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, StyleSheet, Text, View } from 'react-native';
+import type { BeatmapMove } from '@/lib/beatmaps';
+import type { CueGrade, CueScore } from '@/lib/cueScoring';
 import {
   Move,
   PoseFeedback,
@@ -11,11 +13,16 @@ import {
 } from '@/lib/poseTracking';
 import { colors, font, radius, spacing } from '@/theme';
 
+export type UpcomingCue = { move: BeatmapMove; inMs: number };
+
 type Props = {
   frame: PoseFrame | null;
   feedback: PoseFeedback;
   mode: PoseTrackingMode;
   score: PoseScore;
+  /** Present when the level has a beatmap: grades, combo and points come from here. */
+  cueScore?: CueScore | null;
+  upcomingCue?: UpcomingCue | null;
   /** Playback elapsed seconds — drives the progress component of the HUD score. */
   playbackElapsed?: number;
   /** Playback duration seconds — required for progress scoring. */
@@ -30,6 +37,21 @@ const MOVE_ICON: Record<Move, string> = {
   Right: '→',
 };
 
+const CUE_ICON: Record<BeatmapMove, string> = {
+  jump: '↑',
+  duck: '↓',
+  left: '←',
+  right: '→',
+};
+
+const GRADE_LABEL: Record<CueGrade, string> = { perfect: 'PERFECT', good: 'GOOD', miss: 'MISS' };
+const GRADE_COLOR: Record<CueGrade, string> = {
+  perfect: colors.lime,
+  good: colors.cyan,
+  miss: colors.pink,
+};
+const GRADE_FLASH_MS = 700;
+
 const MOVES: Move[] = ['Jump', 'Duck', 'Left', 'Right'];
 
 export function PoseOverlay({
@@ -37,13 +59,17 @@ export function PoseOverlay({
   feedback,
   mode,
   score,
+  cueScore = null,
+  upcomingCue = null,
   playbackElapsed = 0,
   playbackDuration = 0,
   variant,
 }: Props) {
   const compact = variant === 'pip';
   const setup = variant === 'setup';
-  const displayScore = totalWorkoutScore(score.score, playbackElapsed, playbackDuration);
+  const actionScore = cueScore ? cueScore.score : score.score;
+  const combo = cueScore ? cueScore.combo : score.combo;
+  const displayScore = totalWorkoutScore(actionScore, playbackElapsed, playbackDuration);
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -55,6 +81,18 @@ export function PoseOverlay({
         </View>
       ) : null}
 
+      {cueScore && !setup ? <GradeFlash cueScore={cueScore} compact={compact} /> : null}
+      {cueScore && upcomingCue && !setup && upcomingCue.inMs > 0 ? (
+        <View style={[styles.upcoming, compact && styles.upcomingCompact]}>
+          <Text style={[styles.upcomingIcon, compact && styles.upcomingIconCompact]}>
+            {CUE_ICON[upcomingCue.move]}
+          </Text>
+          {!compact ? (
+            <Text style={styles.upcomingText}>{(upcomingCue.inMs / 1000).toFixed(1)}s</Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {!setup ? (
         <View style={[styles.hud, compact && styles.hudCompact]}>
           <HudValue label="SCORE" value={displayScore.toLocaleString()} compact={compact} />
@@ -62,7 +100,7 @@ export function PoseOverlay({
           {!compact ? (
             <>
               <View style={styles.divider} />
-              <HudValue label="COMBO" value={score.combo ? `${score.combo}×` : '—'} compact={compact} />
+              <HudValue label="COMBO" value={combo ? `${combo}×` : '—'} compact={compact} />
               <View style={styles.divider} />
               <View style={styles.countsInline}>
                 {MOVES.map((move) => (
@@ -77,6 +115,42 @@ export function PoseOverlay({
         </View>
       ) : null}
     </View>
+  );
+}
+
+/** "PERFECT" / "GOOD" / "MISS" that pops on every judgement and fades out. */
+function GradeFlash({ cueScore, compact }: { cueScore: CueScore; compact: boolean }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const [grade, setGrade] = useState<CueGrade | null>(null);
+  const { judgements, lastGrade } = cueScore;
+
+  useEffect(() => {
+    if (!judgements || !lastGrade) return;
+    setGrade(lastGrade);
+    opacity.setValue(1);
+    const animation = Animated.timing(opacity, {
+      toValue: 0,
+      duration: GRADE_FLASH_MS,
+      delay: 150,
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [judgements, lastGrade, opacity]);
+
+  if (!grade) return null;
+  return (
+    <Animated.View style={[styles.gradeFlash, compact && styles.gradeFlashCompact, { opacity }]}>
+      <Text
+        style={[
+          styles.gradeText,
+          compact && styles.gradeTextCompact,
+          { color: GRADE_COLOR[grade] },
+        ]}
+      >
+        {GRADE_LABEL[grade]}
+      </Text>
+    </Animated.View>
   );
 }
 
@@ -294,6 +368,39 @@ const styles = StyleSheet.create({
   demoBannerCompact: { top: 30, right: 6, height: 17, paddingHorizontal: 5 },
   demoText: { color: colors.black, fontSize: 9, fontWeight: font.black, letterSpacing: 0.6 },
   demoTextCompact: { fontSize: 6, letterSpacing: 0.2 },
+  gradeFlash: {
+    position: 'absolute',
+    top: '30%',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  gradeFlashCompact: { top: '34%' },
+  gradeText: {
+    fontSize: 30,
+    fontWeight: font.black,
+    letterSpacing: 2,
+    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  gradeTextCompact: { fontSize: 13, letterSpacing: 0.8 },
+  upcoming: {
+    position: 'absolute',
+    top: spacing.md,
+    left: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 28,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(5,8,12,0.7)',
+  },
+  upcomingCompact: { top: 6, left: 6, height: 17, paddingHorizontal: 5 },
+  upcomingIcon: { color: colors.lime, fontSize: 15, fontWeight: font.black },
+  upcomingIconCompact: { fontSize: 9 },
+  upcomingText: { color: colors.white, fontSize: 11, fontWeight: font.black, fontVariant: ['tabular-nums'] },
   hud: {
     position: 'absolute',
     left: spacing.md,

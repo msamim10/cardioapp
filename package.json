@@ -84,7 +84,8 @@
     "test:showcase": "node --experimental-strip-types scripts/replay-showcase-lifecycle.ts",
     "test:notifications": "node --experimental-strip-types scripts/replay-notification-schedule.ts",
     "test:pose-latency": "node --experimental-strip-types scripts/replay-pose-latency.ts",
-    "test:run-clock": "node --experimental-strip-types scripts/replay-run-clock.ts"
+    "test:run-clock": "node --experimental-strip-types scripts/replay-run-clock.ts",
+    "test:cue-scoring": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-cue-scoring.ts"
   },
   "private": true
 }
