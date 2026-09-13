@@ -1,11 +1,15 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import Constants from 'expo-constants';
+import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ShareScoreSheet, type ShareScoreInput } from '@/components/ShareScoreCard';
 import { GhostButton, GradientButton, Mascot } from '@/components/ui';
+import { useAuth } from '@/lib/AuthContext';
+import { submitRunIfEligible, type SubmitOutcome } from '@/lib/leaderboards';
 import {
   achievementsForRun,
   personalBestForRun,
@@ -253,12 +257,18 @@ export default function SummaryScreen() {
     xp: totalXp,
     coins: totalCoins,
     activeClass,
+    username,
   } = useProgress();
+  const { user } = useAuth();
 
   const fromOnboarding = params.fromOnboarding === '1';
   const recordedRef = useRef(false);
   const reviewScheduledRef = useRef(false);
   const [recordedRun, setRecordedRun] = useState<RunRecord | null>(null);
+  // Leaderboard submission runs AFTER the local record succeeds and never
+  // affects it: a rejected or offline submission still leaves the run saved.
+  const [submission, setSubmission] = useState<SubmitOutcome | { status: 'pending' } | null>(null);
+  const [share, setShare] = useState<ShareScoreInput | null>(null);
 
   useEffect(() => {
     if (recordedRef.current) return;
@@ -282,7 +292,20 @@ export default function SummaryScreen() {
       latencyP95Ms: Number(params.latencyP95Ms) || 0,
       staleFramesDropped: Number(params.staleFramesDropped) || 0,
     });
-    if (recorded) setRecordedRun(recorded);
+    if (recorded) {
+      setRecordedRun(recorded);
+      if (params.hasBeatmap === '1') {
+        setSubmission({ status: 'pending' });
+        submitRunIfEligible({
+          runId: recorded.runId,
+          signedIn: user !== null,
+          recorded: true,
+          classKey: recorded.classKey ?? null,
+          appVersion: Constants.expoConfig?.version ?? 'unknown',
+          completedAt: recorded.at,
+        }).then(setSubmission);
+      }
+    }
   }, [
     params.accuracy,
     params.actionCounts,
@@ -299,6 +322,7 @@ export default function SummaryScreen() {
     params.runId,
     params.staleFramesDropped,
     recordRun,
+    user,
   ]);
 
   // Prefer the just-recorded run; on remount (e.g. Strict Mode) fall back to the
@@ -617,6 +641,85 @@ export default function SummaryScreen() {
             </View>
           ) : null}
 
+          {/* Leaderboard: server-verified rank for cued runs, or why it didn't post. */}
+          {submission && run ? (
+            <View style={styles.card}>
+              <View style={styles.cardHead}>
+                <Text style={styles.cardTitle}>Leaderboard</Text>
+                <Text style={styles.cardMeta}>{playedMode?.name ?? 'This level'}</Text>
+              </View>
+              {submission.status === 'pending' ? (
+                <View style={styles.boardRow}>
+                  <ActivityIndicator color={colors.lime} />
+                  <Text style={styles.boardText}>Posting your score…</Text>
+                </View>
+              ) : submission.status === 'submitted' ? (
+                <>
+                  <View style={styles.boardRow}>
+                    <Ionicons name="trophy" size={20} color={colors.lime} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.boardRank}>
+                        #{submission.result.rank.toLocaleString()} global
+                        {submission.result.dailyRank ? ` · #${submission.result.dailyRank.toLocaleString()} today` : ''}
+                      </Text>
+                      <Text style={styles.boardText}>
+                        {submission.result.improved
+                          ? `New best: ${submission.result.best.toLocaleString()} points`
+                          : `Your best stays ${submission.result.best.toLocaleString()} points`}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.boardActions}>
+                    <Pressable
+                      onPress={() =>
+                        router.push(`/leaderboard/${run.levelId}` as Href)
+                      }
+                      accessibilityRole="button"
+                      style={({ pressed }) => [styles.boardBtn, pressed && { opacity: 0.72 }]}
+                    >
+                      <Ionicons name="podium-outline" size={16} color={colors.text} />
+                      <Text style={styles.boardBtnText}>View board</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() =>
+                        setShare({
+                          runId: run.runId,
+                          levelId: run.levelId,
+                          levelName: playedMode?.name ?? 'CardioSurf',
+                          username,
+                          rank: submission.result.rank,
+                          score: Math.round(submission.result.best),
+                          accuracy,
+                          maxCombo,
+                        })
+                      }
+                      accessibilityRole="button"
+                      style={({ pressed }) => [styles.boardBtn, styles.boardBtnPrimary, pressed && { opacity: 0.72 }]}
+                    >
+                      <Ionicons name="share-outline" size={16} color={colors.black} />
+                      <Text style={[styles.boardBtnText, { color: colors.black }]}>Beat my score</Text>
+                    </Pressable>
+                  </View>
+                </>
+              ) : (
+                <View style={styles.boardRow}>
+                  <Ionicons name="information-circle-outline" size={18} color={colors.textFaint} />
+                  <Text style={styles.boardText}>
+                    {submission.status === 'skipped'
+                      ? submission.reason === 'not-signed-in'
+                        ? 'Sign in to post scores to the leaderboard.'
+                        : submission.reason === 'offline' || submission.reason === 'not-configured'
+                          ? 'Leaderboard unavailable right now — your run is saved.'
+                          : 'This run was not eligible for the board — your run is saved.'
+                      : submission.status === 'rejected'
+                        ? 'Score not ranked (verification failed) — your run is saved.'
+                        : 'Could not reach the leaderboard — your run is saved.'}
+                  </Text>
+                </View>
+              )}
+            </View>
+          ) : null}
+
           {/* Streak + weekly goal. */}
           <View style={styles.card}>
             <View style={styles.streakRow}>
@@ -796,6 +899,8 @@ export default function SummaryScreen() {
           <GradientButton label="Done" icon="checkmark" accent="lime" onPress={goHome} />
         )}
       </View>
+
+      <ShareScoreSheet visible={share !== null} input={share} onClose={() => setShare(null)} />
     </View>
   );
 }
@@ -803,6 +908,24 @@ export default function SummaryScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   scroll: { flex: 1 },
+  boardRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
+  boardRank: { ...metric, color: colors.text, fontSize: 16, fontWeight: font.heavy },
+  boardText: { ...type.bodySm, color: colors.textDim, flex: 1 },
+  boardActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  boardBtn: {
+    flex: 1,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: radius.button,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  boardBtnPrimary: { backgroundColor: colors.lime, borderColor: colors.lime },
+  boardBtnText: { color: colors.text, fontSize: 13, fontWeight: font.heavy, letterSpacing: 0.4 },
   content: {},
   hero: {
     backgroundColor: colors.surface,

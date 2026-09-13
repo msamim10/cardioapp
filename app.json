@@ -11,6 +11,7 @@
       "icon": "./assets/images/icon.png",
       "bundleIdentifier": "com.cardiosurf.app",
       "usesAppleSignIn": true,
+      "associatedDomains": ["applinks:cardiosurf.com"],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "SKAdNetworkItems": [

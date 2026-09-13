@@ -1,6 +1,7 @@
+import * as Linking from 'expo-linking';
 import { type Href, Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
@@ -13,6 +14,8 @@ import { ProgressProvider, useProgress } from '@/lib/ProgressContext';
 import { SubscriptionProvider } from '@/lib/SubscriptionContext';
 import { initAnalytics } from '@/lib/analytics';
 import { decideAuthGate } from '@/lib/authGate';
+import { challengeHref, parseChallengeLink } from '@/lib/challengeLinks';
+import { stashPendingDeepLink, takePendingDeepLink } from '@/lib/pendingDeepLink';
 import {
   cancelAllReminders,
   getNotificationPermission,
@@ -86,6 +89,15 @@ function RootNavigator() {
     (destination === 'welcome' && inOnboardingFlow) ||
     (destination === 'resume' && inOnboardingFlow);
 
+  // Latest URL the app was opened with (cold start or while running). When a
+  // gate redirect below fires, a challenge/level link in flight is stashed and
+  // replayed once the gate settles on tabs — otherwise `router.replace` would
+  // silently drop it.
+  const incomingUrl = Linking.useURL();
+  const incomingUrlRef = useRef<string | null>(null);
+  incomingUrlRef.current = incomingUrl;
+  const stashIncomingLink = () => stashPendingDeepLink(parseChallengeLink(incomingUrlRef.current));
+
   // Tabs require both a completed onboarding flow and Firebase user. Legacy
   // installs that completed local onboarding are sent to account creation. A
   // signed-in user with a first-run checkpoint resumes there after a kill.
@@ -94,13 +106,27 @@ function RootNavigator() {
     if (destination === 'tabs' && inOnboarding) {
       router.replace('/(tabs)');
     } else if (destination === 'create-account' && !onCreateAccount) {
+      stashIncomingLink();
       router.replace('/(onboarding)/create-account');
     } else if (destination === 'resume' && !inOnboardingFlow) {
+      stashIncomingLink();
       router.replace(CHECKPOINT_ROUTES[checkpoint ?? 'plan']);
     } else if (destination === 'welcome' && !inOnboardingFlow) {
+      stashIncomingLink();
       router.replace('/(onboarding)/welcome');
     }
   }, [checkpoint, destination, inOnboarding, inOnboardingFlow, onCreateAccount, router]);
+
+  // Replay a stashed deep link once the user is through the gate and on tabs.
+  useEffect(() => {
+    if (destination !== 'tabs' || inOnboarding) return;
+    // Take inside the timeout so a cancelled tick leaves the link stashed.
+    const timer = setTimeout(() => {
+      const link = takePendingDeepLink();
+      if (link) router.push(challengeHref(link));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [destination, inOnboarding, router]);
 
   // Reschedule local reminders on cold start (and whenever the opt-in, weekly
   // goal, streak, today's-run state, or freeze availability changes) so
@@ -173,6 +199,11 @@ function RootStack() {
         options={{ presentation: 'card', animation: 'slide_from_right' }}
       />
       <Stack.Screen name="level/[id]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="l/[id]" options={{ animation: 'none' }} />
+      <Stack.Screen name="leaderboard/[id]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="runner/[uid]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="find-friends" options={{ presentation: 'card' }} />
+      <Stack.Screen name="edit-username" options={{ presentation: 'card' }} />
       <Stack.Screen name="faq" options={{ presentation: 'card' }} />
       <Stack.Screen name="edit-email" options={{ presentation: 'card' }} />
       <Stack.Screen name="support" options={{ presentation: 'card' }} />

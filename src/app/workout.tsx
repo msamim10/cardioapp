@@ -20,7 +20,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import { Card, GradientButton, Pill, ProgressTrack, SpeedPill, StatReadout } from '@/components/ui';
 import { logPoseLatency } from '@/lib/analytics';
-import { getBeatmap } from '@/lib/beatmapRegistry';
+import { getBeatmap, getBeatmapHash } from '@/lib/beatmapRegistry';
+import { requestRunNonce } from '@/lib/leaderboards';
+import { peekRunNonce, stageRunNonce, stageRunSubmission } from '@/lib/runSubmission';
 import { beatmapDurationMismatch, type BeatmapMove } from '@/lib/beatmaps';
 import { CueJudge, INITIAL_CUE_SCORE, type CueScore } from '@/lib/cueScoring';
 import { getLevel, getMode } from '@/lib/gameData';
@@ -172,6 +174,22 @@ export default function WorkoutScreen() {
   cueScoreRef.current = cueScore;
   const [upcomingCue, setUpcomingCue] = useState<{ move: BeatmapMove; inMs: number } | null>(null);
   const durationWarnedRef = useRef(false);
+
+  // Leaderboard nonce: requested once at run start for cued, timed runs. A
+  // failure is non-fatal — the run still records locally, it just cannot be
+  // submitted to the board.
+  useEffect(() => {
+    const runId = typeof trackingRunId === 'string' ? trackingRunId : null;
+    const hash = getBeatmapHash(level);
+    if (!beatmap || !runId || !hash || !timedRun || peekRunNonce(runId)) return;
+    let cancelled = false;
+    requestRunNonce(level, hash).then((nonce) => {
+      if (!cancelled && nonce) stageRunNonce(runId, nonce);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [beatmap, level, timedRun, trackingRunId]);
   const poseAnalyzer = useRef(new PoseAnalyzer());
   const hydratedAnalyzerRef = useRef(false);
   if (initialCalibration && !hydratedAnalyzerRef.current) {
@@ -303,6 +321,28 @@ export default function WorkoutScreen() {
     // With a beatmap the action points come from the cue judge; the playback
     // progress component is composed the same way in both modes.
     const actionScore = cue ? cue.score : poseScoreRef.current.score;
+    // Stage the verbatim judgement log + nonce for the summary to submit. The
+    // server replays this log, so it is the cue score (not the composed
+    // workout score) that goes on the board.
+    const judge = cueJudgeRef.current;
+    const nonce = peekRunNonce(typeof trackingRunId === 'string' ? trackingRunId : undefined);
+    if (judge && cue && nonce && typeof trackingRunId === 'string' && timedRun) {
+      stageRunSubmission({
+        runId: trackingRunId,
+        levelId: level,
+        beatmapHash: nonce.beatmapHash,
+        nonce: nonce.nonce,
+        playbackRate,
+        targetSeconds,
+        elapsedSeconds: elapsedRef.current,
+        videoLengthSec: runClock.videoLengthSec,
+        events: judge.events,
+        spurious: cue.spurious,
+        score: cue.score,
+        maxCombo: cue.maxCombo,
+        accuracy: judge.accuracy,
+      });
+    }
     router.replace({
       pathname: '/summary',
       params: {
@@ -325,7 +365,7 @@ export default function WorkoutScreen() {
         ...(fromOnboarding === '1' ? { fromOnboarding: '1' } : {}),
       },
     });
-  }, [fromOnboarding, router, trackingRunId]);
+  }, [fromOnboarding, level, playbackRate, router, runClock, targetSeconds, timedRun, trackingRunId]);
 
   const exitEarly = useCallback(() => {
     clearTrackingHandoff();

@@ -1,34 +1,25 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { type Href, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import {
-  AppState,
-  Dimensions,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { localDateKey } from '@shared/scoring/daily';
+import { DailyChallengeBoard } from '@/components/DailyChallengeBoard';
 import { MascotHero } from '@/components/MascotHero';
 import { ModeCard } from '@/components/ModeCard';
 import { Card, StatChip, WeekTracker } from '@/components/ui';
+import { useAuth } from '@/lib/AuthContext';
 import { hasBeatmap } from '@/lib/beatmapRegistry';
-import { getSimulatedRunnerCount } from '@/lib/communityActivity';
+import { useRunnerCounts } from '@/lib/communityActivity';
 import { getDailyChallenge, isDailyChallengeCompleted } from '@/lib/dailyRecommendations';
 import { getMode, modes } from '@/lib/gameData';
 import { nextRewardLevel } from '@/lib/levels';
 import { getModeCover } from '@/lib/modeCovers';
 import { calendarWeekStart, MAX_LEVEL } from '@/lib/progressAggregation';
 import { useProgress } from '@/lib/ProgressContext';
-import {
-  DAILY_CHALLENGE_XP_BONUS,
-  nextLiveCompetitionDelay,
-  type LeaderRow,
-} from '@/lib/progression';
+import { DAILY_CHALLENGE_XP_BONUS } from '@/lib/progression';
 import { colors, font, metric, radius, spacing, type } from '@/theme';
 
 const HERO_HEIGHT = Math.round(Dimensions.get('window').height * 0.4);
@@ -48,76 +39,10 @@ const POPULAR_CHALLENGES = POPULAR_CHALLENGE_IDS.flatMap((id) => {
           id,
           mode,
           cornerLabel: id === 'neon-rails' ? 'FEATURED' : undefined,
-          participantCount: getSimulatedRunnerCount(id),
         },
       ]
     : [];
 });
-
-function CompetitionListCard({
-  title,
-  titleMeta,
-  rows,
-  highlightUser = false,
-  emptyText,
-}: {
-  title: string;
-  titleMeta?: string;
-  rows: LeaderRow[];
-  highlightUser?: boolean;
-  emptyText: string;
-}) {
-  const accessibilityLabel = rows.length
-    ? `${title}${titleMeta ? `, ${titleMeta}` : ''}. ${rows
-        .map(
-          (row) =>
-            `Rank ${row.rank}, ${row.isUser ? 'you, ' : ''}${row.name}, ${row.calories} calories`
-        )
-        .join('. ')}`
-    : `${title}. ${emptyText}`;
-
-  return (
-    <Card accessible accessibilityLabel={accessibilityLabel} style={styles.competitionListCard}>
-      <View style={styles.listCardHeader}>
-        <Text style={styles.listCardTitle}>{title}</Text>
-        {titleMeta ? <Text style={styles.listCardMeta}>{titleMeta}</Text> : null}
-      </View>
-      {rows.length ? (
-        <View style={styles.rankingList}>
-          {rows.map((row, index) => {
-            const isHighlightedUser = highlightUser && row.isUser;
-            return (
-              <View
-                key={`${row.rank}-${row.name}`}
-                style={[
-                  styles.rankingRow,
-                  index > 0 && styles.rankingRowSeparated,
-                  isHighlightedUser && styles.rankingRowUser,
-                ]}
-              >
-                <Text style={[styles.rowRank, isHighlightedUser && styles.rowTextUser]}>
-                  #{row.rank}
-                </Text>
-                <Text
-                  style={[styles.rowName, isHighlightedUser && styles.rowTextUser]}
-                  numberOfLines={1}
-                >
-                  @{row.name}
-                  {row.isUser ? ' (you)' : ''}
-                </Text>
-                <Text style={[styles.rowCalories, isHighlightedUser && styles.rowTextUser]}>
-                  {row.calories.toLocaleString()} kcal
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-      ) : (
-        <Text style={styles.listEmpty}>{emptyText}</Text>
-      )}
-    </Card>
-  );
-}
 
 function WeekMetric({
   icon,
@@ -147,8 +72,8 @@ function WeekMetric({
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user } = useAuth();
   const {
-    activeClassData,
     hydrated,
     streak,
     streakInfo,
@@ -157,11 +82,11 @@ export default function HomeScreen() {
     runsThisWeek,
     weeklyGoal,
     username,
-    activeClass,
-    advanceLiveCompetition,
     isLevelCompleted,
     levelProgress,
   } = useProgress();
+  // Real leaderboard player counts for the recommended cards (no fabrication).
+  const runnerCounts = useRunnerCounts(POPULAR_CHALLENGE_IDS, hydrated && user !== null);
 
   // Daily challenge is keyed to the local date; refresh the date on focus so a
   // session that straddles midnight picks up the new video.
@@ -194,54 +119,7 @@ export default function HomeScreen() {
     return { minutes: Math.round(minutes), calories: Math.round(calories) };
   }, [runs]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!hydrated) return undefined;
-      let focused = true;
-      let timeout: ReturnType<typeof setTimeout> | null = null;
-
-      const clearTimer = () => {
-        if (timeout !== null) {
-          clearTimeout(timeout);
-          timeout = null;
-        }
-      };
-      const scheduleNext = () => {
-        clearTimer();
-        if (!focused || AppState.currentState !== 'active') return;
-        timeout = setTimeout(() => {
-          timeout = null;
-          if (!focused || AppState.currentState !== 'active') return;
-          advanceLiveCompetition(activeClass);
-          scheduleNext();
-        }, nextLiveCompetitionDelay());
-      };
-
-      scheduleNext();
-      const appStateSubscription = AppState.addEventListener('change', (nextState) => {
-        clearTimer();
-        if (nextState === 'active') scheduleNext();
-      });
-
-      return () => {
-        focused = false;
-        clearTimer();
-        appStateSubscription.remove();
-      };
-    }, [activeClass, advanceLiveCompetition, hydrated])
-  );
-
-  const userLeaderboardIndex = activeClassData.leaderboard.findIndex((row) => row.isUser);
-  const hasLeaderboard = hydrated && activeClassData.leaderboard.length > 0;
-  const topRunners = hasLeaderboard ? activeClassData.leaderboard.slice(0, 3) : [];
-  const aroundYouStart =
-    userLeaderboardIndex >= 0
-      ? Math.max(0, Math.min(userLeaderboardIndex - 1, activeClassData.leaderboard.length - 3))
-      : 0;
-  const aroundYou =
-    hasLeaderboard && userLeaderboardIndex >= 0
-      ? activeClassData.leaderboard.slice(aroundYouStart, aroundYouStart + 3)
-      : [];
+  const challengeDateKey = localDateKey(challengeDate);
 
   return (
     <ScrollView
@@ -387,6 +265,18 @@ export default function HomeScreen() {
           </Pressable>
         ) : null}
 
+        {/* 24h board for today's challenge — real scores, server-verified. */}
+        {challenge && hydrated ? (
+          <DailyChallengeBoard
+            dateKey={challengeDateKey}
+            uid={user?.id ?? null}
+            hasBeatmap={hasBeatmap(challenge.mode.id)}
+            onOpen={() =>
+              router.push(`/leaderboard/${challenge.mode.id}?board=daily&date=${challengeDateKey}` as Href)
+            }
+          />
+        ) : null}
+
         {/* This week's training load, then the weekly goal it feeds. */}
         <Card style={styles.weekCard}>
           <View style={styles.weekTop}>
@@ -443,7 +333,7 @@ export default function HomeScreen() {
                 mode={challenge.mode}
                 completed={isLevelCompleted(challenge.id)}
                 cornerLabel={challenge.cornerLabel}
-                participantCount={challenge.participantCount}
+                participantCount={runnerCounts[challenge.id]}
                 showMeta={false}
                 showAction={false}
                 style={styles.challengeCard}
@@ -456,35 +346,6 @@ export default function HomeScreen() {
               />
             ))}
           </ScrollView>
-        </View>
-
-        {/* Active-class competition, kept separate from class selection and summaries. */}
-        <View style={styles.competitionSection}>
-          <View style={styles.competitionHeader}>
-            <Text style={styles.competitionTitle}>Competition</Text>
-            <View style={styles.liveBadge}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveText}>Live</Text>
-            </View>
-          </View>
-          <View style={styles.competitionCards}>
-            <CompetitionListCard
-              title="Top runners"
-              rows={topRunners}
-              emptyText="Rankings unavailable."
-            />
-            <CompetitionListCard
-              title="Around you"
-              titleMeta={
-                hasLeaderboard
-                  ? `#${activeClassData.rank} of ${activeClassData.rankTotal}`
-                  : undefined
-              }
-              rows={aroundYou}
-              highlightUser
-              emptyText="Your ranking is unavailable."
-            />
-          </View>
         </View>
       </View>
     </ScrollView>
@@ -641,65 +502,4 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xs,
   },
   challengeCard: { width: 208 },
-  competitionSection: { gap: spacing.md },
-  competitionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  competitionTitle: { ...type.h2, color: colors.text, fontSize: 18, lineHeight: 22 },
-  // Live state carries the fixed alert red, not the CTA lime.
-  liveBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: radius.xs,
-    backgroundColor: 'rgba(255,71,87,0.14)',
-  },
-  liveDot: { width: 6, height: 6, borderRadius: radius.pill, backgroundColor: colors.effort },
-  liveText: { ...type.micro, color: colors.effort },
-  competitionCards: { gap: spacing.md },
-  competitionListCard: {
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  listCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  listCardTitle: { ...type.label, color: colors.textDim },
-  listCardMeta: { ...metric, color: colors.lime, fontSize: 12, fontWeight: font.bold },
-  rankingList: { marginHorizontal: -spacing.xs },
-  rankingRow: {
-    minHeight: 42,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-  },
-  rankingRowSeparated: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.borderStrong },
-  rankingRowUser: {
-    borderLeftWidth: 2,
-    borderLeftColor: colors.lime,
-    borderRadius: radius.xs,
-    backgroundColor: 'rgba(215,255,62,0.08)',
-  },
-  rowRank: {
-    ...metric,
-    width: 32,
-    color: colors.textDim,
-    fontSize: 13,
-    fontWeight: font.heavy,
-  },
-  rowName: {
-    flex: 1,
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: font.semibold,
-  },
-  rowCalories: {
-    ...metric,
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: font.bold,
-    textAlign: 'right',
-  },
-  rowTextUser: { color: colors.lime },
-  listEmpty: { ...type.bodySm, color: colors.textDim, paddingVertical: spacing.md },
 });

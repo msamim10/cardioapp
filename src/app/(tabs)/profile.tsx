@@ -302,6 +302,31 @@ export default function ProfileScreen() {
         <Text style={styles.sectionHint}>{activeTheme.tagline}</Text>
       </View>
 
+      {/* Leaderboard identity + friends */}
+      <View style={styles.section}>
+        <SectionHeader title="Leaderboards" />
+        <Pressable
+          onPress={() => router.push('/edit-username' as Href)}
+          accessibilityRole="button"
+          accessibilityLabel={`Change username. Currently ${handle}`}
+          style={({ pressed }) => [styles.settingRow, pressed && { opacity: 0.85 }]}
+        >
+          <View style={styles.settingLead}>
+            <Text style={styles.settingText}>Username</Text>
+            <Text style={styles.settingHint}>{handle}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+        </Pressable>
+        <Pressable
+          onPress={() => router.push('/find-friends' as Href)}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.settingRow, pressed && { opacity: 0.85 }]}
+        >
+          <Text style={styles.settingText}>Find friends</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+        </Pressable>
+      </View>
+
       {/* Tracking */}
       <View style={styles.section}>
         <SectionHeader title="Tracking" />

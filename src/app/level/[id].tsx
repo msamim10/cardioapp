@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
 import { VideoAirPlayButton } from 'expo-video';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -16,7 +16,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RunSettingsSheet } from '@/components/RunSettingsSheet';
 import { OptionCard, SectionHeader } from '@/components/ui';
+import { hasBeatmap } from '@/lib/beatmapRegistry';
 import { discoveryClassForMode } from '@/lib/dailyRecommendations';
+import { displayHandle, fetchChallenge, type ChallengeCard } from '@/lib/leaderboards';
 import { getMode, modes } from '@/lib/gameData';
 import { getModeCover } from '@/lib/modeCovers';
 import { useOnboarding } from '@/lib/OnboardingContext';
@@ -53,11 +55,13 @@ const PREP_ITEMS: {
 type PlaybackDestination = 'phone' | 'tv';
 
 export default function LevelDetailScreen() {
-  const { id: idParam, classKey: classKeyParam } = useLocalSearchParams<{
+  const { id: idParam, classKey: classKeyParam, challenge: challengeParam } = useLocalSearchParams<{
     id: string | string[];
     classKey?: string | string[];
+    challenge?: string | string[];
   }>();
   const id = Array.isArray(idParam) ? idParam[0] : idParam;
+  const challengeId = Array.isArray(challengeParam) ? challengeParam[0] : challengeParam;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const mode = getMode(id);
@@ -72,6 +76,22 @@ export default function LevelDetailScreen() {
     resolveRunSettings(null, answers),
   );
   const [editOpen, setEditOpen] = useState(false);
+  // Beat-my-score deep link: `?challenge={runId}` → public `challenges/{runId}`.
+  const [challenge, setChallenge] = useState<ChallengeCard | null>(null);
+
+  useEffect(() => {
+    if (!challengeId) {
+      setChallenge(null);
+      return undefined;
+    }
+    let mounted = true;
+    fetchChallenge(challengeId).then((card) => {
+      if (mounted) setChallenge(card && card.levelId === id ? card : null);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [challengeId, id]);
 
   useEffect(() => {
     let mounted = true;
@@ -247,6 +267,36 @@ export default function LevelDetailScreen() {
             </View>
           </View>
         </View>
+
+        {challenge ? (
+          <Pressable
+            onPress={() => router.push(`/leaderboard/${mode.id}` as Href)}
+            accessibilityRole="button"
+            accessibilityLabel={`Challenge from ${displayHandle(challenge)}: ${challenge.score.toLocaleString()} points at ${Math.round(challenge.accuracy * 100)} percent accuracy. Beat it. Opens the leaderboard.`}
+            style={({ pressed }) => [styles.challengeBanner, pressed && styles.pressed]}
+          >
+            <Ionicons name="trophy" size={18} color={colors.black} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.challengeTitle} numberOfLines={1}>
+                {displayHandle(challenge)} scored {challenge.score.toLocaleString()} · {Math.round(challenge.accuracy * 100)}%
+              </Text>
+              <Text style={styles.challengeDetail}>Beat it — finish this level to post your score.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.black} />
+          </Pressable>
+        ) : null}
+
+        <Pressable
+          onPress={() => router.push(`/leaderboard/${mode.id}` as Href)}
+          accessibilityRole="button"
+          accessibilityLabel={hasBeatmap(mode.id) ? 'Open leaderboard' : 'Leaderboard. This level needs a beatmap before scores can be ranked.'}
+          style={({ pressed }) => [styles.boardLink, pressed && styles.pressed]}
+        >
+          <Ionicons name="podium-outline" size={18} color={colors.lime} />
+          <Text style={styles.boardLinkText}>Leaderboard</Text>
+          <Text style={styles.boardLinkMeta}>{hasBeatmap(mode.id) ? 'Global · Friends' : 'Needs a beatmap'}</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.textFaint} />
+        </Pressable>
 
         {lockCopy ? (
           <View
@@ -679,4 +729,27 @@ const styles = StyleSheet.create({
   },
   lockTitle: { ...type.h3, color: colors.text },
   lockDetail: { ...type.bodySm, color: colors.textDim, marginTop: 2 },
+  challengeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.lime,
+  },
+  challengeTitle: { ...type.h3, color: colors.black },
+  challengeDetail: { ...type.bodySm, color: 'rgba(0,0,0,0.7)', marginTop: 2 },
+  boardLink: {
+    minHeight: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  boardLinkText: { flex: 1, color: colors.text, fontSize: 14, fontWeight: font.bold },
+  boardLinkMeta: { ...type.bodySm, color: colors.textFaint, fontSize: 12 },
 });
