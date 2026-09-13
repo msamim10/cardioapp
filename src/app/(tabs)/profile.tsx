@@ -10,13 +10,16 @@ import {
   requestCalibrationGuidance,
   type CalibrationProfile,
 } from '@/lib/calibrationProfile';
+import type { IconName } from '@/lib/gameData';
+import { DEFAULT_HUD_THEME_ID, hudThemeOptions, resolveHudTheme } from '@/lib/hudThemes';
+import { levelBadges, nextRewardLevel } from '@/lib/levels';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import { useProgress } from '@/lib/ProgressContext';
 import { useSubscription } from '@/lib/SubscriptionContext';
 import { requestSubscriptionAccess } from '@/lib/subscriptionAccess';
 import { CLASS_ORDER } from '@/lib/progression';
 import { PRIVACY_POLICY_URL, TERMS_URL, openLegalUrl } from '@/lib/legal';
-import { colors, font, radius, spacing } from '@/theme';
+import { colors, font, metric, radius, spacing } from '@/theme';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -67,11 +70,22 @@ export default function ProfileScreen() {
     completedLevelIds,
     username,
     syncStatus,
+    levelProgress,
+    hudThemeId,
+    setHudTheme,
   } = useProgress();
 
   const firstName = user?.name?.split(' ')[0] || username || 'Runner';
   const handle = username ? `@${username}` : user?.email ?? '@runner';
   const anyClassComplete = CLASS_ORDER.some((k) => classData(k).allComplete);
+
+  // Level rewards derive from the effective level every render — nothing persisted.
+  const level = levelProgress.level;
+  const rewardBadges = levelBadges(level);
+  const rewardBadgesEarned = rewardBadges.filter((b) => b.unlocked).length;
+  const nextReward = nextRewardLevel(level);
+  const themeOptions = hudThemeOptions(level);
+  const activeTheme = resolveHudTheme(hudThemeId, level);
 
   const badges = [
     { icon: 'footsteps' as const, label: 'First Run', earned: totalRuns >= 1 },
@@ -206,6 +220,86 @@ export default function ProfileScreen() {
             </View>
           ))}
         </View>
+      </View>
+
+      {/* Level rewards: badges unlocked by player level (1–50). */}
+      <View style={styles.section}>
+        <SectionHeader
+          title="Level rewards"
+          action={
+            <Text style={styles.link}>
+              Lv {level} · {rewardBadgesEarned} / {rewardBadges.length}
+            </Text>
+          }
+        />
+        <View style={styles.badgeGrid}>
+          {rewardBadges.map((b) => (
+            <View
+              key={b.badge.id}
+              style={[styles.badge, !b.unlocked && styles.badgeLocked]}
+              accessible
+              accessibilityLabel={`${b.badge.title}, level ${b.level}, ${b.unlocked ? 'unlocked' : 'locked'}`}
+            >
+              <Ionicons
+                name={b.badge.icon as IconName}
+                size={26}
+                color={b.unlocked ? colors.lime : colors.textFaint}
+              />
+              <Text style={styles.badgeLabel}>{b.badge.title}</Text>
+              <Text style={styles.badgeLevel}>{b.unlocked ? 'Unlocked' : `Level ${b.level}`}</Text>
+            </View>
+          ))}
+        </View>
+        {nextReward ? (
+          <Text style={styles.sectionHint}>
+            Next reward at level {nextReward} · {levelProgress.toNext.toLocaleString()} XP to level{' '}
+            {Math.min(50, level + 1)}.
+          </Text>
+        ) : null}
+      </View>
+
+      {/* HUD theme: in-run overlay palette, unlocked by level. */}
+      <View style={styles.section}>
+        <SectionHeader
+          title="HUD theme"
+          action={<Text style={styles.link}>{activeTheme.name}</Text>}
+        />
+        <View style={styles.themeGrid}>
+          {themeOptions.map(({ theme, unlockLevel, unlocked }) => {
+            const selected = activeTheme.id === theme.id;
+            return (
+              <Pressable
+                key={theme.id}
+                disabled={!unlocked}
+                onPress={() => setHudTheme(theme.id === DEFAULT_HUD_THEME_ID ? null : theme.id)}
+                accessibilityRole="radio"
+                accessibilityLabel={`${theme.name} HUD theme${unlocked ? '' : `, unlocks at level ${unlockLevel}`}`}
+                accessibilityState={{ selected, disabled: !unlocked }}
+                style={({ pressed }) => [
+                  styles.themeChip,
+                  selected && styles.themeChipSelected,
+                  !unlocked && styles.badgeLocked,
+                  pressed && unlocked && { opacity: 0.85 },
+                ]}
+              >
+                <View style={[styles.themeSwatch, { backgroundColor: theme.accent }]}>
+                  {!unlocked ? (
+                    <Ionicons name="lock-closed" size={12} color={colors.black} />
+                  ) : selected ? (
+                    <Ionicons name="checkmark" size={13} color={colors.black} />
+                  ) : null}
+                </View>
+                <Text style={styles.themeName} numberOfLines={1}>
+                  {theme.name}
+                </Text>
+                <Text style={styles.themeMeta}>
+                  {unlocked ? (selected ? 'Active' : 'Unlocked') : `Level ${unlockLevel}`}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={styles.sectionHint}>{activeTheme.tagline}</Text>
       </View>
 
       {/* Tracking */}
@@ -365,6 +459,33 @@ const styles = StyleSheet.create({
   },
   badgeLocked: { opacity: 0.45 },
   badgeLabel: { color: colors.text, fontSize: 12, fontWeight: font.semibold },
+  badgeLevel: { ...metric, color: colors.textFaint, fontSize: 10, fontWeight: font.bold },
+  sectionHint: { color: colors.textFaint, fontSize: 12, lineHeight: 16, fontWeight: font.medium },
+  themeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  themeChip: {
+    width: '23%',
+    flexGrow: 1,
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  themeChipSelected: { borderColor: colors.lime, backgroundColor: colors.surface2 },
+  themeSwatch: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  themeName: { color: colors.text, fontSize: 12, fontWeight: font.semibold },
+  themeMeta: { ...metric, color: colors.textFaint, fontSize: 10, fontWeight: font.bold },
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -3,9 +3,14 @@ import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { getMode } from '@/lib/gameData';
 import { getModeCover } from '@/lib/modeCovers';
-import type { ClassMapEntry, MapState } from '@/lib/progression';
-import { campaignCoverBlurIntensity, shouldBlurCampaignTitle } from '@/lib/progression';
+import type { ClassMapEntry, LockReason, MapState } from '@/lib/progression';
+import {
+  campaignCoverBlurIntensity,
+  lockReasonCopy,
+  shouldBlurCampaignTitle,
+} from '@/lib/progression';
 import { colors, font, radius, spacing } from '@/theme';
 
 const NODE_SIZE = 92;
@@ -16,7 +21,22 @@ const CONNECTOR_THICKNESS = 5;
 
 type PathPoint = { x: number; y: number };
 
-function stateLabel(state: MapState, index: number, blurTitle: boolean): string {
+/**
+ * Locked-node copy. Blurred (distant) nodes never leak a neighbour's name, so
+ * they only ever say "Complete Level N"; near nodes spell out the gate — the
+ * previous node, a 70% accuracy target on it, or a player level to reach.
+ */
+function lockCopy(index: number, reason: LockReason | null, blurTitle: boolean): string {
+  if (!reason || blurTitle) return `Complete Level ${index}`;
+  return lockReasonCopy(reason, (levelId) => getMode(levelId)?.name ?? `Level ${index}`);
+}
+
+function stateLabel(
+  state: MapState,
+  index: number,
+  blurTitle: boolean,
+  reason: LockReason | null
+): string {
   switch (state) {
     case 'completed':
       return 'Completed';
@@ -25,9 +45,7 @@ function stateLabel(state: MapState, index: number, blurTitle: boolean): string 
     case 'unlocked':
       return 'Unlocked';
     case 'locked':
-      return blurTitle
-        ? 'Locked upcoming map'
-        : `Locked. Complete Level ${index}`;
+      return blurTitle ? 'Locked upcoming map' : `Locked. ${lockCopy(index, reason, blurTitle)}`;
   }
 }
 
@@ -115,8 +133,10 @@ function PathNode({
   const playable = !locked;
   const blurTitle = shouldBlurCampaignTitle(entry.index, entry.state, rosterLength);
   const coverBlur = campaignCoverBlurIntensity(entry.index, entry.state, rosterLength);
-  const label = stateLabel(entry.state, entry.index, blurTitle);
+  const label = stateLabel(entry.state, entry.index, blurTitle, entry.lockReason);
   const a11yName = blurTitle ? 'upcoming map' : entry.mode.name;
+  const lockedMeta = lockCopy(entry.index, entry.lockReason, blurTitle);
+  const gated = locked && entry.lockReason !== null && entry.lockReason.kind !== 'previous';
 
   return (
     <View
@@ -195,7 +215,11 @@ function PathNode({
             ) : null}
             {locked ? (
               <View style={styles.lockOverlay}>
-                <Ionicons name="lock-closed" size={22} color={colors.textDim} />
+                <Ionicons
+                  name={gated ? (entry.lockReason?.kind === 'level' ? 'trending-up' : 'analytics') : 'lock-closed'}
+                  size={22}
+                  color={gated ? colors.text : colors.textDim}
+                />
               </View>
             ) : null}
             {completed ? (
@@ -238,9 +262,12 @@ function PathNode({
             Complete Level {entry.index}
           </Text>
         ) : (
-          <Text style={[styles.nodeMeta, locked && styles.nodeMetaLocked]}>
+          <Text
+            style={[styles.nodeMeta, locked && styles.nodeMetaLocked, gated && styles.nodeMetaGated]}
+            numberOfLines={2}
+          >
             {locked
-              ? `Complete Level ${entry.index}`
+              ? lockedMeta
               : completed
                 ? `${entry.level.durationMin} min · Replay`
                 : `${entry.level.durationMin} min`}
@@ -448,6 +475,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   nodeMetaLocked: { color: colors.textFaint },
+  nodeMetaGated: { color: colors.textDim, paddingHorizontal: 2 },
   playNowChip: {
     marginTop: 5,
     paddingHorizontal: 9,

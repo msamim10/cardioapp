@@ -32,6 +32,7 @@ import { useProgress } from '@/lib/ProgressContext';
 import {
   caloriesForRun,
   CLASS_META,
+  lockReasonCopy,
   parseOptionalClassKeyParam,
 } from '@/lib/progression';
 import { useSubscription } from '@/lib/SubscriptionContext';
@@ -97,6 +98,14 @@ export default function LevelDetailScreen() {
   const inCampaignRoster = Boolean(
     campaignClass && id && classData(campaignClass).roster.includes(id)
   );
+  // Campaign entry only: a node reached while gated (deep link, stale summary
+  // CTA) explains the lock and cannot start. Casual entry never gates.
+  const campaignEntry =
+    campaignClass && id ? classData(campaignClass).maps.find((m) => m.levelId === id) ?? null : null;
+  const campaignLock = campaignEntry?.state === 'locked' ? campaignEntry.lockReason : null;
+  const lockCopy = campaignLock
+    ? lockReasonCopy(campaignLock, (levelId) => getMode(levelId)?.name ?? 'the previous map')
+    : null;
 
   if (!mode) {
     return (
@@ -144,7 +153,7 @@ export default function LevelDetailScreen() {
   };
 
   const onStart = async () => {
-    if (!subscriptionHydrated || starting) return;
+    if (!subscriptionHydrated || starting || campaignLock) return;
 
     if (canStartRun(isPremium)) {
       goPreflight();
@@ -238,6 +247,21 @@ export default function LevelDetailScreen() {
             </View>
           </View>
         </View>
+
+        {lockCopy ? (
+          <View
+            style={styles.lockBanner}
+            accessible
+            accessibilityRole="summary"
+            accessibilityLabel={`Locked on the ${classMeta.label} path. ${lockCopy}`}
+          >
+            <Ionicons name="lock-closed" size={18} color={colors.text} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.lockTitle}>Locked on the {classMeta.label} path</Text>
+              <Text style={styles.lockDetail}>{lockCopy}</Text>
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.section}>
           <SectionHeader
@@ -391,22 +415,28 @@ export default function LevelDetailScreen() {
         </View>
         <Pressable
           onPress={onStart}
-          disabled={!subscriptionHydrated || starting}
+          disabled={!subscriptionHydrated || starting || Boolean(campaignLock)}
           accessibilityRole="button"
-          accessibilityLabel={`Continue to camera setup for ${mode.name}`}
-          accessibilityState={{ disabled: !subscriptionHydrated || starting, busy: starting }}
+          accessibilityLabel={
+            campaignLock ? `Locked. ${lockCopy}` : `Continue to camera setup for ${mode.name}`
+          }
+          accessibilityState={{
+            disabled: !subscriptionHydrated || starting || Boolean(campaignLock),
+            busy: starting,
+          }}
           style={({ pressed }) => [
             styles.beginButton,
             (!subscriptionHydrated || starting) && styles.beginDisabled,
+            campaignLock && styles.beginLocked,
             pressed && styles.beginPressed,
           ]}
         >
           {!subscriptionHydrated || starting ? (
             <ActivityIndicator color={colors.black} />
           ) : (
-            <Ionicons name="play" size={20} color={colors.black} />
+            <Ionicons name={campaignLock ? 'lock-closed' : 'play'} size={20} color={colors.black} />
           )}
-          <Text style={styles.beginButtonText}>{continueLabel}</Text>
+          <Text style={styles.beginButtonText}>{campaignLock ? 'LOCKED' : continueLabel}</Text>
         </Pressable>
       </View>
 
@@ -634,6 +664,19 @@ const styles = StyleSheet.create({
     color: colors.black,
   },
   beginDisabled: { opacity: 0.82 },
+  beginLocked: { backgroundColor: colors.textFaint, opacity: 0.9 },
   beginPressed: { opacity: 0.72 },
   pressed: { opacity: 0.72 },
+  lockBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  lockTitle: { ...type.h3, color: colors.text },
+  lockDetail: { ...type.bodySm, color: colors.textDim, marginTop: 2 },
 });

@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   aggregateWeeklyActivity,
+  MAX_LEVEL,
   type WeeklyActivity,
 } from '@/lib/progressAggregation';
 import { useProgress } from '@/lib/ProgressContext';
@@ -142,6 +143,9 @@ export default function ProgressScreen() {
 
 function LevelHero({ progress }: { progress: ReturnType<typeof useProgress>['levelProgress'] }) {
   const tier = tierForLevel(progress.level);
+  const remaining = progress.isMax
+    ? `Level ${MAX_LEVEL} — the cap.`
+    : `${progress.toNext.toLocaleString()} XP until Level ${progress.level + 1}.`;
   return (
     <LinearGradient
       colors={['#202039', '#13131E', '#0E0E15']}
@@ -151,32 +155,40 @@ function LevelHero({ progress }: { progress: ReturnType<typeof useProgress>['lev
       style={styles.levelHero}
       accessible
       accessibilityRole="summary"
-      accessibilityLabel={`${tier}, Level ${progress.level}. ${progress.intoLevel} of ${progress.span} experience points. ${progress.toNext} experience points to Level ${progress.level + 1}.`}
+      accessibilityLabel={`${tier}, Level ${progress.level}. ${progress.current} of ${progress.needed} experience points. ${remaining}`}
     >
-      <LevelOrbit level={progress.level} value={progress.progress} />
+      <LevelOrbit level={progress.level} value={progress.fraction} />
       <View style={styles.heroCopy}>
         <View style={styles.tierRow}>
           <View style={styles.tierDot} />
           <Text style={styles.tierName}>{tier.toUpperCase()}</Text>
         </View>
         <Text style={styles.heroTitle}>Fitness level</Text>
-        <Text style={styles.heroRemaining}>
-          <Text style={styles.heroRemainingStrong}>{progress.toNext.toLocaleString()} XP</Text>
-          {' '}until Level {progress.level + 1}
-        </Text>
+        {progress.isMax ? (
+          <Text style={styles.heroRemaining}>
+            <Text style={styles.heroRemainingStrong}>Max level.</Text> Every run still counts.
+          </Text>
+        ) : (
+          <Text style={styles.heroRemaining}>
+            <Text style={styles.heroRemainingStrong}>{progress.toNext.toLocaleString()} XP</Text>
+            {' '}until Level {progress.level + 1}
+          </Text>
+        )}
         <View style={styles.segmentRail} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
           {Array.from({ length: 10 }, (_, index) => (
             <View
               key={index}
               style={[
                 styles.railSegment,
-                index < Math.ceil(progress.progress * 10) && styles.railSegmentFilled,
+                index < Math.ceil(progress.fraction * 10) && styles.railSegmentFilled,
               ]}
             />
           ))}
         </View>
         <Text style={styles.heroXp}>
-          {progress.intoLevel.toLocaleString()} / {progress.span.toLocaleString()} XP
+          {progress.isMax
+            ? `Level ${MAX_LEVEL} / ${MAX_LEVEL}`
+            : `${progress.current.toLocaleString()} / ${progress.needed.toLocaleString()} XP`}
         </Text>
       </View>
     </LinearGradient>
@@ -367,10 +379,13 @@ function MetricPanel({
   );
 }
 
+/** Display tier for the 1–50 curve (cosmetic only; rewards live in `levels.ts`). */
 function tierForLevel(level: number) {
-  if (level >= 15) return 'Apex Runner';
-  if (level >= 10) return 'Trailblazer';
-  if (level >= 6) return 'Pacesetter';
+  if (level >= 45) return 'Legend';
+  if (level >= 35) return 'Elite';
+  if (level >= 25) return 'Apex Runner';
+  if (level >= 15) return 'Trailblazer';
+  if (level >= 8) return 'Pacesetter';
   if (level >= 3) return 'Strider';
   return 'Rookie';
 }

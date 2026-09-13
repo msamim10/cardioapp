@@ -1,9 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   AppState,
   Dimensions,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,11 +16,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MascotHero } from '@/components/MascotHero';
 import { ModeCard } from '@/components/ModeCard';
 import { Card, StatChip, WeekTracker } from '@/components/ui';
+import { hasBeatmap } from '@/lib/beatmapRegistry';
 import { getSimulatedRunnerCount } from '@/lib/communityActivity';
-import { getMode } from '@/lib/gameData';
-import { calendarWeekStart } from '@/lib/progressAggregation';
+import { getDailyChallenge, isDailyChallengeCompleted } from '@/lib/dailyRecommendations';
+import { getMode, modes } from '@/lib/gameData';
+import { nextRewardLevel } from '@/lib/levels';
+import { getModeCover } from '@/lib/modeCovers';
+import { calendarWeekStart, MAX_LEVEL } from '@/lib/progressAggregation';
 import { useProgress } from '@/lib/ProgressContext';
-import { nextLiveCompetitionDelay, type LeaderRow } from '@/lib/progression';
+import {
+  DAILY_CHALLENGE_XP_BONUS,
+  nextLiveCompetitionDelay,
+  type LeaderRow,
+} from '@/lib/progression';
 import { colors, font, metric, radius, spacing, type } from '@/theme';
 
 const HERO_HEIGHT = Math.round(Dimensions.get('window').height * 0.4);
@@ -140,6 +151,7 @@ export default function HomeScreen() {
     activeClassData,
     hydrated,
     streak,
+    streakInfo,
     coins,
     runs,
     runsThisWeek,
@@ -148,7 +160,25 @@ export default function HomeScreen() {
     activeClass,
     advanceLiveCompetition,
     isLevelCompleted,
+    levelProgress,
   } = useProgress();
+
+  // Daily challenge is keyed to the local date; refresh the date on focus so a
+  // session that straddles midnight picks up the new video.
+  const [challengeDate, setChallengeDate] = useState(() => new Date());
+  useFocusEffect(
+    useCallback(() => {
+      setChallengeDate(new Date());
+    }, [])
+  );
+  const challenge = useMemo(
+    () => getDailyChallenge(modes, challengeDate, hasBeatmap),
+    [challengeDate]
+  );
+  const challengeDone = useMemo(
+    () => isDailyChallengeCompleted(runs, challenge),
+    [challenge, runs]
+  );
 
   // Training load for the current calendar week, on the same Monday boundary
   // the weekly goal tracker uses.
@@ -227,13 +257,136 @@ export default function HomeScreen() {
             <Text style={styles.usernameText}>@{username || 'runner'}</Text>
           </View>
           <View style={styles.heroChips}>
-            <StatChip icon="flame" label={`${streak}`} accent="orange" />
+            <View
+              style={styles.streakChip}
+              accessible
+              accessibilityLabel={`${streak} day streak. Streak freeze ${streakInfo.freezeAvailable ? 'available' : 'used'} this week.`}
+            >
+              <Ionicons name="flame" size={16} color={colors.heat} />
+              <Text style={styles.streakChipText}>{streak}</Text>
+              <View
+                style={[
+                  styles.freezePill,
+                  !streakInfo.freezeAvailable && styles.freezePillUsed,
+                ]}
+              >
+                <Ionicons
+                  name="snow"
+                  size={10}
+                  color={streakInfo.freezeAvailable ? colors.pace : colors.textFaint}
+                />
+                <Text
+                  style={[
+                    styles.freezePillText,
+                    !streakInfo.freezeAvailable && styles.freezePillTextUsed,
+                  ]}
+                >
+                  {streakInfo.freezeAvailable ? 'Freeze available' : 'Freeze used'}
+                </Text>
+              </View>
+            </View>
             <StatChip icon="diamond" label={`${coins}`} accent="lime" />
           </View>
         </View>
       </MascotHero>
 
       <View style={styles.body}>
+        {/* Player level: XP toward the next level on the 1–50 curve. */}
+        <Card
+          style={styles.levelCard}
+          accessible
+          accessibilityLabel={
+            levelProgress.isMax
+              ? `Level ${MAX_LEVEL}, max level`
+              : `Level ${levelProgress.level}. ${levelProgress.toNext} XP to level ${levelProgress.level + 1}`
+          }
+        >
+          <View style={styles.levelBadge}>
+            <Text style={styles.levelBadgeNumber}>{levelProgress.level}</Text>
+            <Text style={styles.levelBadgeLabel}>LVL</Text>
+          </View>
+          <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+            <View style={styles.levelHead}>
+              <Text style={styles.levelTitle}>Level {levelProgress.level}</Text>
+              <Text style={styles.levelMeta}>
+                {levelProgress.isMax
+                  ? 'Max level'
+                  : `${levelProgress.toNext.toLocaleString()} XP to level ${levelProgress.level + 1}`}
+              </Text>
+            </View>
+            <View style={styles.levelTrack}>
+              <View
+                style={[styles.levelFill, { width: `${Math.round(levelProgress.fraction * 100)}%` }]}
+              />
+            </View>
+            <Text style={styles.levelHint}>
+              {(() => {
+                const next = nextRewardLevel(levelProgress.level);
+                return next ? `Next reward at level ${next}` : 'Every reward unlocked';
+              })()}
+            </Text>
+          </View>
+        </Card>
+
+        {/* Today's challenge: one video per local date, same for everyone. */}
+        {challenge ? (
+          <Pressable
+            onPress={() =>
+              router.push({ pathname: '/level/[id]', params: { id: challenge.mode.id } })
+            }
+            accessibilityRole="button"
+            accessibilityLabel={`Today's challenge, ${challenge.mode.name}. ${
+              challengeDone
+                ? 'Completed, bonus earned.'
+                : `Complete for ${Math.round(DAILY_CHALLENGE_XP_BONUS * 100)} percent bonus XP.`
+            }${challenge.practice ? ' Practice pick.' : ''}`}
+            style={({ pressed }) => [styles.challengeCardWrap, pressed && { opacity: 0.85 }]}
+          >
+            <View style={styles.challengeCover}>
+              {getModeCover(challenge.mode.id) ? (
+                <Image
+                  source={getModeCover(challenge.mode.id)}
+                  contentFit="cover"
+                  style={StyleSheet.absoluteFill}
+                />
+              ) : null}
+              <LinearGradient
+                colors={['transparent', 'rgba(8,9,10,0.85)']}
+                style={StyleSheet.absoluteFill}
+              />
+              {challengeDone ? (
+                <View style={styles.challengeDoneBadge}>
+                  <Ionicons name="checkmark" size={14} color={colors.black} />
+                </View>
+              ) : null}
+            </View>
+            <View style={styles.challengeBody}>
+              <View style={styles.challengeEyebrowRow}>
+                <Ionicons name="calendar" size={12} color={colors.lime} />
+                <Text style={styles.challengeEyebrow}>Today&apos;s challenge</Text>
+                {challenge.practice ? (
+                  <View style={styles.practicePill}>
+                    <Text style={styles.practicePillText}>PRACTICE</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={styles.challengeName} numberOfLines={1}>
+                {challenge.mode.name}
+              </Text>
+              <Text style={[styles.challengeMeta, challengeDone && { color: colors.lime }]}>
+                {challengeDone
+                  ? `Completed · +${Math.round(DAILY_CHALLENGE_XP_BONUS * 100)}% XP earned`
+                  : `Complete for +${Math.round(DAILY_CHALLENGE_XP_BONUS * 100)}% XP`}
+              </Text>
+            </View>
+            <Ionicons
+              name={challengeDone ? 'checkmark-circle' : 'chevron-forward'}
+              size={20}
+              color={challengeDone ? colors.lime : colors.textFaint}
+            />
+          </Pressable>
+        ) : null}
+
         {/* This week's training load, then the weekly goal it feeds. */}
         <Card style={styles.weekCard}>
           <View style={styles.weekTop}>
@@ -364,6 +517,93 @@ const styles = StyleSheet.create({
   },
   usernameText: { color: colors.text, fontSize: 14, fontWeight: font.bold },
   heroChips: { flexDirection: 'row', gap: spacing.sm },
+  streakChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingLeft: spacing.md,
+    paddingRight: 6,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  streakChipText: { ...metric, color: colors.text, fontSize: 14, fontWeight: font.bold },
+  freezePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(61,197,240,0.14)',
+  },
+  freezePillUsed: { backgroundColor: 'rgba(255,255,255,0.06)' },
+  freezePillText: { color: colors.pace, fontSize: 9, fontWeight: font.black, letterSpacing: 0.3 },
+  freezePillTextUsed: { color: colors.textFaint },
+
+  levelCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md },
+  levelBadge: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.lime,
+  },
+  levelBadgeNumber: { ...metric, color: colors.black, fontSize: 22, lineHeight: 24, fontWeight: font.heavy, letterSpacing: -0.8 },
+  levelBadgeLabel: { color: 'rgba(0,0,0,0.6)', fontSize: 7, fontWeight: font.black, letterSpacing: 1.2, marginTop: -1 },
+  levelHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.sm },
+  levelTitle: { ...type.h3, color: colors.text },
+  levelMeta: { ...metric, color: colors.textDim, fontSize: 12, fontWeight: font.bold, flexShrink: 1, textAlign: 'right' },
+  levelTrack: { height: 6, borderRadius: radius.pill, backgroundColor: colors.surface3, overflow: 'hidden' },
+  levelFill: { height: '100%', backgroundColor: colors.lime },
+  levelHint: { ...type.bodySm, color: colors.textFaint, fontSize: 12 },
+
+  challengeCardWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.sm,
+    paddingRight: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: 'rgba(215,255,62,0.28)',
+  },
+  challengeCover: {
+    width: 96,
+    height: 72,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    backgroundColor: colors.surface2,
+  },
+  challengeDoneBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.lime,
+  },
+  challengeBody: { flex: 1, minWidth: 0, gap: 3 },
+  challengeEyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  challengeEyebrow: { ...type.micro, color: colors.lime },
+  practicePill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.xs,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  practicePillText: { color: colors.textDim, fontSize: 8, fontWeight: font.black, letterSpacing: 0.6 },
+  challengeName: { ...type.h3, color: colors.text, fontSize: 15 },
+  challengeMeta: { ...type.bodySm, color: colors.textDim, fontSize: 12 },
   weekCard: { gap: spacing.md },
   weekTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   weekEyebrow: { ...type.label, color: colors.textDim },

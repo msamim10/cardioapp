@@ -80,8 +80,9 @@ export default function ModeMapScreen() {
             <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
           </View>
           <Text style={styles.pathHint}>
-            Follow the path. Complete each level to unlock the next at{' '}
-            {selectedData.meta.speedFactor.toFixed(1)}x speed.
+            Follow the path at {selectedData.meta.speedFactor.toFixed(1)}x speed. Each level
+            unlocks the next once you finish it, hit 70% accuracy on cued maps, and reach the
+            node&apos;s player level.
           </Text>
         </View>
 

@@ -5,7 +5,7 @@ import * as Device from 'expo-device';
 import { LinearGradient } from 'expo-linear-gradient';
 import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -50,6 +50,7 @@ import {
   type TrackingStatus,
 } from '@/lib/poseTracking';
 import { useProgress } from '@/lib/ProgressContext';
+import { resolveHudTheme } from '@/lib/hudThemes';
 import { parseOptionalClassKeyParam } from '@/lib/progression';
 import {
   INITIAL_PREFLIGHT_STATE,
@@ -105,8 +106,13 @@ export default function PreflightScreen() {
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { startRun } = useProgress();
+  const { startRun, hudThemeId, levelProgress } = useProgress();
   const { setCheckpoint } = useOnboarding();
+  // Same palette the run will use, so the calibration skeleton matches.
+  const hudTheme = useMemo(
+    () => resolveHudTheme(hudThemeId, levelProgress.level),
+    [hudThemeId, levelProgress.level]
+  );
   const campaignClass = parseOptionalClassKeyParam(params.classKey);
   const intensity = isIntensityKey(params.intensity) ? params.intensity : undefined;
   const isFirstRun = params.firstRun === '1';
@@ -437,6 +443,7 @@ export default function PreflightScreen() {
           poseFrame={poseFrame}
           poseFeedback={feedback}
           poseScore={INITIAL_POSE_SCORE}
+          hudTheme={hudTheme}
           trackingMode="real"
           unavailableReason={unavailableReason}
           variant="setup"

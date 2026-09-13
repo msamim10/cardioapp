@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { PoseOverlay, type UpcomingCue } from '@/components/PoseOverlay';
 import type { CueScore } from '@/lib/cueScoring';
+import type { HudTheme } from '@/lib/hudThemes';
 import { frameAgeMs, STALE_FRAME_MS } from '@/lib/poseLatency';
 import {
   POSE_JOINTS,
@@ -47,6 +48,8 @@ type WorkoutCameraPreviewProps = {
   playbackElapsed?: number;
   /** Playback duration seconds for hybrid progress + action scoring. */
   playbackDuration?: number;
+  /** Unlocked HUD palette chosen in Profile; omitted → default Volt. */
+  hudTheme?: HudTheme;
   trackingMode: PoseTrackingMode;
   unavailableReason: string;
   variant?: 'companion' | 'pip' | 'setup';
@@ -66,6 +69,7 @@ export function WorkoutCameraPreview({
   upcomingCue = null,
   playbackElapsed = 0,
   playbackDuration = 0,
+  hudTheme,
   trackingMode,
   unavailableReason,
   variant = 'companion',
@@ -219,6 +223,7 @@ export function WorkoutCameraPreview({
         score={poseScore}
         cueScore={cueScore}
         upcomingCue={upcomingCue}
+        hudTheme={hudTheme}
         variant={variant}
       />
     </View>

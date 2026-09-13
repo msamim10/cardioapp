@@ -24,6 +24,7 @@ import { getBeatmap } from '@/lib/beatmapRegistry';
 import { beatmapDurationMismatch, type BeatmapMove } from '@/lib/beatmaps';
 import { CueJudge, INITIAL_CUE_SCORE, type CueScore } from '@/lib/cueScoring';
 import { getLevel, getMode } from '@/lib/gameData';
+import { resolveHudTheme } from '@/lib/hudThemes';
 import { LatencyReservoir, latencyDeltas } from '@/lib/poseLatency';
 import {
   applyRecognizedMove,
@@ -204,8 +205,13 @@ export default function WorkoutScreen() {
   const pipHeight = pipWidth * (4 / 3);
 
   // Additive (AirPlay): resolve the class + level for the companion dashboard.
-  const { activeClass, activeRun, abandonRun } = useProgress();
+  const { activeClass, activeRun, abandonRun, hudThemeId, levelProgress } = useProgress();
   const classKey = activeRun?.classKey ?? activeClass;
+  // HUD palette: the persisted pick, but only if this device's level unlocks it.
+  const hudTheme = useMemo(
+    () => resolveHudTheme(hudThemeId, levelProgress.level),
+    [hudThemeId, levelProgress.level]
+  );
   const classMeta = CLASS_META[classKey];
   const levelInfo = getLevel(level);
   const worldInfo = getMode(level);
@@ -595,6 +601,7 @@ export default function WorkoutScreen() {
                 poseScore={poseScore}
                 cueScore={cueScore}
                 upcomingCue={upcomingCue}
+                hudTheme={hudTheme}
                 trackingMode={trackingMode}
                 unavailableReason={trackingUnavailableReason}
                 variant="companion"
@@ -658,6 +665,7 @@ export default function WorkoutScreen() {
                 poseScore={poseScore}
                 cueScore={cueScore}
                 upcomingCue={upcomingCue}
+                hudTheme={hudTheme}
                 trackingMode={trackingMode}
                 unavailableReason={trackingUnavailableReason}
                 variant="pip"

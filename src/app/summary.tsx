@@ -13,6 +13,8 @@ import {
   type PersonalBest,
 } from '@/lib/achievements';
 import { getMode } from '@/lib/gameData';
+import { getHudTheme } from '@/lib/hudThemes';
+import { effectiveLevel, MAX_LEVEL, rewardsBetween, type LevelReward } from '@/lib/levels';
 import { getModeCover } from '@/lib/modeCovers';
 import {
   normalizeActionCounts,
@@ -21,7 +23,7 @@ import {
   type TrackedAction,
 } from '@/lib/progressAggregation';
 import { useProgress, type RunRecord } from '@/lib/ProgressContext';
-import { CLASS_META, isClassKey } from '@/lib/progression';
+import { CLASS_META, dayKey, isClassKey, lockReasonCopy } from '@/lib/progression';
 import { REVIEW_RUN_MILESTONE } from '@/lib/reviewEligibility';
 import { requestMilestoneStoreReview } from '@/lib/storeReview';
 import { accentColor, colors, font, metric, radius, spacing, type } from '@/theme';
@@ -97,6 +99,90 @@ function useCountUp(target: number, delayMs = 0): number {
   return value;
 }
 
+/**
+ * Level-up moment: the new level number springs in over a lime ring, with any
+ * reward that came with it named underneath. Purely presentational — the level
+ * and rewards are derived from persisted XP, so a remount re-shows the same
+ * state rather than inventing a second celebration.
+ */
+function LevelUpCelebration({
+  from,
+  to,
+  rewards,
+}: {
+  from: number;
+  to: number;
+  rewards: { level: number; reward: LevelReward }[];
+}) {
+  const scale = useRef(new Animated.Value(0.6)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const animation = Animated.parallel([
+      Animated.spring(scale, { toValue: 1, friction: 5, tension: 90, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 1, duration: 320, useNativeDriver: true }),
+    ]);
+    animation.start();
+    return () => animation.stop();
+  }, [opacity, scale]);
+
+  const rewardLines = rewards.flatMap(({ level, reward }) => {
+    const lines: { key: string; icon: keyof typeof Ionicons.glyphMap; text: string; swatch?: string }[] = [];
+    if (reward.badge) {
+      lines.push({
+        key: `badge-${level}`,
+        icon: 'ribbon',
+        text: `${reward.badge.title} badge`,
+      });
+    }
+    if (reward.hudThemeId) {
+      const theme = getHudTheme(reward.hudThemeId);
+      if (theme) {
+        lines.push({
+          key: `theme-${level}`,
+          icon: 'color-palette',
+          text: `${theme.name} HUD theme`,
+          swatch: theme.accent,
+        });
+      }
+    }
+    return lines;
+  });
+
+  return (
+    <Animated.View style={[styles.levelUp, { opacity }]} accessible accessibilityRole="summary"
+      accessibilityLabel={`Level up. Level ${to}.${rewardLines.length ? ` Unlocked ${rewardLines.map((l) => l.text).join(', ')}.` : ''}`}
+    >
+      <Animated.View style={[styles.levelUpBadge, { transform: [{ scale }] }]}>
+        <Text style={styles.levelUpNumber}>{to}</Text>
+        <Text style={styles.levelUpBadgeLabel}>LEVEL</Text>
+      </Animated.View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.levelUpEyebrow}>Level up</Text>
+        <Text style={styles.levelUpTitle}>
+          {to >= MAX_LEVEL ? `Level ${to} — max level` : `Level ${to}`}
+        </Text>
+        <Text style={styles.levelUpDetail}>
+          {to - from > 1 ? `Up from level ${from}.` : `Up from level ${from}. Keep stacking runs.`}
+        </Text>
+        {rewardLines.length ? (
+          <View style={styles.levelUpRewards}>
+            {rewardLines.map((line) => (
+              <View key={line.key} style={styles.levelUpReward}>
+                {line.swatch ? (
+                  <View style={[styles.levelUpSwatch, { backgroundColor: line.swatch }]} />
+                ) : (
+                  <Ionicons name={line.icon} size={13} color={colors.lime} />
+                )}
+                <Text style={styles.levelUpRewardText}>{line.text}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+      </View>
+    </Animated.View>
+  );
+}
+
 function BreakdownRow({
   label,
   detail,
@@ -159,9 +245,12 @@ export default function SummaryScreen() {
     classData,
     streak,
     longestStreak,
+    streakInfo,
     runsThisWeek,
     weeklyGoal,
     levelProgress,
+    legacyLevelFloor,
+    xp: totalXp,
     coins: totalCoins,
     activeClass,
   } = useProgress();
@@ -286,12 +375,33 @@ export default function SummaryScreen() {
   const shownCoins = useCountUp(coins, 350);
   const shownCalories = useCountUp(Math.round(calories), 120);
 
+  // Level-up: compare the effective level before and after this run's XP.
+  // Both sides derive from persisted totals (context xp already includes the
+  // run once it is in `runs`), so a remount shows the same moment, not a new one.
+  const runInHistory = run !== null && runs.some((r) => r.runId === run.runId);
+  const levelUp = useMemo(() => {
+    if (!run || !runInHistory) return null;
+    const before = effectiveLevel(Math.max(0, totalXp - run.xp), legacyLevelFloor);
+    const after = effectiveLevel(totalXp, legacyLevelFloor);
+    if (after <= before) return null;
+    return { from: before, to: after, rewards: rewardsBetween(before, after) };
+  }, [legacyLevelFloor, run, runInHistory, totalXp]);
+
+  // Daily challenge bonus is baked into the persisted breakdown (xpBonusFactor > 1).
+  const dailyBonus = breakdown && breakdown.xpBonusFactor > 1 ? breakdown.xpBonusFactor : null;
+  // The just-recorded run bridged a missed day with this week's freeze.
+  const usedFreeze =
+    run !== null && streakInfo.lastLinkFrozen && dayKey(run.at) === dayKey(Date.now());
+
   const campaignClass = isClassKey(run?.classKey) ? run.classKey : null;
   const isCampaignRun = campaignClass !== null;
   const playedMode = getMode(run?.levelId);
   const cover = playedMode ? getModeCover(playedMode.id) : undefined;
   const data = isCampaignRun ? classData(campaignClass) : null;
   const nextLevelId = isCampaignRun ? data?.nextLevelId ?? null : null;
+  // First incomplete node held shut by a skill/level gate — explain instead of
+  // silently dropping the "Next level" CTA.
+  const nextLocked = isCampaignRun ? data?.nextLocked ?? null : null;
   // Wait until the run is attached so next-map state reflects this completion.
   const recapReady = run !== null || params.completed !== '1';
   const showNext = !fromOnboarding && recapReady && Boolean(nextLevelId);
@@ -439,15 +549,22 @@ export default function SummaryScreen() {
             </View>
             <View style={styles.levelRow}>
               <View style={styles.track}>
-                <View style={[styles.fill, { width: `${Math.round(levelProgress.progress * 100)}%` }]} />
+                <View style={[styles.fill, { width: `${Math.round(levelProgress.fraction * 100)}%` }]} />
               </View>
               <Text style={styles.levelMeta}>
-                {levelProgress.toNext.toLocaleString()} XP to level {levelProgress.level + 1}
+                {levelProgress.isMax
+                  ? `Level ${MAX_LEVEL} — max level`
+                  : `${levelProgress.toNext.toLocaleString()} XP to level ${levelProgress.level + 1}`}
               </Text>
             </View>
           </View>
 
-          {/* Rewards breakdown: base × accuracy (or activity) × combo = total. */}
+          {/* Level-up celebration, above the rewards breakdown. */}
+          {levelUp ? (
+            <LevelUpCelebration from={levelUp.from} to={levelUp.to} rewards={levelUp.rewards} />
+          ) : null}
+
+          {/* Rewards breakdown: base × accuracy (or activity) × combo (× daily bonus on XP) = total. */}
           {breakdown ? (
             <View style={styles.card}>
               <View style={styles.cardHead}>
@@ -478,6 +595,17 @@ export default function SummaryScreen() {
                   value={`×${breakdown.comboFactor.toFixed(2)}`}
                   accent={breakdown.comboFactor > 1 ? colors.lime : undefined}
                 />
+                {dailyBonus ? (
+                  <>
+                    <View style={styles.rowRule} />
+                    <BreakdownRow
+                      label="Daily challenge"
+                      detail={`Today's video · +${Math.round((dailyBonus - 1) * 100)}% XP`}
+                      value={`×${dailyBonus.toFixed(2)} XP`}
+                      accent={colors.lime}
+                    />
+                  </>
+                ) : null}
                 <View style={styles.rowRule} />
                 <BreakdownRow
                   label="Total"
@@ -504,6 +632,14 @@ export default function SummaryScreen() {
                     ? 'Current streak · your longest yet'
                     : `Current streak · best ${longestStreak}`}
                 </Text>
+                {usedFreeze ? (
+                  <View style={styles.freezeNote}>
+                    <Ionicons name="snow" size={12} color={colors.pace} />
+                    <Text style={styles.freezeNoteText}>
+                      Streak freeze used — yesterday&apos;s miss was covered.
+                    </Text>
+                  </View>
+                ) : null}
               </View>
             </View>
             <View style={styles.goalBlock}>
@@ -531,6 +667,23 @@ export default function SummaryScreen() {
               </View>
             </View>
           </View>
+
+          {/* Campaign: the next node exists but a skill/level gate holds it. */}
+          {!fromOnboarding && recapReady && nextLocked ? (
+            <View style={styles.callout}>
+              <View style={[styles.calloutIcon, { backgroundColor: 'rgba(255,255,255,0.08)' }]}>
+                <Ionicons name="lock-closed" size={18} color={colors.textDim} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.calloutTitle}>
+                  Level {nextLocked.index + 1} · {getMode(nextLocked.levelId)?.name ?? 'Next map'}
+                </Text>
+                <Text style={styles.calloutDetail}>
+                  {lockReasonCopy(nextLocked.reason, (id) => getMode(id)?.name ?? 'the previous map')}
+                </Text>
+              </View>
+            </View>
+          ) : null}
 
           {/* Achievements unlocked by this run. */}
           {achievements.length > 0 ? (
@@ -773,6 +926,40 @@ const styles = StyleSheet.create({
   },
   streakValue: { ...metric, color: colors.text, fontSize: 26, fontWeight: font.heavy, letterSpacing: -0.8 },
   streakLabel: { ...type.bodySm, color: colors.textDim },
+  freezeNote: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
+  freezeNoteText: { ...type.bodySm, color: colors.pace, fontSize: 12 },
+
+  levelUp: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: 'rgba(215,255,62,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(215,255,62,0.35)',
+  },
+  levelUpBadge: {
+    width: 72,
+    height: 72,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.lime,
+    shadowColor: colors.lime,
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  levelUpNumber: { ...metric, color: colors.black, fontSize: 30, lineHeight: 32, fontWeight: font.heavy, letterSpacing: -1 },
+  levelUpBadgeLabel: { color: 'rgba(0,0,0,0.65)', fontSize: 8, fontWeight: font.black, letterSpacing: 1.4, marginTop: -1 },
+  levelUpEyebrow: { ...type.label, color: colors.lime },
+  levelUpTitle: { ...type.h2, color: colors.text, marginTop: 2 },
+  levelUpDetail: { ...type.bodySm, color: colors.textDim, marginTop: 2 },
+  levelUpRewards: { gap: 4, marginTop: spacing.sm },
+  levelUpReward: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  levelUpSwatch: { width: 12, height: 12, borderRadius: radius.pill, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' },
+  levelUpRewardText: { color: colors.text, fontSize: 13, fontWeight: font.semibold },
   goalBlock: { gap: spacing.sm },
   goalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   goalTitle: { ...type.label, color: colors.textDim },

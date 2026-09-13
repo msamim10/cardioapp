@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import type { BeatmapMove } from '@/lib/beatmaps';
 import type { CueGrade, CueScore } from '@/lib/cueScoring';
+import { DEFAULT_HUD_THEME, withAlpha, type HudTheme } from '@/lib/hudThemes';
 import {
   Move,
   PoseFeedback,
@@ -27,6 +28,8 @@ type Props = {
   playbackElapsed?: number;
   /** Playback duration seconds — required for progress scoring. */
   playbackDuration?: number;
+  /** Level-reward palette for skeleton / lane / cue / counters (default: Volt). */
+  hudTheme?: HudTheme;
   variant: 'companion' | 'pip' | 'setup';
 };
 
@@ -45,11 +48,6 @@ const CUE_ICON: Record<BeatmapMove, string> = {
 };
 
 const GRADE_LABEL: Record<CueGrade, string> = { perfect: 'PERFECT', good: 'GOOD', miss: 'MISS' };
-const GRADE_COLOR: Record<CueGrade, string> = {
-  perfect: colors.lime,
-  good: colors.cyan,
-  miss: colors.pink,
-};
 const GRADE_FLASH_MS = 700;
 
 const MOVES: Move[] = ['Jump', 'Duck', 'Left', 'Right'];
@@ -63,6 +61,7 @@ export function PoseOverlay({
   upcomingCue = null,
   playbackElapsed = 0,
   playbackDuration = 0,
+  hudTheme = DEFAULT_HUD_THEME,
   variant,
 }: Props) {
   const compact = variant === 'pip';
@@ -73,7 +72,9 @@ export function PoseOverlay({
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {frame ? <ResponsiveSkeleton feedback={feedback} frame={frame} compact={compact} /> : null}
+      {frame ? (
+        <ResponsiveSkeleton feedback={feedback} frame={frame} compact={compact} theme={hudTheme} />
+      ) : null}
 
       {mode === 'demo' ? (
         <View style={[styles.demoBanner, compact && styles.demoBannerCompact]}>
@@ -81,10 +82,12 @@ export function PoseOverlay({
         </View>
       ) : null}
 
-      {cueScore && !setup ? <GradeFlash cueScore={cueScore} compact={compact} /> : null}
+      {cueScore && !setup ? <GradeFlash cueScore={cueScore} compact={compact} theme={hudTheme} /> : null}
       {cueScore && upcomingCue && !setup && upcomingCue.inMs > 0 ? (
         <View style={[styles.upcoming, compact && styles.upcomingCompact]}>
-          <Text style={[styles.upcomingIcon, compact && styles.upcomingIconCompact]}>
+          <Text
+            style={[styles.upcomingIcon, compact && styles.upcomingIconCompact, { color: hudTheme.accent }]}
+          >
             {CUE_ICON[upcomingCue.move]}
           </Text>
           {!compact ? (
@@ -105,7 +108,7 @@ export function PoseOverlay({
               <View style={styles.countsInline}>
                 {MOVES.map((move) => (
                   <View key={move} style={styles.count}>
-                    <Text style={styles.countIcon}>{MOVE_ICON[move]}</Text>
+                    <Text style={[styles.countIcon, { color: hudTheme.accent }]}>{MOVE_ICON[move]}</Text>
                     <Text style={styles.countNumber}>{score.counts[move]}</Text>
                   </View>
                 ))}
@@ -119,7 +122,20 @@ export function PoseOverlay({
 }
 
 /** "PERFECT" / "GOOD" / "MISS" that pops on every judgement and fades out. */
-function GradeFlash({ cueScore, compact }: { cueScore: CueScore; compact: boolean }) {
+function GradeFlash({
+  cueScore,
+  compact,
+  theme,
+}: {
+  cueScore: CueScore;
+  compact: boolean;
+  theme: HudTheme;
+}) {
+  const gradeColor: Record<CueGrade, string> = {
+    perfect: theme.perfect,
+    good: theme.good,
+    miss: theme.miss,
+  };
   const opacity = useRef(new Animated.Value(0)).current;
   const [grade, setGrade] = useState<CueGrade | null>(null);
   const { judgements, lastGrade } = cueScore;
@@ -145,7 +161,7 @@ function GradeFlash({ cueScore, compact }: { cueScore: CueScore; compact: boolea
         style={[
           styles.gradeText,
           compact && styles.gradeTextCompact,
-          { color: GRADE_COLOR[grade] },
+          { color: gradeColor[grade] },
         ]}
       >
         {GRADE_LABEL[grade]}
@@ -167,12 +183,24 @@ function ResponsiveSkeleton({
   feedback,
   frame,
   compact,
+  theme,
 }: {
   feedback: PoseFeedback;
   frame: PoseFrame;
   compact: boolean;
+  theme: HudTheme;
 }) {
   const [size, setSize] = useState({ width: 0, height: 0 });
+  // Palette-driven tints: the StyleSheet below holds the default (Volt) values
+  // so the fallback path is unchanged; these override per theme.
+  const laneStyle = {
+    borderColor: withAlpha(theme.accent, compact ? 0.18 : 0.24),
+    backgroundColor: withAlpha(theme.accent, 0.035),
+  };
+  const floorStyle = { backgroundColor: withAlpha(theme.accent, 0.58) };
+  const targetStyle = { borderColor: withAlpha(theme.accent, 0.72) };
+  const boneStyle = { backgroundColor: theme.accent };
+  const jointStyle = { backgroundColor: theme.joint, borderColor: theme.accent };
   // Native pose coordinates describe the full portrait camera buffer. The
   // preview uses aspect-fill, so map through the same cover crop.
   if (!size.width || !size.height) {
@@ -227,6 +255,7 @@ function ResponsiveSkeleton({
             style={[
               styles.homeLane,
               compact && styles.homeLaneCompact,
+              laneStyle,
               { left: referenceX - laneWidth / 2, width: laneWidth },
             ]}
           />
@@ -242,6 +271,7 @@ function ResponsiveSkeleton({
               style={[
                 styles.homeFloor,
                 compact && styles.homeFloorCompact,
+                floorStyle,
                 {
                   left: referenceX - laneWidth * 0.72,
                   top: floorY,
@@ -254,10 +284,11 @@ function ResponsiveSkeleton({
             <View
               style={[
                 styles.homeTarget,
+                targetStyle,
                 { left: referenceX - 13, top: (floorY ?? size.height * 0.75) - 13 },
               ]}
             >
-              <View style={styles.homeTargetDot} />
+              <View style={[styles.homeTargetDot, boneStyle]} />
             </View>
           ) : null}
         </>
@@ -274,6 +305,7 @@ function ResponsiveSkeleton({
             style={[
               styles.bone,
               compact && styles.boneCompact,
+              boneStyle,
               {
                 width: length,
                 left: (a.x + b.x - length) / 2,
@@ -290,6 +322,7 @@ function ResponsiveSkeleton({
           style={[
             styles.joint,
             compact && styles.jointCompact,
+            jointStyle,
             { left: point.x - (compact ? 2 : 3.5), top: point.y - (compact ? 2 : 3.5) },
           ]}
         />
