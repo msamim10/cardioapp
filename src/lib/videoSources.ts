@@ -75,6 +75,22 @@ export function getVideoSource(
   return masterUrl(entry.slug, resolved);
 }
 
+/**
+ * Progressive MP4 of the game half used by the post-run composer (the HLS
+ * ladder cannot be composited): 720×576, ~1.2 Mbps H.264, fast-start, cut
+ * from the vertical source by `scripts/transcode-composite.sh` and uploaded
+ * by `scripts/upload-hls.sh` under `composite/<slug>/game-576.mp4`.
+ */
+export const COMPOSITE_PREFIX = 'composite';
+export const COMPOSITE_GAME_FILE = 'game-576.mp4';
+
+export function getCompositeGameSource(levelId: string | undefined): string | null {
+  if (!levelId) return null;
+  const entry = LEVEL_MEDIA[levelId];
+  if (!entry || !BASE_URL) return null;
+  return `${BASE_URL}/${COMPOSITE_PREFIX}/${entry.slug}/${COMPOSITE_GAME_FILE}`;
+}
+
 export function getPoster(levelId: string | undefined): string | null {
   if (!levelId) return null;
   return LEVEL_MEDIA[levelId]?.poster ?? null;
