@@ -29,6 +29,7 @@
     "expo-keep-awake": "~15.0.8",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.12",
+    "expo-media-library": "~18.2.1",
     "expo-notifications": "~0.32.17",
     "expo-router": "~6.0.23",
     "expo-sharing": "~14.0.8",
@@ -93,7 +94,8 @@
     "test:streaks": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-streaks.ts",
     "test:submit-validation": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-submit-validation.ts",
     "test:daily-key": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-daily-key.ts",
-    "test:preflight-flow": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-preflight-flow.ts"
+    "test:preflight-flow": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-preflight-flow.ts",
+    "test:recording-log": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-recording-log.ts"
   },
   "private": true
 }
