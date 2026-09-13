@@ -1,7 +1,9 @@
 # Pose pipeline: latency, clock, beatmaps, scoring, rewards
 
 Reference for the body-tracking → scoring → reward path. Code paths in
-parentheses.
+parentheses. The preflight calibration screen that precedes a run (framing
+coaching, move test drive, handoff, fallbacks) is documented separately in
+`docs/CALIBRATION_FLOW.md`.
 
 ## 1. Frame path and latency stamps
 
