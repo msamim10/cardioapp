@@ -9,7 +9,10 @@ coaching, move test drive, handoff, fallbacks) is documented separately in
 
 ```
 AVCaptureSession (front camera, portrait, mirrored)
-  → visionQueue: throttle to 10 fps, VNDetectHumanBodyPoseRequest, keypoints   (CardioSurfPoseModule.swift)
+  → captureQueue: [recording? append CMSampleBuffer to AVAssetWriter]           (CardioSurfPoseModule.swift)
+                  throttle to 10 fps, skip if an inference is in flight,
+                  retain the pixel buffer
+  → inferenceQueue: VNDetectHumanBodyPoseRequest, keypoints
   → main: onPose event
   → JS: WorkoutCameraPreview.onPose → staleness guard → normalizeNativeFrame
   → workout.tsx handlePoseFrame → PoseAnalyzer.process                          (poseTracking.ts)
@@ -25,7 +28,7 @@ skew the stamps).
 | Stamp          | Where                                            |
 | -------------- | ------------------------------------------------ |
 | `captureTs`    | `CMSampleBufferGetPresentationTimeStamp` → epoch |
-| `extractedTs`  | after Vision + keypoint extraction (visionQueue) |
+| `extractedTs`  | after Vision + keypoint extraction (inferenceQueue) |
 | `dispatchTs`   | on main, immediately before `onPose`             |
 | `receivedTs`   | JS, first line of the `onPose` handler           |
 | `classifiedTs` | JS, after `PoseAnalyzer.process` returns         |
@@ -49,6 +52,15 @@ event is sent through the analytics facade with `{metric}_p50_ms`,
 
 Frames from builds that predate the stamps have no `captureTs`; they are
 never dropped and produce no latency samples.
+
+The capture queue never blocks on Vision (it used to run Vision inline on
+`visionQueue`): the sample-buffer delegate only appends to the run recorder
+when "Record my run" is on and hands at most one frame every 100 ms to the
+serial `inferenceQueue`, skipping the hand-off while a previous inference is
+still running. The 10 Hz cadence, the stamp semantics and `timestamp` are
+unchanged; `inference` now also includes the hop onto `inferenceQueue`, which
+is why `pose_latency` is the regression gate for the recording work — see
+`docs/RUN_RECORDING.md` §2.
 
 ## 2. Staleness guard
 
