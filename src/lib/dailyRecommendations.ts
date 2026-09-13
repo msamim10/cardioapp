@@ -65,6 +65,63 @@ export function getDailyDiscovery(allModes: readonly Mode[], date: Date): DailyD
   };
 }
 
+// ---------------------------------------------------------------------------
+// Daily challenge
+// ---------------------------------------------------------------------------
+
+/** Salt so the challenge pick is independent of the featured/recommended rotation. */
+const DAILY_CHALLENGE_SALT = 'daily-challenge';
+
+export type DailyChallenge = {
+  mode: Mode;
+  /** Local `YYYY-MM-DD` the pick is valid for. */
+  dateKey: string;
+  /**
+   * True when no level has a published beatmap yet, so the pick came from the
+   * full roster: it is a "practice" challenge — same +25% XP, free scoring.
+   */
+  practice: boolean;
+};
+
+/**
+ * One designated video per local calendar date, identical for every user:
+ * `hash(dateKey + salt) mod eligible.length` over levels WITH a published
+ * beatmap (canonical `modes` order). While the registry ships empty — today's
+ * state — the pool falls back to every level and the challenge is flagged
+ * `practice`. `hasBeatmap` is injected so this module stays registry-free.
+ */
+export function getDailyChallenge(
+  allModes: readonly Mode[],
+  date: Date,
+  hasBeatmap: (levelId: string) => boolean
+): DailyChallenge | null {
+  const uniqueModes = Array.from(new Map(allModes.map((mode) => [mode.id, mode])).values());
+  if (uniqueModes.length === 0) return null;
+  const cued = uniqueModes.filter((mode) => hasBeatmap(mode.id));
+  const pool = cued.length > 0 ? cued : uniqueModes;
+  const dateKey = localDateKey(date);
+  const index = hashSeed(`${dateKey}:${DAILY_CHALLENGE_SALT}`) % pool.length;
+  return { mode: pool[index], dateKey, practice: cued.length === 0 };
+}
+
+/**
+ * The challenge is complete once ≥1 persisted run on that level falls on the
+ * challenge's local day. Derived from runs — nothing extra is persisted.
+ */
+export function isDailyChallengeCompleted(
+  runs: readonly { levelId?: unknown; at?: unknown }[],
+  challenge: DailyChallenge | null
+): boolean {
+  if (!challenge) return false;
+  return runs.some(
+    (run) =>
+      run.levelId === challenge.mode.id &&
+      typeof run.at === 'number' &&
+      Number.isFinite(run.at) &&
+      localDateKey(new Date(run.at)) === challenge.dateKey
+  );
+}
+
 /**
  * Stable discovery difficulty for calorie estimates / UI badges only.
  * Must never be passed as a campaign `classKey` — casual plays omit that.

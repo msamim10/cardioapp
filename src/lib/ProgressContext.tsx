@@ -11,7 +11,12 @@ import {
 } from 'react';
 import { logRunComplete } from '@/lib/analytics';
 import { useAuth } from '@/lib/AuthContext';
+import { hasBeatmap } from '@/lib/beatmapRegistry';
+import { getDailyChallenge, isDailyChallengeCompleted } from '@/lib/dailyRecommendations';
 import { readCloudProgress, syncCloudProgress } from '@/lib/firestoreSync';
+import { modes } from '@/lib/gameData';
+import { isHudThemeId } from '@/lib/hudThemes';
+import { clampLevel, legacyLevelFor, MIN_LEVEL, progressWithinLevel } from '@/lib/levels';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import {
   aggregateLifetime,
@@ -25,11 +30,10 @@ import {
   campaignClassKeyForCompletion,
   CLASS_ORDER,
   classForMover,
-  computeStreaks,
+  computeStreaksWithFreeze,
   ensureFullRosters,
   generateCohort,
   isClassKey,
-  levelFromXp,
   normalizeSimulatedCohort,
   rewardForRunPerformance,
   rollAllRosters,
@@ -38,6 +42,7 @@ import {
   type ClassKey,
   type CohortMember,
   type LevelProgress,
+  type StreakInfo,
 } from '@/lib/progression';
 import { INTENSITY_META, isIntensityKey, type IntensityKey } from '@/lib/playSetup';
 import {
@@ -110,9 +115,24 @@ type PersistedShape = {
   activeRun: ActiveRun | null;
   /** Claimed leaderboard handle (from the onboarding username step). */
   username: string | null;
+  /** Chosen HUD palette id (`hudThemes.ts`); null = default. Unlock is re-derived from level. */
+  hudTheme: string | null;
+  /**
+   * Level shown by the old flat 500-XP curve at the moment this install first
+   * ran the 1–50 curve. Displayed level = max(curve level, floor) so the switch
+   * never visibly demotes anyone. Computed once, then only ever raised.
+   */
+  legacyLevelFloor: number;
   /** Last local mutation to cloud-restorable state (activeRun is device-local). */
   stateUpdatedAt: number;
 };
+
+/** Total persisted XP — the single input to the level curve. */
+const totalXp = (runs: readonly RunRecord[]): number => runs.reduce((sum, r) => sum + r.xp, 0);
+
+/** Legacy floor from storage/cloud, or null when that writer predates the curve. */
+const readLegacyFloor = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? clampLevel(value) : null;
 
 type ProgressContextValue = {
   hydrated: boolean;
@@ -132,9 +152,16 @@ type ProgressContextValue = {
   totalObstacles: number;
   coins: number;
   xp: number;
+  /** Effective level (1–50, legacy floor applied) with in-level progress. */
   levelProgress: LevelProgress;
+  legacyLevelFloor: number;
+  /** Chosen HUD palette id (may be locked on this device — resolve via `resolveHudTheme`). */
+  hudThemeId: string | null;
+  setHudTheme: (id: string | null) => void;
   streak: number;
   longestStreak: number;
+  /** Freeze-aware streak detail (ran today, freeze used/available this week). */
+  streakInfo: StreakInfo;
 
   runsThisWeek: number;
   weeklyGoal: number;
@@ -190,6 +217,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   const [cohorts, setCohorts] = useState<ClassCohorts | null>(null);
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
   const [username, setUsernameState] = useState<string | null>(null);
+  const [hudTheme, setHudThemeState] = useState<string | null>(null);
+  const [legacyLevelFloor, setLegacyLevelFloor] = useState<number>(MIN_LEVEL);
   const [stateUpdatedAt, setStateUpdatedAt] = useState(0);
   const [syncStatus, setSyncStatus] = useState<ProgressContextValue['syncStatus']>('local');
 
@@ -204,6 +233,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     cohorts,
     activeRun,
     username,
+    hudTheme,
+    legacyLevelFloor,
     stateUpdatedAt,
   });
   stateRef.current = {
@@ -213,6 +244,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     cohorts,
     activeRun,
     username,
+    hudTheme,
+    legacyLevelFloor,
     stateUpdatedAt,
   };
 
@@ -230,6 +263,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       cohorts: stateRef.current.cohorts,
       activeRun: stateRef.current.activeRun,
       username: stateRef.current.username,
+      hudTheme: stateRef.current.hudTheme,
+      legacyLevelFloor: stateRef.current.legacyLevelFloor,
       stateUpdatedAt: stateRef.current.stateUpdatedAt,
       ...over,
     }),
@@ -303,6 +338,14 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
           : null;
       setActiveRun(nextActiveRun);
       setUsernameState(loaded.username ?? null);
+      const nextHudTheme = isHudThemeId(loaded.hudTheme) ? loaded.hudTheme : null;
+      setHudThemeState(nextHudTheme);
+      // Grandfather the level curve switch exactly once: storage written before
+      // the curve has no floor, so freeze the OLD formula's level for this XP.
+      // A fresh install has no runs → floor 1 (no effect).
+      const storedFloor = readLegacyFloor(loaded.legacyLevelFloor);
+      const nextFloor = storedFloor ?? legacyLevelFor(totalXp(nextRuns));
+      setLegacyLevelFloor(nextFloor);
       const nextStateUpdatedAt =
         typeof loaded.stateUpdatedAt === 'number' && Number.isFinite(loaded.stateUpdatedAt)
           ? loaded.stateUpdatedAt
@@ -315,6 +358,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         rostersChanged ||
         cohortsChanged ||
         runsChanged ||
+        storedFloor === null ||
+        loaded.hudTheme !== nextHudTheme ||
         loaded.activeRun !== nextActiveRun
       ) {
         persist({
@@ -324,6 +369,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
           cohorts: nextCohorts,
           activeRun: nextActiveRun,
           username: loaded.username ?? null,
+          hudTheme: nextHudTheme,
+          legacyLevelFloor: nextFloor,
           stateUpdatedAt: nextStateUpdatedAt,
         });
       }
@@ -356,6 +403,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
           rosters: current.rosters,
           cohorts: current.cohorts,
           username: current.username,
+          hudTheme: current.hudTheme,
+          legacyLevelFloor: current.legacyLevelFloor,
           stateUpdatedAt: current.stateUpdatedAt,
         };
         const cloudState =
@@ -376,18 +425,31 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
                     : null,
                 username:
                   typeof cloud.state.username === 'string' ? cloud.state.username : null,
+                hudTheme: isHudThemeId(cloud.state.hudTheme) ? cloud.state.hudTheme : null,
+                // Cloud state written before the curve carries no floor: those
+                // runs were earned under the flat formula, so grandfather them
+                // from the merged XP. Curve-era cloud state carries its floor.
+                legacyLevelFloor:
+                  readLegacyFloor(cloud.state.legacyLevelFloor) ?? legacyLevelFor(totalXp(mergedRuns)),
                 stateUpdatedAt: cloud.state.stateUpdatedAt,
               }
             : null;
         const selected = newerState(localState, cloudState);
 
         const selectedRosters = ensureFullRosters(selected.rosters);
-        const selectedState = { ...selected, rosters: selectedRosters };
+        // The floor only ever rises: take the higher of both devices' floors.
+        const selectedFloor = Math.max(
+          localState.legacyLevelFloor,
+          cloudState?.legacyLevelFloor ?? MIN_LEVEL
+        );
+        const selectedState = { ...selected, rosters: selectedRosters, legacyLevelFloor: selectedFloor };
         setRuns(mergedRuns);
         setActiveClassState(selected.activeClass);
         setRosters(selectedRosters);
         setCohorts(selected.cohorts);
         setUsernameState(selected.username);
+        setHudThemeState(selected.hudTheme);
+        setLegacyLevelFloor(selectedFloor);
         setStateUpdatedAt(selected.stateUpdatedAt);
         persist({
           runs: mergedRuns,
@@ -396,6 +458,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
           cohorts: selected.cohorts,
           activeRun: current.activeRun,
           username: selected.username,
+          hudTheme: selected.hudTheme,
+          legacyLevelFloor: selectedFloor,
           stateUpdatedAt: selected.stateUpdatedAt,
         });
         cloudReadyUid.current = user.id;
@@ -436,6 +500,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
             rosters: current.rosters,
             cohorts: current.cohorts,
             username: current.username,
+            hudTheme: current.hudTheme,
+            legacyLevelFloor: current.legacyLevelFloor,
             stateUpdatedAt: current.stateUpdatedAt,
           },
           acquisitionSource: answersRef.current.attribution,
@@ -450,7 +516,9 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   }, [
     activeClass,
     cohorts,
+    hudTheme,
     hydrated,
+    legacyLevelFloor,
     rosters,
     runs,
     stateUpdatedAt,
@@ -572,21 +640,31 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       // standing still now earns the 30% floor rather than the full base.
       const actionCounts = normalizeActionCounts(completion.actionCounts);
       const totalMoves = Object.values(actionCounts).reduce((sum, n) => sum + n, 0);
-      const hasBeatmap = completion.hasBeatmap === true;
+      const cuedRun = completion.hasBeatmap === true;
       const perfectCount = wholeCount(completion.perfectCount);
       const goodCount = wholeCount(completion.goodCount);
       const missCount = wholeCount(completion.missCount);
       const maxCombo = wholeCount(completion.maxCombo);
-      const accuracy = hasBeatmap
+      const accuracy = cuedRun
         ? Math.min(1, Math.max(0, Number.isFinite(completion.accuracy) ? completion.accuracy! : 0))
         : 0;
+      // Daily challenge: +25% XP on the run that first completes today's
+      // designated level (casual or campaign). Later same-day runs on it, and
+      // every other level, pay the plain performance-scaled reward.
+      const completedAt = Date.now();
+      const challenge = getDailyChallenge(modes, new Date(completedAt), hasBeatmap);
+      const isDailyChallengeRun =
+        challenge !== null &&
+        challenge.mode.id === pending.levelId &&
+        !isDailyChallengeCompleted(stateRef.current.runs, challenge);
       const reward = rewardForRunPerformance({
         durationMin,
         classKey: rewardClass,
         accuracy,
         maxCombo,
-        hasBeatmap,
+        hasBeatmap: cuedRun,
         movesPerMin: durationMin > 0 ? totalMoves / durationMin : 0,
+        dailyChallenge: isDailyChallengeRun,
       });
       const { coins, xp } = reward.total;
       const effort = pending.intensity ? INTENSITY_META[pending.intensity].effort : 1;
@@ -595,7 +673,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         runId: pending.runId,
         levelId: pending.levelId,
         durationMin,
-        at: Date.now(),
+        at: completedAt,
         coins,
         xp,
         calories,
@@ -614,6 +692,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
           base: reward.base,
           accuracyFactor: reward.accuracyFactor,
           comboFactor: reward.comboFactor,
+          xpBonusFactor: reward.xpBonusFactor,
         },
       };
 
@@ -642,7 +721,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         perfect: record.perfectCount,
         good: record.goodCount,
         miss: record.missCount,
-        hasBeatmap,
+        hasBeatmap: cuedRun,
         coins: record.coins,
         xp: record.xp,
         latencyP50Ms: completion.latencyP50Ms,
@@ -664,6 +743,17 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     [persist, snapshot]
   );
 
+  const setHudTheme = useCallback<ProgressContextValue['setHudTheme']>(
+    (id) => {
+      const next = isHudThemeId(id) ? id : null;
+      const updatedAt = Date.now();
+      setHudThemeState(next);
+      setStateUpdatedAt(updatedAt);
+      persist(snapshot({ hudTheme: next, stateUpdatedAt: updatedAt }));
+    },
+    [persist, snapshot]
+  );
+
   const resetProgress = useCallback(async () => {
     const freshRosters = rollAllRosters();
     const freshCohorts: ClassCohorts = {
@@ -677,6 +767,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     setRosters(freshRosters);
     setCohorts(freshCohorts);
     setUsernameState(null);
+    setHudThemeState(null);
+    setLegacyLevelFloor(MIN_LEVEL);
     setStateUpdatedAt(0);
     setSyncStatus('local');
     seededRef.current = false;
@@ -700,9 +792,9 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     const totalMinutes = lifetime.minutes;
     const totalCalories = lifetime.calories;
     const coins = runs.reduce((sum, r) => sum + r.coins, 0);
-    const xp = runs.reduce((sum, r) => sum + r.xp, 0);
-    const levelProgress = levelFromXp(xp);
-    const { current, longest } = computeStreaks(runs.map((r) => r.at));
+    const xp = totalXp(runs);
+    const levelProgress = progressWithinLevel(xp, legacyLevelFloor);
+    const streakInfo = computeStreaksWithFreeze(runs.map((r) => r.at));
 
     const weekStart = startOfWeek();
     const runsThisWeek = runs.filter((r) => r.at >= weekStart).length;
@@ -712,6 +804,9 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     const safeRosters: ClassRosters = rosters ?? { beginner: [], intermediate: [], hard: [] };
     const safeCohorts: ClassCohorts = cohorts ?? { beginner: [], intermediate: [], hard: [] };
 
+    // Campaign gates read the EFFECTIVE level (floor applied) and the live
+    // beatmap registry — levels without a beatmap auto-pass the skill gate.
+    const gate = { playerLevel: levelProgress.level, hasBeatmap };
     const classDataMap = {} as Record<ClassKey, ClassData>;
     for (const key of CLASS_ORDER) {
       classDataMap[key] = buildClassData(
@@ -719,7 +814,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         safeRosters[key],
         safeCohorts[key],
         runs,
-        leaderboardName
+        leaderboardName,
+        gate
       );
     }
 
@@ -734,14 +830,15 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       coins,
       xp,
       levelProgress,
-      streak: current,
-      longestStreak: longest,
+      streak: streakInfo.current,
+      longestStreak: streakInfo.longest,
+      streakInfo,
       runsThisWeek,
       completedLevelIds,
       classDataMap,
       bestRank,
     };
-  }, [runs, rosters, cohorts, leaderboardName]);
+  }, [runs, rosters, cohorts, leaderboardName, legacyLevelFloor]);
 
   const weeklyGoal = answers.daysPerWeek ?? DEFAULT_WEEKLY_GOAL;
 
@@ -777,8 +874,12 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       coins: derived.coins,
       xp: derived.xp,
       levelProgress: derived.levelProgress,
+      legacyLevelFloor,
+      hudThemeId: hudTheme,
+      setHudTheme,
       streak: derived.streak,
       longestStreak: derived.longestStreak,
+      streakInfo: derived.streakInfo,
       runsThisWeek: derived.runsThisWeek,
       weeklyGoal,
       completedLevelIds: derived.completedLevelIds,
@@ -803,6 +904,9 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       syncStatus,
       username,
       setUsername,
+      legacyLevelFloor,
+      hudTheme,
+      setHudTheme,
       derived,
       weeklyGoal,
       isLevelCompleted,

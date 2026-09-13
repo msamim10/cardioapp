@@ -40,6 +40,8 @@ export type RunRewardBreakdown = {
   base: { coins: number; xp: number };
   accuracyFactor: number;
   comboFactor: number;
+  /** 1.25 when the run completed the daily challenge (XP only); 1 otherwise / legacy. */
+  xpBonusFactor: number;
 };
 
 function finiteNonNegative(value: unknown): number {
@@ -64,6 +66,7 @@ function normalizeRewardBreakdown(
     },
     accuracyFactor: Math.max(0, finiteOr(source?.accuracyFactor, 1)),
     comboFactor: Math.max(0, finiteOr(source?.comboFactor, 1)),
+    xpBonusFactor: Math.max(1, finiteOr(source?.xpBonusFactor, 1)),
   };
 }
 

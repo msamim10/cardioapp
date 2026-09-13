@@ -16,6 +16,13 @@ export type CloudProgressState = {
   rosters: unknown;
   cohorts: unknown;
   username: string | null;
+  /** Chosen HUD palette id; absent on documents written before HUD themes existed. */
+  hudTheme?: unknown;
+  /**
+   * Grandfathered level floor for the 1–50 curve switch; absent on documents
+   * written before the curve (the reader then derives it from the merged XP).
+   */
+  legacyLevelFloor?: unknown;
   stateUpdatedAt: number;
 };
 
