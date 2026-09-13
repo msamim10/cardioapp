@@ -160,6 +160,17 @@ public final class CardioSurfPoseView: ExpoView, AVCaptureVideoDataOutputSampleB
     lastProcessedTime = now
     guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
+    // Latency stamps. The sample buffer's presentation timestamp is on the host
+    // clock (mach_absolute_time), the same domain as CACurrentMediaTime(). One
+    // offset per frame maps every stamp into the epoch-ms domain JS `Date.now()`
+    // uses. The offset is recomputed per frame rather than cached: it costs two
+    // clock reads, and caching would let the stamps drift from Date.now() after
+    // any wall-clock adjustment (NTP step, time-zone-independent) mid-run.
+    let epochOffsetMs = Date().timeIntervalSince1970 * 1000 - now * 1000
+    let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+    let captureMediaTime = pts.isValid && !pts.isIndefinite ? CMTimeGetSeconds(pts) : now
+    let captureTs = captureMediaTime * 1000 + epochOffsetMs
+
     do {
       // The output connection already rotates and mirrors the pixel buffer.
       // Vision therefore receives an upright image with the same horizontal
@@ -188,10 +199,21 @@ public final class CardioSurfPoseView: ExpoView, AVCaptureVideoDataOutputSampleB
 
       let width = CVPixelBufferGetWidth(pixelBuffer)
       let height = CVPixelBufferGetHeight(pixelBuffer)
+      // After Vision inference + keypoint extraction, still on visionQueue.
+      let extractedTs = CACurrentMediaTime() * 1000 + epochOffsetMs
       DispatchQueue.main.async { [weak self] in
+        // Immediately before the event crosses to JS, on main.
+        let dispatchTs = CACurrentMediaTime() * 1000 + epochOffsetMs
         self?.onPose([
           "keypoints": points,
-          "timestamp": Date().timeIntervalSince1970 * 1000,
+          // `timestamp` keeps its historical meaning — epoch ms at dispatch on
+          // main (previously `Date()` read here). The analyzer's cooldown,
+          // frame-gap and velocity math run on this field, so it is deliberately
+          // NOT moved to captureTs; use the dedicated stamps for latency.
+          "timestamp": dispatchTs,
+          "captureTs": captureTs,
+          "extractedTs": extractedTs,
+          "dispatchTs": dispatchTs,
           "sourceWidth": width,
           "sourceHeight": height,
         ])

@@ -14,7 +14,15 @@ export type NativePosePoint = {
 
 export type NativePoseFrame = {
   keypoints: NativePosePoint[];
+  /** Epoch ms at dispatch on the main thread (historical field). */
   timestamp: number;
+  /**
+   * Latency stamps, all epoch ms in the `Date.now()` domain. Optional because
+   * app builds that predate them (≤ build 19) do not emit them.
+   */
+  captureTs?: number;
+  extractedTs?: number;
+  dispatchTs?: number;
   sourceWidth: number;
   sourceHeight: number;
 };

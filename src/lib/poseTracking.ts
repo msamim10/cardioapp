@@ -29,9 +29,18 @@ export type PoseKeypoint = {
 export type PoseFrame = {
   keypoints: PoseKeypoint[];
   origin: 'native' | 'demo';
+  /** Epoch ms when the native side dispatched the frame (drives analyzer timing). */
   timestamp: number;
   sourceWidth: number;
   sourceHeight: number;
+  /** Camera presentation time, epoch ms (see poseLatency.ts). Absent on old builds. */
+  captureTs?: number;
+  /** After Vision + keypoint extraction, epoch ms. */
+  extractedTs?: number;
+  /** Immediately before the native → JS event, epoch ms. */
+  dispatchTs?: number;
+  /** `Date.now()` when JS received the event. */
+  receivedTs?: number;
 };
 
 export type PoseTrackingMode = 'real' | 'demo' | 'unavailable';

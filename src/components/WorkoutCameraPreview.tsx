@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { PoseOverlay } from '@/components/PoseOverlay';
+import { frameAgeMs, STALE_FRAME_MS } from '@/lib/poseLatency';
 import {
   POSE_JOINTS,
   PoseFeedback,
@@ -27,6 +28,11 @@ type WorkoutCameraPreviewProps = {
   active: boolean;
   onUnavailable?: () => void;
   onPoseFrame: (frame: PoseFrame) => void;
+  /**
+   * A native frame arrived more than STALE_FRAME_MS after its camera capture
+   * and was dropped before reaching `onPoseFrame` (see poseLatency.ts).
+   */
+  onStaleFrame?: (ageMs: number) => void;
   onTrackingStatus?: (status: 'searching') => void;
   permission: { granted: boolean } | null;
   poseFrame: PoseFrame | null;
@@ -45,6 +51,7 @@ export function WorkoutCameraPreview({
   active,
   onUnavailable,
   onPoseFrame,
+  onStaleFrame,
   onTrackingStatus,
   permission,
   poseFrame,
@@ -130,9 +137,19 @@ export function WorkoutCameraPreview({
         <NativePoseCamera
           active={cameraActive}
           onPose={({ nativeEvent }) => {
-            const frame = normalizeNativeFrame(nativeEvent);
-            if (frame) onPoseFrame(frame);
+            // Stamp receipt first so the bridge delta excludes our own work.
+            const receivedTs = Date.now();
             setReady(true);
+            // Staleness guard: the earliest point in JS that has the frame. A
+            // frame this old describes a pose the player has already left, so
+            // it must not reach the analyzer or trigger a render.
+            const ageMs = frameAgeMs(nativeEvent, receivedTs);
+            if (ageMs > STALE_FRAME_MS) {
+              onStaleFrame?.(ageMs);
+              return;
+            }
+            const frame = normalizeNativeFrame(nativeEvent, receivedTs);
+            if (frame) onPoseFrame(frame);
           }}
           onStatus={({ nativeEvent }) => {
             if (nativeEvent.status === 'unavailable' || nativeEvent.status === 'error') {
@@ -199,7 +216,7 @@ export function WorkoutCameraPreview({
   );
 }
 
-function normalizeNativeFrame(frame: NativePoseFrame): PoseFrame | null {
+function normalizeNativeFrame(frame: NativePoseFrame, receivedTs: number): PoseFrame | null {
   const joints = new Set<string>(POSE_JOINTS);
   const keypoints = frame.keypoints
     .filter((point) => joints.has(point.name))
@@ -208,7 +225,7 @@ function normalizeNativeFrame(frame: NativePoseFrame): PoseFrame | null {
       name: point.name as (typeof POSE_JOINTS)[number],
     }));
   if (!keypoints.length) return null;
-  return { ...frame, keypoints, origin: 'native' };
+  return { ...frame, keypoints, origin: 'native', receivedTs };
 }
 
 function cameraErrorDetail(message: string): string {

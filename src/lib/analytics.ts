@@ -53,6 +53,7 @@ import {
   recordReportedConversionValue,
   type CalibrationFailureReason,
 } from './funnelStore';
+import { LATENCY_METRICS, type LatencySummary } from './poseLatency';
 import { collectPurchasesDeviceIdentifiers } from './purchasesDeviceIdentifiers';
 import {
   initSingular,
@@ -81,6 +82,8 @@ export const EVENTS = {
   // Their non-revenue stand-ins, sent instead when RevenueCat owns revenue.
   clientTrialStarted: 'client_trial_started',
   clientSubscribe: 'client_subscribe',
+  // One per run: pose pipeline latency percentiles (see poseLatency.ts).
+  poseLatency: 'pose_latency',
 } as const;
 
 let initialized = false;
@@ -222,15 +225,65 @@ export function logCalibrationFailure(reason: CalibrationFailureReason): void {
  * `two_plus_runs` — the two highest pre-purchase rungs of the ladder, since the
  * trial-gated paywall means every run already happened inside a trial.
  */
-export function logRunComplete(attrs: { durationMin: number; score: number }): void {
+export function logRunComplete(attrs: {
+  durationMin: number;
+  score: number;
+  /** Cue-scoring performance (items below are 0 / false for free-scoring runs). */
+  accuracy?: number;
+  maxCombo?: number;
+  perfect?: number;
+  good?: number;
+  miss?: number;
+  hasBeatmap?: boolean;
+  coins?: number;
+  xp?: number;
+  /** End-to-end pose latency for the run, when the native build emitted stamps. */
+  latencyP50Ms?: number;
+  latencyP95Ms?: number;
+  staleFramesDropped?: number;
+}): void {
   safely('logRunComplete', async () => {
     singularEvent(EVENTS.runComplete, {
       duration_min: roundTo(attrs?.durationMin, 2),
       score: Math.round(finiteOr(attrs?.score, 0)),
+      accuracy: roundTo(attrs?.accuracy ?? 0, 3),
+      max_combo: Math.round(finiteOr(attrs?.maxCombo ?? 0, 0)),
+      perfect: Math.round(finiteOr(attrs?.perfect ?? 0, 0)),
+      good: Math.round(finiteOr(attrs?.good ?? 0, 0)),
+      miss: Math.round(finiteOr(attrs?.miss ?? 0, 0)),
+      has_beatmap: attrs?.hasBeatmap ? 1 : 0,
+      coins: Math.round(finiteOr(attrs?.coins ?? 0, 0)),
+      xp: Math.round(finiteOr(attrs?.xp ?? 0, 0)),
+      latency_p50_ms: Math.round(finiteOr(attrs?.latencyP50Ms ?? 0, 0)),
+      latency_p95_ms: Math.round(finiteOr(attrs?.latencyP95Ms ?? 0, 0)),
+      stale_frames_dropped: Math.round(finiteOr(attrs?.staleFramesDropped ?? 0, 0)),
     });
     const count = await markRunComplete();
     if (count === 1) singularEvent(EVENTS.firstRunComplete);
     await bumpConversionValueForRunCount(count);
+  });
+}
+
+/**
+ * One event per run with the pose pipeline's latency percentiles (ints, ms)
+ * for each stage plus the frame and stale-drop counts. Never per frame. Skipped
+ * when no stamped frames were seen (simulator, tracking off, old native build)
+ * so the event only ever carries real measurements.
+ */
+export function logPoseLatency(summary: LatencySummary): void {
+  safely('logPoseLatency', () => {
+    if (!summary || summary.frames <= 0) return;
+    const args: Record<string, number> = {
+      frames: Math.round(finiteOr(summary.frames, 0)),
+      stale_frames_dropped: Math.round(finiteOr(summary.staleFramesDropped, 0)),
+    };
+    for (const metric of LATENCY_METRICS) {
+      const stats = summary.metrics[metric];
+      args[`${metric}_p50_ms`] = Math.round(finiteOr(stats?.p50, 0));
+      args[`${metric}_p95_ms`] = Math.round(finiteOr(stats?.p95, 0));
+      args[`${metric}_max_ms`] = Math.round(finiteOr(stats?.max, 0));
+    }
+    singularEvent(EVENTS.poseLatency, args);
   });
 }
 
