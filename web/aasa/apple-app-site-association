@@ -1,0 +1,16 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID_TODO.com.cardiosurf.app"],
+        "components": [
+          { "/": "/l/*", "comment": "Beat-my-score challenge links: /l/{levelId}?c={runId}" },
+          { "/": "/level/*", "comment": "Direct level links" }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": ["TEAMID_TODO.com.cardiosurf.app"]
+  }
+}

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beat my score · CardioSurf</title>
+    <meta name="description" content="A CardioSurf runner posted a score on this level. Open the app and beat it." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="CardioSurf" />
+    <meta property="og:title" content="Can you beat it? · CardioSurf" />
+    <meta property="og:description" content="Run this level in CardioSurf and beat the score." />
+    <meta property="og:image" content="https://cardiosurf.com/og/beat-my-score.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="apple-itunes-app" content="app-id=6794463238" />
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+        background: #08090a; color: #f7f8f8;
+        font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      main { width: min(440px, 92vw); padding: 32px 24px; border-radius: 18px; background: #141618; border: 1px solid rgba(255,255,255,.09); text-align: center; }
+      .mark { font-weight: 900; letter-spacing: .18em; font-size: 13px; color: #fff; }
+      h1 { font-size: 30px; letter-spacing: -.9px; margin: 18px 0 6px; }
+      p { color: #9ba1a6; margin: 0 0 22px; }
+      .btn { display: block; padding: 16px; border-radius: 12px; font-weight: 900; letter-spacing: .06em; text-decoration: none; text-transform: uppercase; }
+      .primary { background: #d7ff3e; color: #000; }
+      .ghost { margin-top: 10px; color: #d7ff3e; }
+      .meta { margin-top: 18px; font-size: 12px; color: #828a8e; }
+      code { color: #d7ff3e; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark">CARDIOSURF</div>
+      <h1>Can you beat it?</h1>
+      <p id="detail">A runner posted a score on this level. Open CardioSurf to see it and take your shot.</p>
+      <a id="open" class="btn primary" href="#">Open in CardioSurf</a>
+      <a class="btn ghost" href="https://apps.apple.com/app/id6794463238">Get the app on the App Store</a>
+      <div class="meta" id="meta"></div>
+    </main>
+    <script>
+      // /l/{levelId}?c={runId} → cardiosurf://level/{levelId}?challenge={runId}
+      (function () {
+        var parts = location.pathname.split('/').filter(Boolean);
+        var levelId = parts.length >= 2 && parts[0] === 'l' ? decodeURIComponent(parts[1]) : null;
+        var runId = new URLSearchParams(location.search).get('c');
+        if (!levelId) return;
+        var deep = 'cardiosurf://level/' + encodeURIComponent(levelId) + (runId ? '?challenge=' + encodeURIComponent(runId) : '');
+        var open = document.getElementById('open');
+        open.href = deep;
+        document.getElementById('meta').textContent = 'Level: ' + levelId;
+        // Installed app with Universal Links opens directly; this is the
+        // fallback for browsers that landed here anyway.
+        setTimeout(function () { location.href = deep; }, 400);
+      })();
+    </script>
+  </body>
+</html>

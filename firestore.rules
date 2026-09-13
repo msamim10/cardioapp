@@ -2,11 +2,30 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // --- Private per-user progress (unchanged) ---------------------------
     match /users/{uid} {
-      allow read, create, update, delete: if request.auth != null && request.auth.uid == uid;
+      allow read, create, update, delete: if isOwner(uid);
+
+      // Following list: owner writes, any signed-in user may read (the
+      // Friends tab of another user's board, follower counts later).
+      match /following/{targetUid} {
+        allow read: if signedIn();
+        allow create, update: if isOwner(uid)
+          && targetUid != uid
+          && request.resource.data.keys().hasOnly(['uid', 'at'])
+          && request.resource.data.uid == targetUid;
+        allow delete: if isOwner(uid);
+      }
 
       match /{document=**} {
-        allow read, create, update, delete: if request.auth != null && request.auth.uid == uid;
+        allow read, create, update, delete: if isOwner(uid);
       }
     }
 
@@ -20,6 +39,62 @@ service cloud.firestore {
         && request.resource.data.message.size() > 0
         && request.resource.data.message.size() <= 4000;
       allow read, update, delete: if false;
+    }
+
+    // --- Public profile ------------------------------------------------------
+    // Anyone signed in can read. The owner writes presentation fields only;
+    // `username` is written exclusively by the reserveUsername Function so the
+    // usernames/ registry stays authoritative.
+    match /profiles/{uid} {
+      allow read: if signedIn();
+      allow create: if isOwner(uid)
+        && !('username' in request.resource.data)
+        && request.resource.data.keys().hasOnly(['photoURL', 'level', 'badges', 'hudTheme', 'updatedAt']);
+      allow update: if isOwner(uid)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['username'])
+        && request.resource.data.keys().hasOnly(['username', 'photoURL', 'level', 'badges', 'hudTheme', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // --- Leaderboards + beat-my-score (Functions write, clients read) ---------
+    match /leaderboards/{levelId} {
+      allow read: if signedIn();
+      allow write: if false;
+      match /entries/{uid} {
+        allow read: if signedIn();
+        allow write: if false;
+      }
+    }
+    match /dailyLeaderboards/{dateKey} {
+      allow read: if signedIn();
+      allow write: if false;
+      match /entries/{uid} {
+        allow read: if signedIn();
+        allow write: if false;
+      }
+    }
+    match /challenges/{runId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /beatmaps/{levelId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /usernames/{handle} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Server-only bookkeeping: nonces, audit trail, rate limits.
+    match /runNonces/{nonce} {
+      allow read, write: if false;
+    }
+    match /submissions/{runId} {
+      allow read, write: if false;
+    }
+    match /rateLimits/{uid} {
+      allow read, write: if false;
     }
 
     match /{document=**} {
