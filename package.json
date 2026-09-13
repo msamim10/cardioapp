@@ -87,7 +87,8 @@
     "test:run-clock": "node --experimental-strip-types scripts/replay-run-clock.ts",
     "test:cue-scoring": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-cue-scoring.ts",
     "test:levels": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-levels.ts",
-    "test:streaks": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-streaks.ts"
+    "test:streaks": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-streaks.ts",
+    "test:preflight-flow": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-preflight-flow.ts"
   },
   "private": true
 }
