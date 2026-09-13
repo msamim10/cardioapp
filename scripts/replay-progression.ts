@@ -334,7 +334,7 @@ assert.equal(parseOptionalClassKeyParam(['nope']), null);
 
   // Legacy run records normalize to factors of 1 with base = stored totals.
   const legacy = normalizeRunRecord({ levelId: mapA, durationMin: 10, at: 1, coins: 200, xp: 400, calories: 90 }, 0)!;
-  assert.deepEqual(legacy.rewardBreakdown, { base: { coins: 200, xp: 400 }, accuracyFactor: 1, comboFactor: 1 });
+  assert.deepEqual(legacy.rewardBreakdown, { base: { coins: 200, xp: 400 }, accuracyFactor: 1, comboFactor: 1, xpBonusFactor: 1 });
   assert.equal(legacy.perfectCount, 0);
   assert.equal(legacy.maxCombo, 0);
   assert.equal(legacy.accuracy, 0);
@@ -346,7 +346,8 @@ assert.equal(parseOptionalClassKeyParam(['nope']), null);
     },
     0,
   )!;
-  assert.deepEqual(modern.rewardBreakdown, { base: { coins: 200, xp: 400 }, accuracyFactor: 0.65, comboFactor: 1.1 });
+  // Pre-daily-challenge breakdowns (no xpBonusFactor) default to a neutral 1.
+  assert.deepEqual(modern.rewardBreakdown, { base: { coins: 200, xp: 400 }, accuracyFactor: 0.65, comboFactor: 1.1, xpBonusFactor: 1 });
   assert.equal(modern.perfectCount, 7);
   assert.equal(modern.accuracy, 0.5);
   assert.equal(normalizeRunRecord({ levelId: mapA, accuracy: 3 }, 0)!.accuracy, 1, 'accuracy clamps to 1');

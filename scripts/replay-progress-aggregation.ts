@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 // @ts-expect-error -- Node type-stripping requires the source extension.
-import { aggregateLifetime, aggregateWeeklyActivity, calendarWeekStart, countActions, levelFromXp, normalizeActionCounts } from '../src/lib/progressAggregation.ts';
+import { aggregateLifetime, aggregateWeeklyActivity, calendarWeekStart, countActions, levelFromXp, progressWithinLevel, normalizeActionCounts } from '../src/lib/progressAggregation.ts';
 
 const local = (year: number, month: number, day: number, hour = 12) =>
   new Date(year, month - 1, day, hour).getTime();
@@ -70,21 +70,25 @@ assert.deepEqual(normalizeActionCounts({ Jump: 2, Duck: -2, Left: NaN, Right: 1.
 });
 assert.equal(countActions({ Jump: 1, Duck: 2, Left: 3, Right: 4 }), 10);
 
-assert.deepEqual(levelFromXp(0), {
+// Level curve is T(L) = 300 × (L − 1)^1.5 (see levels.ts / test:levels for the
+// full table); here we only pin the re-export contract this module exposes.
+assert.equal(levelFromXp(0), 1);
+assert.equal(levelFromXp(299), 1);
+assert.equal(levelFromXp(300), 2);
+assert.equal(levelFromXp(-10), 1);
+assert.deepEqual(progressWithinLevel(0), {
   level: 1,
-  intoLevel: 0,
-  span: 500,
-  toNext: 500,
-  progress: 0,
+  current: 0,
+  needed: 300,
+  fraction: 0,
+  toNext: 300,
+  isMax: false,
 });
-assert.deepEqual(levelFromXp(600), {
-  level: 2,
-  intoLevel: 100,
-  span: 500,
-  toNext: 400,
-  progress: 0.2,
-});
-assert.equal(levelFromXp(-10).level, 1);
+const l2 = progressWithinLevel(600);
+assert.equal(l2.level, 2);
+assert.equal(l2.current, 300);
+assert.equal(l2.toNext, l2.needed - 300);
+assert.equal(l2.isMax, false);
 
 console.log(
   'Progress replay passed: week windows, zero baseline, decrease, boundaries, legacy totals, levels, action counts',

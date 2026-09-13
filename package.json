@@ -76,7 +76,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "test:pose": "node --experimental-strip-types scripts/replay-pose-tracking.ts",
-    "test:progress": "node --experimental-strip-types scripts/replay-progress-aggregation.ts",
+    "test:progress": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-progress-aggregation.ts",
     "test:progression": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-progression.ts",
     "test:review": "node --experimental-strip-types scripts/replay-review-eligibility.ts",
     "test:auth-sync": "node --experimental-strip-types scripts/replay-auth-sync.ts",
@@ -85,7 +85,9 @@
     "test:notifications": "node --experimental-strip-types scripts/replay-notification-schedule.ts",
     "test:pose-latency": "node --experimental-strip-types scripts/replay-pose-latency.ts",
     "test:run-clock": "node --experimental-strip-types scripts/replay-run-clock.ts",
-    "test:cue-scoring": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-cue-scoring.ts"
+    "test:cue-scoring": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-cue-scoring.ts",
+    "test:levels": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-levels.ts",
+    "test:streaks": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-streaks.ts"
   },
   "private": true
 }
