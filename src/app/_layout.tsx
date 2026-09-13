@@ -62,7 +62,7 @@ const CHECKPOINT_ROUTES: Record<OnboardingCheckpoint, Href> = {
 function RootNavigator() {
   const { hydrated: onboardingHydrated, completed, answers, checkpoint } = useOnboarding();
   const { hydrated: authHydrated, user } = useAuth();
-  const { hydrated: progressHydrated, streak } = useProgress();
+  const { hydrated: progressHydrated, streak, streakInfo } = useProgress();
   const segments = useSegments();
   const router = useRouter();
 
@@ -103,11 +103,14 @@ function RootNavigator() {
   }, [checkpoint, destination, inOnboarding, inOnboardingFlow, onCreateAccount, router]);
 
   // Reschedule local reminders on cold start (and whenever the opt-in, weekly
-  // goal, or streak changes) so recurring notifications reflect the latest
-  // schedule and streak copy. Cheap: cancel + reschedule only on those changes,
-  // and a hard no-op on web / older builds without the native module.
+  // goal, streak, today's-run state, or freeze availability changes) so
+  // recurring notifications reflect the latest schedule and streak copy. Cheap:
+  // cancel + reschedule only on those changes, and a hard no-op on web / older
+  // builds without the native module. Local notifications only — no push.
   const remindersOn = answers.reminders;
   const daysPerWeek = answers.daysPerWeek;
+  const ranToday = streakInfo.ranToday;
+  const freezeAvailable = streakInfo.freezeAvailable;
   useEffect(() => {
     if (!hydrated) return;
     initNotificationHandler();
@@ -123,12 +126,18 @@ function RootNavigator() {
         await cancelAllReminders();
         return;
       }
-      await scheduleWeeklyReminders({ daysPerWeek, streak, enabled: true });
+      await scheduleWeeklyReminders({
+        daysPerWeek,
+        streak,
+        ranToday,
+        freezeAvailable,
+        enabled: true,
+      });
     })();
     return () => {
       cancelled = true;
     };
-  }, [hydrated, remindersOn, daysPerWeek, streak]);
+  }, [hydrated, remindersOn, daysPerWeek, streak, ranToday, freezeAvailable]);
 
   // The themed loading state covers the stack while a redirect settles, so
   // neither the welcome screen nor the tabs flash for the wrong completion

@@ -1,6 +1,11 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { Platform } from 'react-native';
-import { buildReminderPlan, REMINDER_SOURCE } from '@/lib/notificationSchedule';
+import {
+  buildReminderPlan,
+  ONE_DAY_SECONDS,
+  REMINDER_SOURCE,
+  secondsUntilTomorrowSlot,
+} from '@/lib/notificationSchedule';
 import type * as Notifications from 'expo-notifications';
 
 /**
@@ -125,12 +130,16 @@ export async function cancelAllReminders(): Promise<void> {
 export async function scheduleWeeklyReminders({
   daysPerWeek,
   streak,
+  ranToday = false,
+  freezeAvailable = false,
   enabled,
 }: {
   daysPerWeek: number | null | undefined;
   streak: number;
-  /** Optional: timestamp of the most recent run. Reserved for future tuning. */
-  lastRunAt?: number | null;
+  /** Today already has a completed run → skip tonight's streak nudge. */
+  ranToday?: boolean;
+  /** This week's streak freeze is unspent → the nudge copy says so. */
+  freezeAvailable?: boolean;
   enabled: boolean;
 }): Promise<'scheduled' | 'cancelled' | 'unavailable'> {
   const mod = getNotificationsModule();
@@ -146,7 +155,7 @@ export async function scheduleWeeklyReminders({
     if (!permission.granted) return 'cancelled';
 
     const { SchedulableTriggerInputTypes } = mod;
-    const plan = buildReminderPlan({ daysPerWeek, streak });
+    const plan = buildReminderPlan({ daysPerWeek, streak, ranToday, freezeAvailable });
 
     await Promise.all(
       plan.weekly.map((slot) =>
@@ -166,18 +175,43 @@ export async function scheduleWeeklyReminders({
       )
     );
 
+    // With a run already logged today, a DAILY trigger would still fire tonight.
+    // Use one-shot triggers for tomorrow (and the day after) instead; the plan
+    // is rebuilt on every launch and streak change, so it snaps back to DAILY.
     await mod.scheduleNotificationAsync({
       content: {
         title: plan.streak.title,
         body: plan.streak.body,
         data: { source: REMINDER_SOURCE, kind: 'streak' } satisfies ReminderData,
       },
-      trigger: {
-        type: SchedulableTriggerInputTypes.DAILY,
-        hour: plan.streak.hour,
-        minute: plan.streak.minute,
-      },
+      trigger: plan.streak.startsTomorrow
+        ? {
+            type: SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds: secondsUntilTomorrowSlot(plan.streak),
+            repeats: false,
+          }
+        : {
+            type: SchedulableTriggerInputTypes.DAILY,
+            hour: plan.streak.hour,
+            minute: plan.streak.minute,
+          },
     });
+    if (plan.streak.startsTomorrow) {
+      // Resume the daily cadence from the day after tomorrow as well, in case
+      // the app is not opened again before then.
+      await mod.scheduleNotificationAsync({
+        content: {
+          title: plan.streak.title,
+          body: plan.streak.body,
+          data: { source: REMINDER_SOURCE, kind: 'streak' } satisfies ReminderData,
+        },
+        trigger: {
+          type: SchedulableTriggerInputTypes.TIME_INTERVAL,
+          seconds: secondsUntilTomorrowSlot(plan.streak) + ONE_DAY_SECONDS,
+          repeats: false,
+        },
+      });
+    }
 
     return 'scheduled';
   } catch {

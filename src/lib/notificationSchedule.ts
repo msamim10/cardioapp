@@ -37,6 +37,14 @@ export type StreakReminderSlot = {
   minute: number;
   title: string;
   body: string;
+  /**
+   * Today already has a run, so tonight's nudge is pointless: the first
+   * delivery must be tomorrow. `notifications.ts` then schedules one-shot
+   * triggers for tomorrow's and the day after's slot instead of a DAILY
+   * trigger (a streak cannot outlive two silent days even with a freeze, and
+   * the plan is rebuilt on every launch / streak change anyway).
+   */
+  startsTomorrow: boolean;
 };
 
 export type ReminderPlan = {
@@ -75,8 +83,13 @@ export function reminderDaysFor(daysPerWeek: number | null | undefined): number[
 /**
  * Streak-nudge copy. Because a recurring local notification bakes its text in at
  * schedule time, callers reschedule on launch so the day count stays accurate.
+ * `freezeAvailable` (one streak freeze per Monday-local week, derived from run
+ * history) changes the stakes: with a freeze tonight's miss is covered once.
  */
-export function streakReminderCopy(streak: number): { title: string; body: string } {
+export function streakReminderCopy(
+  streak: number,
+  options: { freezeAvailable?: boolean } = {}
+): { title: string; body: string } {
   const safe = Number.isFinite(streak) ? Math.max(0, Math.floor(streak)) : 0;
   if (safe <= 0) {
     return {
@@ -85,9 +98,15 @@ export function streakReminderCopy(streak: number): { title: string; body: strin
     };
   }
   const dayLabel = safe === 1 ? '1-day' : `${safe}-day`;
+  if (options.freezeAvailable) {
+    return {
+      title: 'Protect your streak',
+      body: `Your ${dayLabel} streak ends tonight — you have a freeze, but a quick run keeps it growing.`,
+    };
+  }
   return {
     title: 'Protect your streak',
-    body: `Don't break your ${dayLabel} streak — jump in for a quick run.`,
+    body: `Your ${dayLabel} streak ends tonight — no freeze left this week. Jump in for a quick run.`,
   };
 }
 
@@ -95,9 +114,15 @@ export function streakReminderCopy(streak: number): { title: string; body: strin
 export function buildReminderPlan({
   daysPerWeek,
   streak,
+  ranToday = false,
+  freezeAvailable = false,
 }: {
   daysPerWeek: number | null | undefined;
   streak: number;
+  /** A run already exists today → the streak nudge first fires tomorrow. */
+  ranToday?: boolean;
+  /** This week's streak freeze is unspent → softer copy. */
+  freezeAvailable?: boolean;
 }): ReminderPlan {
   const weekly = reminderDaysFor(daysPerWeek).map<WeeklyReminderSlot>((weekday) => ({
     kind: 'weekly',
@@ -108,14 +133,31 @@ export function buildReminderPlan({
     body: WEEKLY_BODY,
   }));
 
-  const copy = streakReminderCopy(streak);
+  const copy = streakReminderCopy(streak, { freezeAvailable });
   const streakSlot: StreakReminderSlot = {
     kind: 'streak',
     hour: STREAK_REMINDER_HOUR,
     minute: STREAK_REMINDER_MINUTE,
     title: copy.title,
     body: copy.body,
+    startsTomorrow: ranToday,
   };
 
   return { weekly, streak: streakSlot };
 }
+
+/**
+ * Seconds from `now` until the streak slot on the NEXT local day. Used for the
+ * one-shot triggers when today already has a run.
+ */
+export function secondsUntilTomorrowSlot(
+  slot: { hour: number; minute: number },
+  now = Date.now()
+): number {
+  const target = new Date(now);
+  target.setDate(target.getDate() + 1);
+  target.setHours(slot.hour, slot.minute, 0, 0);
+  return Math.max(60, Math.round((target.getTime() - now) / 1000));
+}
+
+export const ONE_DAY_SECONDS = 24 * 60 * 60;
