@@ -10,28 +10,17 @@ export type ProgressRun = {
   xp?: unknown;
 };
 
-/** One deterministic level every 500 persisted XP. */
-export const XP_PER_LEVEL = 500;
-export type LevelProgress = {
-  level: number;
-  intoLevel: number;
-  span: number;
-  toNext: number;
-  progress: number;
-};
-
-export function levelFromXp(xp: number): LevelProgress {
-  const safe = finiteNonNegative(xp);
-  const level = Math.floor(safe / XP_PER_LEVEL) + 1;
-  const intoLevel = safe % XP_PER_LEVEL;
-  return {
-    level,
-    intoLevel,
-    span: XP_PER_LEVEL,
-    toNext: XP_PER_LEVEL - intoLevel,
-    progress: intoLevel / XP_PER_LEVEL,
-  };
-}
+// Level curve (1–50, cumulative thresholds) lives in `levels.ts`; re-exported
+// here so existing consumers keep one import for "progress aggregation".
+export {
+  effectiveLevel,
+  legacyLevelFor,
+  levelFromXp,
+  MAX_LEVEL,
+  progressWithinLevel,
+  xpForLevel,
+  type LevelProgress,
+} from '@/lib/levels';
 
 export type WeeklyActivity = {
   weekStart: number;
