@@ -21,7 +21,7 @@ import {
   type TrackedAction,
 } from '@/lib/progressAggregation';
 import { useProgress, type RunRecord } from '@/lib/ProgressContext';
-import { isClassKey } from '@/lib/progression';
+import { CLASS_META, isClassKey } from '@/lib/progression';
 import { REVIEW_RUN_MILESTONE } from '@/lib/reviewEligibility';
 import { requestMilestoneStoreReview } from '@/lib/storeReview';
 import { accentColor, colors, font, metric, radius, spacing, type } from '@/theme';
@@ -97,6 +97,40 @@ function useCountUp(target: number, delayMs = 0): number {
   return value;
 }
 
+function BreakdownRow({
+  label,
+  detail,
+  value,
+  accent,
+  emphasize = false,
+}: {
+  label: string;
+  detail: string;
+  value: string;
+  accent?: string;
+  emphasize?: boolean;
+}) {
+  return (
+    <View style={styles.breakdownRow}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[styles.breakdownLabel, emphasize && styles.breakdownLabelStrong]}>{label}</Text>
+        <Text style={styles.breakdownDetail} numberOfLines={1}>
+          {detail}
+        </Text>
+      </View>
+      <Text
+        style={[
+          styles.breakdownValue,
+          emphasize && styles.breakdownValueStrong,
+          accent ? { color: accent } : null,
+        ]}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
 export default function SummaryScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -106,6 +140,16 @@ export default function SummaryScreen() {
     actionCounts?: string;
     poseScore?: string;
     fromOnboarding?: string;
+    // Performance (cue scoring) + pipeline latency, forwarded by the workout.
+    hasBeatmap?: string;
+    perfectCount?: string;
+    goodCount?: string;
+    missCount?: string;
+    maxCombo?: string;
+    accuracy?: string;
+    latencyP50Ms?: string;
+    latencyP95Ms?: string;
+    staleFramesDropped?: string;
   }>();
   const insets = useSafeAreaInsets();
   const {
@@ -119,6 +163,7 @@ export default function SummaryScreen() {
     weeklyGoal,
     levelProgress,
     coins: totalCoins,
+    activeClass,
   } = useProgress();
 
   const fromOnboarding = params.fromOnboarding === '1';
@@ -138,14 +183,32 @@ export default function SummaryScreen() {
       actionCounts: parseParamActionCounts(params.actionCounts),
       poseScore: Number(params.poseScore) || 0,
       finishedToEnd: true,
+      hasBeatmap: params.hasBeatmap === '1',
+      perfectCount: Number(params.perfectCount) || 0,
+      goodCount: Number(params.goodCount) || 0,
+      missCount: Number(params.missCount) || 0,
+      maxCombo: Number(params.maxCombo) || 0,
+      accuracy: Number(params.accuracy) || 0,
+      latencyP50Ms: Number(params.latencyP50Ms) || 0,
+      latencyP95Ms: Number(params.latencyP95Ms) || 0,
+      staleFramesDropped: Number(params.staleFramesDropped) || 0,
     });
     if (recorded) setRecordedRun(recorded);
   }, [
+    params.accuracy,
     params.actionCounts,
     params.completed,
     params.elapsedSeconds,
+    params.goodCount,
+    params.hasBeatmap,
+    params.latencyP50Ms,
+    params.latencyP95Ms,
+    params.maxCombo,
+    params.missCount,
+    params.perfectCount,
     params.poseScore,
     params.runId,
+    params.staleFramesDropped,
     recordRun,
   ]);
 
@@ -191,6 +254,17 @@ export default function SummaryScreen() {
   const coins = run?.coins ?? 0;
   const calories = run?.calories ?? 0;
   const totalMoves = TRACKED_ACTIONS.reduce((sum, move) => sum + actionCounts[move], 0);
+
+  // Rewards breakdown: base (duration × class) × accuracy/activity × combo.
+  const breakdown = run?.rewardBreakdown ?? null;
+  const perfectCount = run?.perfectCount ?? (Number(params.perfectCount) || 0);
+  const goodCount = run?.goodCount ?? (Number(params.goodCount) || 0);
+  const missCount = run?.missCount ?? (Number(params.missCount) || 0);
+  const maxCombo = run?.maxCombo ?? (Number(params.maxCombo) || 0);
+  const accuracy = run?.accuracy ?? (Number(params.accuracy) || 0);
+  const hasBeatmap = params.hasBeatmap === '1' || perfectCount + goodCount + missCount > 0;
+  const movesPerMin = durationMin > 0 ? totalMoves / durationMin : 0;
+  const rewardClassMeta = CLASS_META[isClassKey(run?.classKey) ? run.classKey : activeClass];
 
   // Recognition is derived from history, never invented: the runs before this
   // one, this run, and the streak after it.
@@ -372,6 +446,48 @@ export default function SummaryScreen() {
               </Text>
             </View>
           </View>
+
+          {/* Rewards breakdown: base × accuracy (or activity) × combo = total. */}
+          {breakdown ? (
+            <View style={styles.card}>
+              <View style={styles.cardHead}>
+                <Text style={styles.cardTitle}>Rewards breakdown</Text>
+                <Text style={styles.cardMeta}>{hasBeatmap ? 'Cued map' : 'Free run'}</Text>
+              </View>
+              <View>
+                <BreakdownRow
+                  label="Base"
+                  detail={`${formatRunClock(durationMin)} × ${rewardClassMeta.label}`}
+                  value={`${breakdown.base.coins.toLocaleString()} · ${breakdown.base.xp.toLocaleString()} XP`}
+                />
+                <View style={styles.rowRule} />
+                <BreakdownRow
+                  label={hasBeatmap ? 'Accuracy' : 'Activity'}
+                  detail={
+                    hasBeatmap
+                      ? `${Math.round(accuracy * 100)}% · ${perfectCount} perfect · ${goodCount} good · ${missCount} miss`
+                      : `${totalMoves} moves · ${movesPerMin.toFixed(1)}/min`
+                  }
+                  value={`×${breakdown.accuracyFactor.toFixed(2)}`}
+                  accent={breakdown.accuracyFactor >= 0.9 ? colors.lime : undefined}
+                />
+                <View style={styles.rowRule} />
+                <BreakdownRow
+                  label="Combo"
+                  detail={maxCombo > 0 ? `Max ${maxCombo}×` : 'No combo'}
+                  value={`×${breakdown.comboFactor.toFixed(2)}`}
+                  accent={breakdown.comboFactor > 1 ? colors.lime : undefined}
+                />
+                <View style={styles.rowRule} />
+                <BreakdownRow
+                  label="Total"
+                  detail="Coins · XP"
+                  value={`+${coins.toLocaleString()} · +${xp.toLocaleString()} XP`}
+                  emphasize
+                />
+              </View>
+            </View>
+          ) : null}
 
           {/* Streak + weekly goal. */}
           <View style={styles.card}>
@@ -639,6 +755,12 @@ const styles = StyleSheet.create({
   trackFaint: { height: 3, borderRadius: radius.pill, backgroundColor: colors.surface3, overflow: 'hidden' },
   fill: { height: '100%', backgroundColor: colors.lime },
   levelMeta: { ...metric, ...type.bodySm, color: colors.textDim },
+  breakdownRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm + 2 },
+  breakdownLabel: { color: colors.text, fontSize: 15, fontWeight: font.medium },
+  breakdownLabelStrong: { fontWeight: font.bold },
+  breakdownDetail: { ...type.bodySm, color: colors.textDim, marginTop: 1 },
+  breakdownValue: { ...metric, color: colors.text, fontSize: 15, fontWeight: font.bold, textAlign: 'right' },
+  breakdownValueStrong: { fontSize: 17, fontWeight: font.heavy, color: colors.lime },
 
   streakRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   flame: {

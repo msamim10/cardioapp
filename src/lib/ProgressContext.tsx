@@ -31,7 +31,7 @@ import {
   isClassKey,
   levelFromXp,
   normalizeSimulatedCohort,
-  rewardForRun,
+  rewardForRunPerformance,
   rollAllRosters,
   startOfWeek,
   type ClassData,
@@ -60,6 +60,10 @@ import {
 const STORAGE_KEY = 'cardiosurf.progress.v2';
 const DEFAULT_WEEKLY_GOAL = 4;
 
+/** Non-negative integer from an optional completion count. */
+const wholeCount = (value: number | undefined): number =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+
 export type { RunRecord } from '@/lib/progressSync';
 
 /** A run that has started (from the pre-run screen) but not yet been recorded. */
@@ -76,6 +80,27 @@ export type ActiveRun = {
 
 type ClassRosters = Record<ClassKey, string[]>;
 type ClassCohorts = Record<ClassKey, CohortMember[]>;
+
+export type RunCompletion = {
+  runId: string;
+  elapsedSeconds: number;
+  actionCounts: ActionCounts;
+  poseScore: number;
+  /** Must be true — only play-to-end (or equivalent) may set this. */
+  finishedToEnd: boolean;
+  /** Cue-scoring performance; omitted/zero for free-scoring runs. */
+  hasBeatmap?: boolean;
+  perfectCount?: number;
+  goodCount?: number;
+  missCount?: number;
+  maxCombo?: number;
+  /** (perfect + 0.5·good) / cues judged, 0–1. */
+  accuracy?: number;
+  /** Pose pipeline latency for the run, forwarded to analytics only. */
+  latencyP50Ms?: number;
+  latencyP95Ms?: number;
+  staleFramesDropped?: number;
+};
 
 type PersistedShape = {
   runs: RunRecord[];
@@ -147,14 +172,7 @@ type ProgressContextValue = {
    * and a matching active run id. Campaign unlocks only when the active run
    * carried an explicit classKey.
    */
-  recordRun: (completion: {
-    runId: string;
-    elapsedSeconds: number;
-    actionCounts: ActionCounts;
-    poseScore: number;
-    /** Must be true — only play-to-end (or equivalent) may set this. */
-    finishedToEnd: boolean;
-  }) => RunRecord | null;
+  recordRun: (completion: RunCompletion) => RunRecord | null;
   /** Wipe all progress — used by the dev reset in Profile. */
   resetProgress: () => Promise<void>;
 };
@@ -547,9 +565,30 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       // Rewards still need a difficulty band; casual runs use activeClass for
       // XP/coins/calories math only and omit classKey from the persisted record.
       const rewardClass = campaignClass ?? stateRef.current.activeClass ?? 'beginner';
-      const { coins, xp } = rewardForRun(durationMin, rewardClass);
-      // Intensity scales the burn estimate only; XP/coins stay class-driven so
-      // the leaderboard economy is not inflated by a playback-rate toggle.
+      // XP/coins = class-driven base (duration × class multiplier) scaled by
+      // performance: accuracy against the beatmap (or move activity without
+      // one) and max combo. Intensity still scales only the burn estimate, so
+      // a playback-rate toggle cannot inflate the leaderboard economy — but
+      // standing still now earns the 30% floor rather than the full base.
+      const actionCounts = normalizeActionCounts(completion.actionCounts);
+      const totalMoves = Object.values(actionCounts).reduce((sum, n) => sum + n, 0);
+      const hasBeatmap = completion.hasBeatmap === true;
+      const perfectCount = wholeCount(completion.perfectCount);
+      const goodCount = wholeCount(completion.goodCount);
+      const missCount = wholeCount(completion.missCount);
+      const maxCombo = wholeCount(completion.maxCombo);
+      const accuracy = hasBeatmap
+        ? Math.min(1, Math.max(0, Number.isFinite(completion.accuracy) ? completion.accuracy! : 0))
+        : 0;
+      const reward = rewardForRunPerformance({
+        durationMin,
+        classKey: rewardClass,
+        accuracy,
+        maxCombo,
+        hasBeatmap,
+        movesPerMin: durationMin > 0 ? totalMoves / durationMin : 0,
+      });
+      const { coins, xp } = reward.total;
       const effort = pending.intensity ? INTENSITY_META[pending.intensity].effort : 1;
       const calories = caloriesForRun(durationMin, rewardClass, effort);
       const record: RunRecord = {
@@ -561,11 +600,21 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         xp,
         calories,
         ...(campaignClass ? { classKey: campaignClass } : {}),
-        actionCounts: normalizeActionCounts(completion.actionCounts),
+        actionCounts,
         poseScore:
           Number.isFinite(completion.poseScore) && completion.poseScore > 0
             ? completion.poseScore
             : 0,
+        perfectCount,
+        goodCount,
+        missCount,
+        maxCombo,
+        accuracy,
+        rewardBreakdown: {
+          base: reward.base,
+          accuracyFactor: reward.accuracyFactor,
+          comboFactor: reward.comboFactor,
+        },
       };
 
       const nextRuns = [...stateRef.current.runs, record];
@@ -583,8 +632,23 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       setStateUpdatedAt(updatedAt);
       persist(snapshot({ runs: nextRuns, activeRun: null, stateUpdatedAt: updatedAt }));
       // Fire the run_complete / first_run_complete analytics from the single
-      // authoritative completion gate (attributes: duration + score).
-      logRunComplete({ durationMin: record.durationMin, score: record.poseScore });
+      // authoritative completion gate (duration, score, performance, rewards,
+      // and the run's pose latency when the native build stamped frames).
+      logRunComplete({
+        durationMin: record.durationMin,
+        score: record.poseScore,
+        accuracy: record.accuracy,
+        maxCombo: record.maxCombo,
+        perfect: record.perfectCount,
+        good: record.goodCount,
+        miss: record.missCount,
+        hasBeatmap,
+        coins: record.coins,
+        xp: record.xp,
+        latencyP50Ms: completion.latencyP50Ms,
+        latencyP95Ms: completion.latencyP95Ms,
+        staleFramesDropped: completion.staleFramesDropped,
+      });
       return record;
     },
     [persist, snapshot]

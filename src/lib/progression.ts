@@ -379,11 +379,78 @@ export const DEFAULT_WEIGHT_KG = 70;
 /** Base MET for vigorous runner-game play, scaled by class speed. */
 const BASE_MET = 8;
 
-export function rewardForRun(durationMin: number, classKey: ClassKey): { coins: number; xp: number } {
+export type RunReward = { coins: number; xp: number };
+
+/** Base reward: duration × class multiplier. The performance floor is 30% of this. */
+export function rewardForRun(durationMin: number, classKey: ClassKey): RunReward {
   const mult = CLASS_META[classKey].multiplier;
   return {
     coins: Math.round(durationMin * COINS_PER_MIN * mult),
     xp: Math.round(durationMin * XP_PER_MIN * mult),
+  };
+}
+
+/** Floor of the accuracy/activity factor: standing still still earns 30% of base. */
+export const REWARD_ACCURACY_FLOOR = 0.3;
+/** Combo bonus caps at +25% (reached at a max combo of 25). */
+export const REWARD_COMBO_CAP = 0.25;
+/**
+ * Free-scoring reference activity: 30 recognized moves per minute (one every
+ * two seconds, roughly the cadence a cued map asks for) earns the full
+ * activity factor. Above that is not rewarded further.
+ */
+export const REWARD_REFERENCE_MOVES_PER_MIN = 30;
+
+export type RewardBreakdown = {
+  base: RunReward;
+  /** 0.3–1.0: accuracy (beatmap) or activity (free scoring) factor. */
+  accuracyFactor: number;
+  /** 1.0–1.25 from the run's max combo. */
+  comboFactor: number;
+  total: RunReward;
+};
+
+const clamp01 = (value: number) =>
+  Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+
+/**
+ * Performance-scaled reward.
+ *
+ *   total = round(base × accuracyFactor × comboFactor)
+ *   base            = rewardForRun(durationMin, classKey)
+ *   accuracyFactor  = 0.3 + 0.7 × accuracy                        (beatmap)
+ *                   = 0.3 + 0.7 × clamp(movesPerMin / 30, 0, 1)   (no beatmap)
+ *   comboFactor     = 1 + min(0.25, maxCombo / 100)
+ *
+ * Calories are NOT affected: they stay a duration × intensity (MET) estimate
+ * in `caloriesForRun`, because effort burned does not depend on hitting cues.
+ */
+export function rewardForRunPerformance(input: {
+  durationMin: number;
+  classKey: ClassKey;
+  /** (perfect + 0.5·good) / cues, 0–1. Ignored without a beatmap. */
+  accuracy: number;
+  maxCombo: number;
+  hasBeatmap: boolean;
+  /** Recognized moves per minute; the activity proxy without a beatmap. */
+  movesPerMin: number;
+}): RewardBreakdown {
+  const base = rewardForRun(input.durationMin, input.classKey);
+  const performance = input.hasBeatmap
+    ? clamp01(input.accuracy)
+    : clamp01(input.movesPerMin / REWARD_REFERENCE_MOVES_PER_MIN);
+  const accuracyFactor = REWARD_ACCURACY_FLOOR + (1 - REWARD_ACCURACY_FLOOR) * performance;
+  const maxCombo = Number.isFinite(input.maxCombo) ? Math.max(0, input.maxCombo) : 0;
+  const comboFactor = 1 + Math.min(REWARD_COMBO_CAP, maxCombo / 100);
+  const scale = accuracyFactor * comboFactor;
+  return {
+    base,
+    accuracyFactor,
+    comboFactor,
+    total: {
+      coins: Math.round(base.coins * scale),
+      xp: Math.round(base.xp * scale),
+    },
   };
 }
 

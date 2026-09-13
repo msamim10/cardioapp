@@ -13,8 +13,14 @@ import {
   parseClassKeyParam,
   parseOptionalClassKeyParam,
   resolveClassMaps,
+  REWARD_ACCURACY_FLOOR,
+  REWARD_COMBO_CAP,
+  REWARD_REFERENCE_MOVES_PER_MIN,
+  rewardForRun,
+  rewardForRunPerformance,
   shouldBlurCampaignTitle,
 } from '../src/lib/progression.ts';
+import { normalizeRunRecord } from '../src/lib/progressSync.ts';
 
 assert.ok(modes.length >= 4, 'expected at least 4 canonical maps for roster tests');
 const roster: string[] = modes.slice(0, 4).map((mode: { id: string }) => mode.id);
@@ -251,6 +257,101 @@ assert.equal(parseOptionalClassKeyParam(['nope']), null);
   assert.ok(campaignCoverBlurIntensity(99, 'locked', 100) <= 96);
 }
 
+// Performance-scaled rewards: base × accuracyFactor × comboFactor, rounded.
+{
+  const close = (a: number, b: number, msg?: string) => assert.ok(Math.abs(a - b) < 1e-9, `${msg ?? ''} ${a} vs ${b}`);
+  // Base is unchanged: 10 min beginner = 200 coins / 400 XP; hard ×1.5.
+  assert.deepEqual(rewardForRun(10, 'beginner'), { coins: 200, xp: 400 });
+  assert.deepEqual(rewardForRun(10, 'hard'), { coins: 300, xp: 600 });
+
+  // Beatmap, perfect accuracy, no combo → exactly base.
+  const perfect = rewardForRunPerformance({
+    durationMin: 10, classKey: 'beginner', accuracy: 1, maxCombo: 0, hasBeatmap: true, movesPerMin: 0,
+  });
+  assert.deepEqual(perfect.base, { coins: 200, xp: 400 });
+  close(perfect.accuracyFactor, 1);
+  close(perfect.comboFactor, 1);
+  assert.deepEqual(perfect.total, { coins: 200, xp: 400 });
+
+  // Standing still on a cued map → the 30% floor (movesPerMin is ignored with a beatmap).
+  const still = rewardForRunPerformance({
+    durationMin: 10, classKey: 'beginner', accuracy: 0, maxCombo: 0, hasBeatmap: true, movesPerMin: 60,
+  });
+  close(still.accuracyFactor, REWARD_ACCURACY_FLOOR);
+  assert.deepEqual(still.total, { coins: 60, xp: 120 });
+
+  // Half accuracy → 0.65; combo 10 → ×1.10; total rounded.
+  const mid = rewardForRunPerformance({
+    durationMin: 10, classKey: 'beginner', accuracy: 0.5, maxCombo: 10, hasBeatmap: true, movesPerMin: 0,
+  });
+  close(mid.accuracyFactor, 0.65);
+  close(mid.comboFactor, 1.1);
+  assert.deepEqual(mid.total, { coins: Math.round(200 * 0.65 * 1.1), xp: Math.round(400 * 0.65 * 1.1) });
+  assert.deepEqual(mid.total, { coins: 143, xp: 286 });
+
+  // Combo bonus caps at +25% (combo 25 and 100 are identical).
+  const combo25 = rewardForRunPerformance({
+    durationMin: 10, classKey: 'beginner', accuracy: 1, maxCombo: 25, hasBeatmap: true, movesPerMin: 0,
+  });
+  const combo100 = rewardForRunPerformance({
+    durationMin: 10, classKey: 'beginner', accuracy: 1, maxCombo: 100, hasBeatmap: true, movesPerMin: 0,
+  });
+  close(combo25.comboFactor, 1 + REWARD_COMBO_CAP);
+  assert.deepEqual(combo25.total, combo100.total);
+  assert.deepEqual(combo25.total, { coins: 250, xp: 500 });
+
+  // Accuracy is clamped to [0, 1]; garbage becomes the floor.
+  close(rewardForRunPerformance({ durationMin: 1, classKey: 'beginner', accuracy: 1.7, maxCombo: 0, hasBeatmap: true, movesPerMin: 0 }).accuracyFactor, 1);
+  close(rewardForRunPerformance({ durationMin: 1, classKey: 'beginner', accuracy: Number.NaN, maxCombo: -3, hasBeatmap: true, movesPerMin: 0 }).accuracyFactor, REWARD_ACCURACY_FLOOR);
+  close(rewardForRunPerformance({ durationMin: 1, classKey: 'beginner', accuracy: 1, maxCombo: -3, hasBeatmap: true, movesPerMin: 0 }).comboFactor, 1);
+
+  // Free scoring: activity factor from moves per minute against the 30/min reference.
+  assert.equal(REWARD_REFERENCE_MOVES_PER_MIN, 30);
+  const idle = rewardForRunPerformance({
+    durationMin: 5, classKey: 'hard', accuracy: 1, maxCombo: 0, hasBeatmap: false, movesPerMin: 0,
+  });
+  close(idle.accuracyFactor, REWARD_ACCURACY_FLOOR, 'accuracy is ignored without a beatmap');
+  assert.deepEqual(idle.base, { coins: 150, xp: 300 });
+  assert.deepEqual(idle.total, { coins: 45, xp: 90 });
+  const halfActive = rewardForRunPerformance({
+    durationMin: 5, classKey: 'hard', accuracy: 0, maxCombo: 4, hasBeatmap: false, movesPerMin: 15,
+  });
+  close(halfActive.accuracyFactor, 0.65);
+  close(halfActive.comboFactor, 1.04);
+  assert.deepEqual(halfActive.total, { coins: Math.round(150 * 0.65 * 1.04), xp: Math.round(300 * 0.65 * 1.04) });
+  const veryActive = rewardForRunPerformance({
+    durationMin: 5, classKey: 'hard', accuracy: 0, maxCombo: 0, hasBeatmap: false, movesPerMin: 90,
+  });
+  close(veryActive.accuracyFactor, 1, 'activity above the reference is not rewarded further');
+  assert.deepEqual(veryActive.total, idle.base);
+
+  // Rounding: factors produce integers, never fractional coins.
+  const odd = rewardForRunPerformance({
+    durationMin: 7.37, classKey: 'intermediate', accuracy: 0.71, maxCombo: 13, hasBeatmap: true, movesPerMin: 0,
+  });
+  assert.ok(Number.isInteger(odd.total.coins) && Number.isInteger(odd.total.xp));
+  assert.ok(odd.total.coins <= odd.base.coins * 1.25 && odd.total.coins >= odd.base.coins * 0.3);
+
+  // Legacy run records normalize to factors of 1 with base = stored totals.
+  const legacy = normalizeRunRecord({ levelId: mapA, durationMin: 10, at: 1, coins: 200, xp: 400, calories: 90 }, 0)!;
+  assert.deepEqual(legacy.rewardBreakdown, { base: { coins: 200, xp: 400 }, accuracyFactor: 1, comboFactor: 1 });
+  assert.equal(legacy.perfectCount, 0);
+  assert.equal(legacy.maxCombo, 0);
+  assert.equal(legacy.accuracy, 0);
+  const modern = normalizeRunRecord(
+    {
+      levelId: mapA, durationMin: 10, at: 1, coins: 143, xp: 286, calories: 90, runId: 'r1',
+      perfectCount: 7, goodCount: 2, missCount: 3, maxCombo: 10, accuracy: 0.5,
+      rewardBreakdown: { base: { coins: 200, xp: 400 }, accuracyFactor: 0.65, comboFactor: 1.1 },
+    },
+    0,
+  )!;
+  assert.deepEqual(modern.rewardBreakdown, { base: { coins: 200, xp: 400 }, accuracyFactor: 0.65, comboFactor: 1.1 });
+  assert.equal(modern.perfectCount, 7);
+  assert.equal(modern.accuracy, 0.5);
+  assert.equal(normalizeRunRecord({ levelId: mapA, accuracy: 3 }, 0)!.accuracy, 1, 'accuracy clamps to 1');
+}
+
 console.log(
-  'Progression replay passed: sequential unlocks, class isolation, casual discovery ignored, early-exit no unlock, finished-to-end unlocks next, finished campaign null next, classKey parsing, full roster expansion, title blur window'
+  'Progression replay passed: sequential unlocks, class isolation, casual discovery ignored, early-exit no unlock, finished-to-end unlocks next, finished campaign null next, classKey parsing, full roster expansion, title blur window, performance-scaled rewards (beatmap + activity branches, floors, cap, rounding, legacy records)'
 );
