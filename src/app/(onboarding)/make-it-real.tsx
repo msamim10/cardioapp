@@ -163,7 +163,7 @@ export default function MakeItRealScreen() {
         <View style={styles.headsUp}>
           <Ionicons name="camera-outline" size={14} color={colors.lime} />
           <Text style={styles.headsUpText} numberOfLines={1}>
-            Next: a 20-second camera calibration.
+            Next: turn on your camera and try your first moves.
           </Text>
         </View>
         <GradientButton
