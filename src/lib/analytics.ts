@@ -84,6 +84,8 @@ export const EVENTS = {
   clientSubscribe: 'client_subscribe',
   // One per run: pose pipeline latency percentiles (see poseLatency.ts).
   poseLatency: 'pose_latency',
+  // First-run calibration test drive: the user skipped one of the four moves.
+  calibrationMoveSkipped: 'calibration_move_skipped',
 } as const;
 
 let initialized = false;
@@ -216,6 +218,17 @@ export function logCalibrationSuccess(): void {
 /** Calibration failed / timed out, with the detected reason (Phase 4). */
 export function logCalibrationFailure(reason: CalibrationFailureReason): void {
   safely('logCalibrationFailure', () => markCalibrationFailure(reason));
+}
+
+/**
+ * The user tapped "Skip this move" during the first-run calibration test
+ * drive. `move` is the classifier label (jump / duck / left / right). Local
+ * signal for tuning which moves people struggle to trigger on day one.
+ */
+export function logCalibrationMoveSkipped(move: 'Jump' | 'Duck' | 'Left' | 'Right'): void {
+  safely('logCalibrationMoveSkipped', () =>
+    singularEvent(EVENTS.calibrationMoveSkipped, { move: move.toLowerCase() }),
+  );
 }
 
 /**
