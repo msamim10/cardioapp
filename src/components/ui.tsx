@@ -17,7 +17,7 @@ import {
   type ViewProps,
   ViewStyle,
 } from 'react-native';
-import { CLASS_META, CLASS_ORDER, type ClassKey, type LeaderRow } from '@/lib/progression';
+import { CLASS_META, CLASS_ORDER, type ClassKey } from '@/lib/progression';
 import { AccentKey, accentColor, accentGradient, colors, font, metric, radius, spacing, type } from '@/theme';
 
 const MASCOT_FULL = require('../../assets/mascot/fox.png');
@@ -536,38 +536,6 @@ export function ClassSelector({
 /** Speed badge, e.g. "1.2x speed", used on class + pre-run screens. */
 export function SpeedPill({ speedFactor, tone = 'dark' }: { speedFactor: number; tone?: 'dark' | 'onColor' }) {
   return <Pill icon="speedometer" label={`${speedFactor.toFixed(1)}x speed`} tone={tone} />;
-}
-
-/** Compact simulated leaderboard: a windowed list with the real user highlighted. */
-export function Leaderboard({ rows }: { rows: LeaderRow[] }) {
-  return (
-    <View style={styles.leaderboard}>
-      {rows.map((row) => (
-        <View
-          key={`${row.rank}-${row.name}`}
-          style={[styles.leaderRow, row.isUser && styles.leaderRowUser]}
-        >
-          <Text style={[styles.leaderRank, row.isUser && { color: colors.black }]}>#{row.rank}</Text>
-          <Text
-            style={[styles.leaderName, row.isUser && { color: colors.black }]}
-            numberOfLines={1}
-          >
-            {row.isUser ? 'You' : row.name}
-          </Text>
-          <View style={styles.leaderCals}>
-            <Ionicons
-              name="flame"
-              size={13}
-              color={row.isUser ? colors.black : colors.orange}
-            />
-            <Text style={[styles.leaderCalText, row.isUser && { color: colors.black }]}>
-              {row.calories.toLocaleString()}
-            </Text>
-          </View>
-        </View>
-      ))}
-    </View>
-  );
 }
 
 /** Slim top bar with an optional back chevron and a lime progress track. */
@@ -1166,26 +1134,6 @@ const styles = StyleSheet.create({
   },
   classChipLabel: { ...type.micro, color: colors.textDim, fontSize: 11 },
   classChipSub: { color: colors.textFaint, fontSize: 11, fontWeight: font.medium },
-  leaderboard: {
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
-  },
-  leaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-  },
-  leaderRowUser: { backgroundColor: colors.lime },
-  leaderRank: { ...metric, width: 34, color: colors.textDim, fontSize: 14, fontWeight: font.heavy },
-  leaderName: { flex: 1, color: colors.text, fontSize: 15, fontWeight: font.semibold },
-  leaderCals: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  leaderCalText: { ...metric, color: colors.text, fontSize: 14, fontWeight: font.bold },
-
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -16,15 +16,15 @@ import { getDailyChallenge, isDailyChallengeCompleted } from '@/lib/dailyRecomme
 import { readCloudProgress, syncCloudProgress } from '@/lib/firestoreSync';
 import { modes } from '@/lib/gameData';
 import { isHudThemeId } from '@/lib/hudThemes';
-import { clampLevel, legacyLevelFor, MIN_LEVEL, progressWithinLevel } from '@/lib/levels';
+import { clampLevel, legacyLevelFor, levelBadges, MIN_LEVEL, progressWithinLevel } from '@/lib/levels';
 import { useOnboarding } from '@/lib/OnboardingContext';
+import { ensureUsernameReserved, writePublicProfile } from '@/lib/profileSync';
 import {
   aggregateLifetime,
   normalizeActionCounts,
   type ActionCounts,
 } from '@/lib/progressAggregation';
 import {
-  advanceSimulatedCohort,
   buildClassData,
   caloriesForRun,
   campaignClassKeyForCompletion,
@@ -32,15 +32,12 @@ import {
   classForMover,
   computeStreaksWithFreeze,
   ensureFullRosters,
-  generateCohort,
   isClassKey,
-  normalizeSimulatedCohort,
   rewardForRunPerformance,
   rollAllRosters,
   startOfWeek,
   type ClassData,
   type ClassKey,
-  type CohortMember,
   type LevelProgress,
   type StreakInfo,
 } from '@/lib/progression';
@@ -57,9 +54,11 @@ import {
  *
  * Mirrors OnboardingContext/AuthContext: a Provider + `useProgress()` hook, a
  * `hydrated` flag, and AsyncStorage persistence. Everything the UI shows
- * (streak, coins, XP, calories, class rosters, rank) is derived from a few
- * stored things: the completed runs, the per-class map rosters, the mock
- * leaderboard cohorts, and the user's active class.
+ * (streak, coins, XP, calories, class rosters) is derived from a few stored
+ * things: the completed runs, the per-class map rosters, and the user's
+ * active class. Leaderboards are server-side (`leaderboards.ts`); the legacy
+ * `cohorts` field of older stores/cloud docs is read and ignored, never
+ * written.
  */
 
 const STORAGE_KEY = 'cardiosurf.progress.v2';
@@ -84,7 +83,6 @@ export type ActiveRun = {
 };
 
 type ClassRosters = Record<ClassKey, string[]>;
-type ClassCohorts = Record<ClassKey, CohortMember[]>;
 
 export type RunCompletion = {
   runId: string;
@@ -111,7 +109,8 @@ type PersistedShape = {
   runs: RunRecord[];
   activeClass: ClassKey | null;
   rosters: ClassRosters | null;
-  cohorts: ClassCohorts | null;
+  /** Legacy simulated-leaderboard cohorts: tolerated on read, never written. */
+  cohorts?: unknown;
   activeRun: ActiveRun | null;
   /** Claimed leaderboard handle (from the onboarding username step). */
   username: string | null;
@@ -175,12 +174,8 @@ type ProgressContextValue = {
   activeClassData: ClassData;
   /** Next incomplete map id in the active class campaign, or null when finished. */
   nextLevelId: string | null;
-  /** Best (lowest) leaderboard rank across all classes. */
-  bestRank: number | null;
 
   setActiveClass: (c: ClassKey) => void;
-  /** Advance simulated competitors/entrants in a class and persist the cohort. */
-  advanceLiveCompetition: (classKey?: ClassKey) => void;
   /** Mark a run as in-flight before launching the player. */
   startRun: (run: {
     runId?: string;
@@ -214,7 +209,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [activeClass, setActiveClassState] = useState<ClassKey | null>(null);
   const [rosters, setRosters] = useState<ClassRosters | null>(null);
-  const [cohorts, setCohorts] = useState<ClassCohorts | null>(null);
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
   const [username, setUsernameState] = useState<string | null>(null);
   const [hudTheme, setHudThemeState] = useState<string | null>(null);
@@ -230,7 +224,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     runs,
     activeClass,
     rosters,
-    cohorts,
     activeRun,
     username,
     hudTheme,
@@ -241,7 +234,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     runs,
     activeClass,
     rosters,
-    cohorts,
     activeRun,
     username,
     hudTheme,
@@ -260,7 +252,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       runs: stateRef.current.runs,
       activeClass: stateRef.current.activeClass,
       rosters: stateRef.current.rosters,
-      cohorts: stateRef.current.cohorts,
       activeRun: stateRef.current.activeRun,
       username: stateRef.current.username,
       hudTheme: stateRef.current.hudTheme,
@@ -289,29 +280,17 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
             .filter((run): run is RunRecord => run !== null)
         : [];
       const runsChanged = JSON.stringify(loaded.runs ?? []) !== JSON.stringify(nextRuns);
-      // Roster + cohort are generated once and then persisted so they're stable.
+      // Rosters are generated once and then persisted so they're stable.
       // Legacy short (4–5 map) rosters are expanded to the full map pool in place.
       const nextRosters = ensureFullRosters(loaded.rosters);
       const rostersChanged =
         !loaded.rosters || JSON.stringify(loaded.rosters) !== JSON.stringify(nextRosters);
-      const loadedCohorts = loaded.cohorts;
-      const nextCohorts: ClassCohorts = {
-        beginner: loadedCohorts?.beginner
-          ? normalizeSimulatedCohort('beginner', loadedCohorts.beginner)
-          : generateCohort('beginner'),
-        intermediate: loadedCohorts?.intermediate
-          ? normalizeSimulatedCohort('intermediate', loadedCohorts.intermediate)
-          : generateCohort('intermediate'),
-        hard: loadedCohorts?.hard
-          ? normalizeSimulatedCohort('hard', loadedCohorts.hard)
-          : generateCohort('hard'),
-      };
-      const cohortsChanged =
-        !loadedCohorts || JSON.stringify(loadedCohorts) !== JSON.stringify(nextCohorts);
+      // Stores written by the simulated-leaderboard era carry `cohorts`; drop
+      // the field on the next persist (nothing reads it any more).
+      const hadLegacyCohorts = loaded.cohorts !== undefined;
 
       setRuns(nextRuns);
       setRosters(nextRosters);
-      setCohorts(nextCohorts);
       setActiveClassState(loaded.activeClass ?? null);
       const loadedActiveRun = loaded.activeRun;
       const nextActiveRun =
@@ -356,7 +335,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       if (
         !loaded.rosters ||
         rostersChanged ||
-        cohortsChanged ||
+        hadLegacyCohorts ||
         runsChanged ||
         storedFloor === null ||
         loaded.hudTheme !== nextHudTheme ||
@@ -366,7 +345,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
           runs: nextRuns,
           activeClass: loaded.activeClass ?? null,
           rosters: nextRosters,
-          cohorts: nextCohorts,
           activeRun: nextActiveRun,
           username: loaded.username ?? null,
           hudTheme: nextHudTheme,
@@ -401,7 +379,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         const localState = {
           activeClass: current.activeClass,
           rosters: current.rosters,
-          cohorts: current.cohorts,
           username: current.username,
           hudTheme: current.hudTheme,
           legacyLevelFloor: current.legacyLevelFloor,
@@ -418,10 +395,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
                 rosters:
                   cloud.state.rosters && typeof cloud.state.rosters === 'object'
                     ? ensureFullRosters(cloud.state.rosters as ClassRosters)
-                    : null,
-                cohorts:
-                  cloud.state.cohorts && typeof cloud.state.cohorts === 'object'
-                    ? (cloud.state.cohorts as ClassCohorts)
                     : null,
                 username:
                   typeof cloud.state.username === 'string' ? cloud.state.username : null,
@@ -446,7 +419,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         setRuns(mergedRuns);
         setActiveClassState(selected.activeClass);
         setRosters(selectedRosters);
-        setCohorts(selected.cohorts);
         setUsernameState(selected.username);
         setHudThemeState(selected.hudTheme);
         setLegacyLevelFloor(selectedFloor);
@@ -455,7 +427,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
           runs: mergedRuns,
           activeClass: selected.activeClass,
           rosters: selectedRosters,
-          cohorts: selected.cohorts,
           activeRun: current.activeRun,
           username: selected.username,
           hudTheme: selected.hudTheme,
@@ -498,7 +469,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
           state: {
             activeClass: current.activeClass,
             rosters: current.rosters,
-            cohorts: current.cohorts,
             username: current.username,
             hudTheme: current.hudTheme,
             legacyLevelFloor: current.legacyLevelFloor,
@@ -515,7 +485,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
   }, [
     activeClass,
-    cohorts,
     hudTheme,
     hydrated,
     legacyLevelFloor,
@@ -525,6 +494,47 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     username,
     user,
   ]);
+
+  // Public profile (`profiles/{uid}`): the leaderboard-facing fields, written
+  // whenever they change. Username is reserved through the Function instead.
+  const publicLevel = progressWithinLevel(totalXp(runs), legacyLevelFloor).level;
+  const publicBadges = levelBadges(publicLevel)
+    .filter((b) => b.unlocked)
+    .map((b) => b.badge.id)
+    .join(',');
+  useEffect(() => {
+    if (!hydrated || !user || cloudReadyUid.current !== user.id) return;
+    const timer = setTimeout(() => {
+      writePublicProfile({
+        uid: user.id,
+        photoURL: user.photo,
+        level: publicLevel,
+        badges: publicBadges ? publicBadges.split(',') : [],
+        hudTheme,
+      }).catch((error) => console.warn('[progress] Public profile sync failed:', error));
+    }, 1200);
+    return () => clearTimeout(timer);
+    // syncStatus re-runs this once the initial cloud sync has finished.
+  }, [hudTheme, hydrated, publicBadges, publicLevel, syncStatus, user]);
+
+  // Lazy username reservation: onboarding chose the handle offline; claim it
+  // server-side once signed in. A taken handle comes back suffixed and the
+  // local handle follows it so the leaderboard identity is the reserved one.
+  const reservingRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!hydrated || !user || !username || cloudReadyUid.current !== user.id) return;
+    const key = `${user.id}:${username}`;
+    if (reservingRef.current === key) return;
+    reservingRef.current = key;
+    ensureUsernameReserved(user.id, username).then((reserved) => {
+      // Ignore late results if the user or handle changed meanwhile.
+      if (reservingRef.current !== key || !reserved || reserved === stateRef.current.username) return;
+      const updatedAt = Date.now();
+      setUsernameState(reserved);
+      setStateUpdatedAt(updatedAt);
+      persist(snapshot({ username: reserved, stateUpdatedAt: updatedAt }));
+    });
+  }, [hydrated, persist, snapshot, syncStatus, user, username]);
 
   // Seed the active class from onboarding once hydrated, if never chosen.
   const seededRef = useRef(false);
@@ -548,27 +558,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       setActiveClassState(c);
       setStateUpdatedAt(updatedAt);
       persist(snapshot({ activeClass: c, stateUpdatedAt: updatedAt }));
-    },
-    [persist, snapshot]
-  );
-
-  const advanceLiveCompetition = useCallback<ProgressContextValue['advanceLiveCompetition']>(
-    (classKey) => {
-      const currentCohorts = stateRef.current.cohorts;
-      if (!currentCohorts) return;
-
-      const key = classKey ?? stateRef.current.activeClass ?? 'beginner';
-      const userCalories = stateRef.current.runs
-        .filter((run) => run.classKey === key)
-        .reduce((sum, run) => sum + run.calories, 0);
-      const nextCohorts: ClassCohorts = {
-        ...currentCohorts,
-        [key]: advanceSimulatedCohort(key, currentCohorts[key], userCalories),
-      };
-      const updatedAt = Date.now();
-      setCohorts(nextCohorts);
-      setStateUpdatedAt(updatedAt);
-      persist(snapshot({ cohorts: nextCohorts, stateUpdatedAt: updatedAt }));
     },
     [persist, snapshot]
   );
@@ -756,16 +745,10 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
   const resetProgress = useCallback(async () => {
     const freshRosters = rollAllRosters();
-    const freshCohorts: ClassCohorts = {
-      beginner: generateCohort('beginner'),
-      intermediate: generateCohort('intermediate'),
-      hard: generateCohort('hard'),
-    };
     setRuns([]);
     setActiveRun(null);
     setActiveClassState(null);
     setRosters(freshRosters);
-    setCohorts(freshCohorts);
     setUsernameState(null);
     setHudThemeState(null);
     setLegacyLevelFloor(MIN_LEVEL);
@@ -778,13 +761,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       // ignore
     }
   }, []);
-
-  // The claimed handle is the user's leaderboard identity; fall back to their
-  // account name (or "You") before a handle has been claimed.
-  const leaderboardName = useMemo(
-    () => username || user?.name?.split(' ')[0] || 'You',
-    [username, user?.name]
-  );
 
   const derived = useMemo(() => {
     const lifetime = aggregateLifetime(runs);
@@ -802,25 +778,14 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     const completedLevelIds = new Set(runs.map((r) => r.levelId));
 
     const safeRosters: ClassRosters = rosters ?? { beginner: [], intermediate: [], hard: [] };
-    const safeCohorts: ClassCohorts = cohorts ?? { beginner: [], intermediate: [], hard: [] };
 
     // Campaign gates read the EFFECTIVE level (floor applied) and the live
     // beatmap registry — levels without a beatmap auto-pass the skill gate.
     const gate = { playerLevel: levelProgress.level, hasBeatmap };
     const classDataMap = {} as Record<ClassKey, ClassData>;
     for (const key of CLASS_ORDER) {
-      classDataMap[key] = buildClassData(
-        key,
-        safeRosters[key],
-        safeCohorts[key],
-        runs,
-        leaderboardName,
-        gate
-      );
+      classDataMap[key] = buildClassData(key, safeRosters[key], runs, gate);
     }
-
-    const ranked = CLASS_ORDER.map((k) => classDataMap[k]).filter((c) => c.runs > 0);
-    const bestRank = ranked.length ? Math.min(...ranked.map((c) => c.rank)) : null;
 
     return {
       totalRuns,
@@ -836,9 +801,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       runsThisWeek,
       completedLevelIds,
       classDataMap,
-      bestRank,
     };
-  }, [runs, rosters, cohorts, leaderboardName, legacyLevelFloor]);
+  }, [runs, rosters, legacyLevelFloor]);
 
   const weeklyGoal = answers.daysPerWeek ?? DEFAULT_WEEKLY_GOAL;
 
@@ -888,9 +852,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       classData,
       activeClassData,
       nextLevelId,
-      bestRank: derived.bestRank,
       setActiveClass,
-      advanceLiveCompetition,
       startRun,
       abandonRun,
       recordRun,
@@ -915,7 +877,6 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       activeClassData,
       nextLevelId,
       setActiveClass,
-      advanceLiveCompetition,
       startRun,
       abandonRun,
       recordRun,

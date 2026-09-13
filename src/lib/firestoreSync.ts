@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -14,7 +15,12 @@ import { normalizeRunRecord, type RunRecord } from './progressSync';
 export type CloudProgressState = {
   activeClass: unknown;
   rosters: unknown;
-  cohorts: unknown;
+  /**
+   * Legacy simulated-leaderboard cohorts. Documents written before real
+   * leaderboards still carry it; it is read (and ignored) for compatibility
+   * and removed on the next sync.
+   */
+  cohorts?: unknown;
   username: string | null;
   /** Chosen HUD palette id; absent on documents written before HUD themes existed. */
   hudTheme?: unknown;
@@ -69,9 +75,12 @@ export async function syncCloudProgress(input: {
     },
     { merge: true }
   );
-  await setDoc(doc(db, 'users', input.user.id, 'progress', 'state'), input.state, {
-    merge: true,
-  });
+  const { cohorts: _legacyCohorts, ...state } = input.state;
+  await setDoc(
+    doc(db, 'users', input.user.id, 'progress', 'state'),
+    { ...state, cohorts: deleteField() },
+    { merge: true }
+  );
 
   // Batched idempotent upserts make retries safe and avoid duplicate runs.
   for (let offset = 0; offset < input.runs.length; offset += 450) {

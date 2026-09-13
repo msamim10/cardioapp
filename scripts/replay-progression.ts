@@ -187,16 +187,10 @@ assert.equal(parseOptionalClassKeyParam(['nope']), null);
 
 // buildClassData wires nextLevelId / allComplete for summary CTAs.
 {
-  const data = buildClassData(
-    'beginner',
-    roster,
-    [],
-    [
-      { levelId: mapA, calories: 10, classKey: 'beginner' },
-      { levelId: mapB, calories: 12, classKey: 'beginner' },
-    ],
-    'Tester'
-  );
+  const data = buildClassData('beginner', roster, [
+    { levelId: mapA, calories: 10, classKey: 'beginner' },
+    { levelId: mapB, calories: 12, classKey: 'beginner' },
+  ]);
   assert.equal(data.nextLevelId, mapC);
   assert.equal(data.allComplete, false);
   assert.equal(data.completedCount, 2);
@@ -204,9 +198,7 @@ assert.equal(parseOptionalClassKeyParam(['nope']), null);
   const finished = buildClassData(
     'beginner',
     roster,
-    [],
-    roster.map((levelId) => ({ levelId, calories: 8, classKey: 'beginner' as const })),
-    'Tester'
+    roster.map((levelId) => ({ levelId, calories: 8, classKey: 'beginner' as const }))
   );
   assert.equal(finished.nextLevelId, null);
   assert.equal(finished.allComplete, true);

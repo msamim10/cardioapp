@@ -18,8 +18,10 @@ export {
  * selectable difficulty CLASSES — Beginner, Intermediate, Hard. Each class owns
  * a full, randomly-ordered roster of every available map (persisted so order
  * stays stable), runs slightly faster than the class below it, and tracks its
- * own calories + leaderboard rank. Everything the UI shows is derived from
- * persisted run records + the persisted rosters/cohorts (see ProgressContext).
+ * own calories. Everything the UI shows is derived from persisted run records
+ * + the persisted rosters (see ProgressContext). Per-level leaderboards are
+ * real and server-verified — see `src/lib/leaderboards.ts`; nothing here is
+ * simulated.
  */
 
 // ---------------------------------------------------------------------------
@@ -829,232 +831,6 @@ export function startOfWeek(now = Date.now()): number {
 }
 
 // ---------------------------------------------------------------------------
-// Simulated leaderboard  // simulated until backend
-// ---------------------------------------------------------------------------
-
-/**
- * There is no backend yet, so "where you rank vs other people" is a locally
- * generated mock cohort. Each class gets a stable set of fake runners (persisted
- * in ProgressContext), and the real user is slotted in by their real class
- * calories — so their rank climbs believably as they train. Swapping in a real
- * backend later just means replacing generateCohort + the persisted cohort with
- * fetched data; rankAmong/classLeaderboard stay the same.
- */
-
-const USERNAME_POOL = [
-  'PixelDasher', 'NovaSprint', 'ByteRunner', 'TurboFox', 'EchoStride', 'GlitchWolf',
-  'NeonPacer', 'AshRider', 'ZephyrJog', 'VoltHopper', 'LunaDash', 'CobraStep',
-  'RiftRunner', 'HazeStrider', 'OrbitLegs', 'FlareTrack', 'DriftKid', 'PulseRacer',
-  'IronCadence', 'MintVelocity', 'SkyBolt', 'QuartzRush', 'EmberQuick', 'JadeSprinter',
-  'BlazePivot', 'FrostTempo', 'VectorLeap', 'SableSwift',
-];
-
-export type CohortMember = { id: string; name: string; calories: number };
-
-export const MIN_LIVE_COMPETITION_DELAY_MS = 20_000;
-export const MAX_LIVE_COMPETITION_DELAY_MS = 30_000;
-export const MAX_SIMULATED_COHORT_SIZE = 50;
-
-/** Pick a fresh delay for every simulated live update. */
-export function nextLiveCompetitionDelay(random: () => number = Math.random): number {
-  const span = MAX_LIVE_COMPETITION_DELAY_MS - MIN_LIVE_COMPETITION_DELAY_MS + 1;
-  const offset = Math.min(span - 1, Math.max(0, Math.floor(random() * span)));
-  return MIN_LIVE_COMPETITION_DELAY_MS + offset;
-}
-
-/** Generate a stable, plausible mock cohort for a class (persist the result). */
-export function generateCohort(classKey: ClassKey, size = 20): CohortMember[] {
-  const meta = CLASS_META[classKey];
-  const cohortSize = Math.min(size, MAX_SIMULATED_COHORT_SIZE);
-  const pool = [...USERNAME_POOL];
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  const members: CohortMember[] = [];
-  for (let i = 0; i < cohortSize; i++) {
-    const name = pool[i % pool.length] + (i >= pool.length ? `${Math.floor(i / pool.length) + 1}` : '');
-    // Spread of accumulated calories; scaled up for faster (higher) classes.
-    const base = 150 + Math.random() * 2400;
-    members.push({
-      id: `sim-${classKey}-${i + 1}`,
-      name,
-      calories: Math.round(base * meta.speedFactor),
-    });
-  }
-  return members.sort((a, b) => b.calories - a.calories);
-}
-
-/**
- * Add ids to cohorts persisted before simulated entrants existed and repair any
- * duplicate ids/handles deterministically without changing calorie scores.
- */
-export function normalizeSimulatedCohort(
-  classKey: ClassKey,
-  cohort: CohortMember[]
-): CohortMember[] {
-  const usedIds = new Set<string>();
-  const usedNames = new Set<string>();
-  let nextId = 1;
-
-  return cohort.slice(0, MAX_SIMULATED_COHORT_SIZE).map((member, index) => {
-    let id = typeof member.id === 'string' && member.id.trim() ? member.id : '';
-    if (!id || usedIds.has(id)) {
-      while (usedIds.has(`sim-${classKey}-${nextId}`)) nextId += 1;
-      id = `sim-${classKey}-${nextId}`;
-      nextId += 1;
-    }
-    usedIds.add(id);
-
-    const baseName =
-      typeof member.name === 'string' && member.name.trim() ? member.name.trim() : `Runner${index + 1}`;
-    let name = baseName;
-    let suffix = 2;
-    while (usedNames.has(name)) {
-      name = `${baseName}${suffix}`;
-      suffix += 1;
-    }
-    usedNames.add(name);
-
-    return { id, name, calories: Math.max(0, Math.round(member.calories || 0)) };
-  });
-}
-
-const LIVE_GAIN_RANGE: Record<ClassKey, { min: number; max: number }> = {
-  beginner: { min: 1, max: 3 },
-  intermediate: { min: 2, max: 4 },
-  hard: { min: 2, max: 5 },
-};
-const LIVE_ACTIVITY_CHANCE = 0.35;
-const ONE_RUNNER_JOIN_CHANCE = 0.25;
-const TWO_RUNNER_JOIN_CHANCE = 0.05;
-
-function randomIndex(length: number, random: () => number): number {
-  return Math.min(length - 1, Math.floor(random() * length));
-}
-
-function nextSimulatedId(classKey: ClassKey, members: CohortMember[]): string {
-  const used = new Set(members.map((member) => member.id));
-  let sequence = 1;
-  while (used.has(`sim-${classKey}-${sequence}`)) sequence += 1;
-  return `sim-${classKey}-${sequence}`;
-}
-
-function nextSimulatedHandle(members: CohortMember[], random: () => number): string {
-  const used = new Set(members.map((member) => member.name));
-  const base = USERNAME_POOL[randomIndex(USERNAME_POOL.length, random)];
-  let name = base;
-  let suffix = 2;
-  while (used.has(name)) {
-    name = `${base}${suffix}`;
-    suffix += 1;
-  }
-  return name;
-}
-
-function entrantCalories(
-  classKey: ClassKey,
-  members: CohortMember[],
-  userCalories: number,
-  random: () => number
-): number {
-  const sortedScores = members.map((member) => member.calories).sort((a, b) => a - b);
-  const median = sortedScores[Math.floor(sortedScores.length / 2)] ?? 150 * CLASS_META[classKey].speedFactor;
-  const nearbyWindow = Math.max(8, Math.round(median * 0.08));
-  const offset = 1 + Math.floor(random() * nearbyWindow);
-  const entersAboveUser = random() < 0.45;
-  return entersAboveUser ? userCalories + offset : Math.max(0, userCalories - offset);
-}
-
-/**
- * Advance a subset of the locally simulated competitors by one small activity
- * tick and occasionally add entrants. This is simulated until a backend
- * provides real-time runner updates. The injected RNG keeps focused checks
- * deterministic. The real user's calories are only an entrant-position
- * reference and are never mutated here.
- */
-export function advanceSimulatedCohort(
-  classKey: ClassKey,
-  cohort: CohortMember[],
-  userCalories: number,
-  random: () => number = Math.random
-): CohortMember[] {
-  const { min, max } = LIVE_GAIN_RANGE[classKey];
-  let advanced = 0;
-  const next = normalizeSimulatedCohort(classKey, cohort).map((member) => {
-    if (random() >= LIVE_ACTIVITY_CHANCE) return member;
-    const gain = min + Math.floor(random() * (max - min + 1));
-    advanced += 1;
-    return { ...member, calories: member.calories + gain };
-  });
-
-  // A live tick always represents at least one competitor activity event.
-  if (advanced === 0 && next.length > 0) {
-    const index = randomIndex(next.length, random);
-    const gain = min + Math.floor(random() * (max - min + 1));
-    next[index] = { ...next[index], calories: next[index].calories + gain };
-  }
-
-  const joinRoll = random();
-  const requestedJoins =
-    joinRoll < TWO_RUNNER_JOIN_CHANCE
-      ? 2
-      : joinRoll < TWO_RUNNER_JOIN_CHANCE + ONE_RUNNER_JOIN_CHANCE
-        ? 1
-        : 0;
-  const joinCount = Math.min(requestedJoins, MAX_SIMULATED_COHORT_SIZE - next.length);
-  for (let i = 0; i < joinCount; i++) {
-    const id = nextSimulatedId(classKey, next);
-    const name = nextSimulatedHandle(next, random);
-    const calories = entrantCalories(classKey, next, userCalories, random);
-    next.push({ id, name, calories });
-  }
-
-  return next.sort((a, b) => b.calories - a.calories || a.id.localeCompare(b.id));
-}
-
-export type ClassRank = { rank: number; total: number; percentile: number };
-
-export function rankAmong(cohort: CohortMember[], userCalories: number): ClassRank {
-  const total = cohort.length + 1;
-  const ahead = cohort.filter((m) => m.calories > userCalories).length;
-  const rank = ahead + 1;
-  const percentile = Math.max(1, Math.round((1 - (rank - 1) / total) * 100));
-  return { rank, total, percentile };
-}
-
-export type LeaderRow = { rank: number; name: string; calories: number; isUser: boolean };
-
-/**
- * Combined leaderboard (cohort + real user), returning the full ordered rows
- * so screens can derive top and user-centered windows from one ranking model.
- */
-export function classLeaderboard(
-  cohort: CohortMember[],
-  userCalories: number,
-  userName: string
-): { rank: number; total: number; rows: LeaderRow[] } {
-  const combined = [
-    ...cohort.map((m) => ({ name: m.name, calories: m.calories, isUser: false })),
-    { name: userName, calories: userCalories, isUser: true },
-  ].sort(
-    (a, b) =>
-      b.calories - a.calories ||
-      Number(b.isUser) - Number(a.isUser) ||
-      a.name.localeCompare(b.name)
-  );
-
-  const rows: LeaderRow[] = combined.map((e, i) => ({ rank: i + 1, ...e }));
-  const total = rows.length;
-  const userIdx = rows.findIndex((r) => r.isUser);
-  return {
-    rank: rows[userIdx].rank,
-    total,
-    rows,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Aggregated per-class view model (consumed by the screens)
 // ---------------------------------------------------------------------------
 
@@ -1072,18 +848,12 @@ export type ClassData = {
   allComplete: boolean;
   calories: number;
   runs: number;
-  rank: number;
-  rankTotal: number;
-  percentile: number;
-  leaderboard: LeaderRow[];
 };
 
 export function buildClassData(
   key: ClassKey,
   roster: string[],
-  cohort: CohortMember[],
   runs: readonly { levelId?: unknown; calories?: unknown; classKey?: unknown; accuracy?: unknown }[],
-  userName: string,
   /**
    * Skill/level gate inputs. Omitted → max level and no beatmaps, i.e. only the
    * completion sequence gates (replay scripts). ProgressContext always passes it.
@@ -1111,7 +881,6 @@ export function buildClassData(
   };
   const maps = resolveClassMaps(roster, completedInClass, gate);
   const calories = runsInClass.reduce((sum, r) => sum + r.calories, 0);
-  const lb = classLeaderboard(cohort, calories, userName);
   const completedCount = maps.filter((m) => m.state === 'completed').length;
   return {
     key,
@@ -1125,9 +894,5 @@ export function buildClassData(
     allComplete: maps.length > 0 && completedCount >= maps.length,
     calories,
     runs: runsInClass.length,
-    rank: lb.rank,
-    rankTotal: lb.total,
-    percentile: rankAmong(cohort, calories).percentile,
-    leaderboard: lb.rows,
   };
 }
