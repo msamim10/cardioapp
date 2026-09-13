@@ -17,21 +17,18 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BodyOutline } from '@/components/BodyOutline';
+import { CalibrationIntroFigure } from '@/components/CalibrationIntroFigure';
+import { ParticleBurst } from '@/components/ParticleBurst';
 import { TvSetupGuide } from '@/components/TvSetupGuide';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import {
   logCalibrationAttempt,
   logCalibrationFailure,
+  logCalibrationMoveSkipped,
   logCalibrationSuccess,
 } from '@/lib/analytics';
-import { useExternalDisplay } from '@/lib/externalDisplay';
-import { useOnboarding } from '@/lib/OnboardingContext';
-import {
-  isIntensityKey,
-  loadPlaySetup,
-  saveFirstRunTrackingOff,
-  type PlayScreen,
-} from '@/lib/playSetup';
+import { createCalibrationSounds, playHaptic, type FeedbackCue } from '@/lib/calibrationFeedback';
 import {
   loadCalibrationProfile,
   proportionsFromBaseline,
@@ -40,24 +37,40 @@ import {
   shouldGuideCalibration,
   type BodyProportions,
 } from '@/lib/calibrationProfile';
+import { useExternalDisplay } from '@/lib/externalDisplay';
 import type { CalibrationFailureReason } from '@/lib/funnelStore';
+import { resolveHudTheme, type HudTheme } from '@/lib/hudThemes';
+import { useOnboarding } from '@/lib/OnboardingContext';
+import {
+  isIntensityKey,
+  loadPlaySetup,
+  saveFirstRunTrackingOff,
+  type PlayScreen,
+} from '@/lib/playSetup';
 import {
   INITIAL_POSE_FEEDBACK,
   INITIAL_POSE_SCORE,
   PoseAnalyzer,
+  type Move,
   type PoseFeedback,
   type PoseFrame,
-  type TrackingStatus,
 } from '@/lib/poseTracking';
-import { useProgress } from '@/lib/ProgressContext';
-import { resolveHudTheme } from '@/lib/hudThemes';
-import { parseOptionalClassKeyParam } from '@/lib/progression';
 import {
-  INITIAL_PREFLIGHT_STATE,
-  PREFLIGHT_COUNTDOWN_SECONDS,
-  PREFLIGHT_EXPRESS_COUNTDOWN_SECONDS,
-  reducePreflight,
-} from '@/lib/preflightState';
+  createPreflightFlowState,
+  currentTestMove,
+  END_CARD_MS,
+  flowElapsedSeconds,
+  isCameraPhase,
+  MOVE_PROMPT,
+  MOVE_TEST_ORDER,
+  type PreflightFlowEvent,
+  type PreflightOutcome,
+  reducePreflightFlow,
+  SYNC_LINES,
+} from '@/lib/preflightFlow';
+import { useProgress } from '@/lib/ProgressContext';
+import { parseOptionalClassKeyParam } from '@/lib/progression';
+import { FRAMING_MESSAGE, skeletonFraming } from '@/lib/skeletonFraming';
 import {
   clearTrackingHandoff,
   createTrackingRunId,
@@ -65,7 +78,17 @@ import {
 } from '@/lib/trackingSession';
 import { colors, font, metric, radius, spacing, type } from '@/theme';
 
-const TRACKING_TIMEOUT_MS = 25_000;
+/** Reducer clock tick: drives the 10 s fallback offer and the dev timer. */
+const TICK_MS = 500;
+/** Phase 3 playful status lines rotate at this cadence. */
+const SYNC_LINE_MS = 900;
+
+const MOVE_ICON: Record<Move, keyof typeof Ionicons.glyphMap> = {
+  Jump: 'arrow-up',
+  Duck: 'arrow-down',
+  Left: 'arrow-back',
+  Right: 'arrow-forward',
+};
 
 /**
  * Best-effort classification of WHY a calibration failed, from the last pose
@@ -89,6 +112,12 @@ function deriveCalibrationFailureReason(frame: PoseFrame | null): CalibrationFai
   return 'unknown';
 }
 
+/**
+ * Calibration as a micro-game. Screen 1 ("Your body is the controller.")
+ * asks for the camera; Screen 2 runs the phases of `preflightFlow.ts` on top
+ * of the untouched `PoseAnalyzer`: framing coaching → move test drive (first
+ * run only) → handoff. See docs/CALIBRATION_FLOW.md.
+ */
 export default function PreflightScreen() {
   const params = useLocalSearchParams<{
     level: string;
@@ -124,20 +153,26 @@ export default function PreflightScreen() {
   const display = useExternalDisplay();
   const tvConnected = display.supported && display.connected;
   const [permission, requestPermission, getPermission] = useCameraPermissions();
-  const [state, setState] = useState(INITIAL_PREFLIGHT_STATE);
+  const [state, setState] = useState(() =>
+    createPreflightFlowState({ firstRun: isFirstRun, now: Date.now() }),
+  );
   const [poseFrame, setPoseFrame] = useState<PoseFrame | null>(null);
   const [feedback, setFeedback] = useState<PoseFeedback>(INITIAL_POSE_FEEDBACK);
-  const [trackingStatus, setTrackingStatus] = useState<TrackingStatus>('calibrating');
   const [requesting, setRequesting] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
   const [unavailableReason, setUnavailableReason] = useState('');
-  // Guided mode teaches the framing; express mode is a silent sensor lock for
-  // anyone who has already calibrated on this device at least once.
+  // Guided mode keeps the longer Phase 3 countdown; express is the shorter
+  // hold for anyone who has already calibrated on this device at least once.
   const [guided, setGuided] = useState(true);
+  const [now, setNow] = useState(() => Date.now());
+  const [syncLine, setSyncLine] = useState(0);
+  const [burst, setBurst] = useState(0);
+  const [bigBurst, setBigBurst] = useState(0);
   const storedProportionsRef = useRef<BodyProportions | null>(null);
   const analyzerRef = useRef(new PoseAnalyzer());
+  const soundsRef = useRef(createCalibrationSounds());
   const stateRef = useRef(state);
   const launchedRef = useRef(false);
-  const timeoutStartedRef = useRef(Date.now());
   const runIdRef = useRef(createTrackingRunId(params.level));
   stateRef.current = state;
 
@@ -145,22 +180,28 @@ export default function PreflightScreen() {
   // can classify a failure without re-subscribing on every frame.
   const latestFrameRef = useRef<PoseFrame | null>(null);
   latestFrameRef.current = poseFrame;
-  const guidedRef = useRef(guided);
-  guidedRef.current = guided;
   // True while a calibration cycle is in progress; gates attempt/outcome events
   // so a purely "unavailable" (no detector / permission denied) isn't a failure.
   const calibrationCycleRef = useRef(false);
 
   const detectorAvailable =
     Platform.OS === 'ios' && Device.isDevice && isCardioSurfPoseAvailable;
-  const dispatch = useCallback((event: Parameters<typeof reducePreflight>[1]) => {
-    setState((current) => reducePreflight(current, event));
+  const dispatch = useCallback((event: PreflightFlowEvent) => {
+    setState((current) => reducePreflightFlow(current, event));
+  }, []);
+
+  const cue = useCallback((kind: FeedbackCue) => {
+    playHaptic(kind);
+    soundsRef.current.play(kind);
   }, []);
 
   useEffect(() => {
     clearTrackingHandoff();
+    const sounds = soundsRef.current;
+    sounds.preload();
     return () => {
       if (!launchedRef.current) clearTrackingHandoff();
+      sounds.dispose();
     };
   }, []);
 
@@ -184,6 +225,10 @@ export default function PreflightScreen() {
   }, []);
 
   useEffect(() => {
+    dispatch({ type: 'SET_EXPRESS', express: !guided });
+  }, [dispatch, guided]);
+
+  useEffect(() => {
     if (!permission) return;
     if (!detectorAvailable) {
       setUnavailableReason(
@@ -193,14 +238,15 @@ export default function PreflightScreen() {
             ? 'Real body tracking requires a physical iPhone.'
             : 'This app build does not include the Apple Vision body detector.',
       );
-      dispatch({ type: 'UNAVAILABLE' });
+      dispatch({ type: 'UNAVAILABLE', now: Date.now() });
       return;
     }
-    if (permission.granted && stateRef.current.phase === 'permission') {
-      timeoutStartedRef.current = Date.now();
-      dispatch({ type: 'PERMISSION_GRANTED' });
+    // Repeat runs skip Screen 1 when the camera is already allowed. The first
+    // run always shows it: it is the ceremony, not just a permission prompt.
+    if (permission.granted && stateRef.current.phase === 'permission' && !isFirstRun) {
+      dispatch({ type: 'PERMISSION_GRANTED', now: Date.now() });
     }
-  }, [detectorAvailable, dispatch, permission]);
+  }, [detectorAvailable, dispatch, isFirstRun, permission]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (next) => {
@@ -208,40 +254,50 @@ export default function PreflightScreen() {
       getPermission()
         .then((latest) => {
           if (!latest.granted) return;
+          setPermissionDenied(false);
           analyzerRef.current.reset();
-          timeoutStartedRef.current = Date.now();
-          dispatch({ type: 'PERMISSION_GRANTED' });
+          dispatch({ type: 'PERMISSION_GRANTED', now: Date.now() });
         })
         .catch(() => {});
     });
     return () => subscription.remove();
   }, [dispatch, getPermission, permission?.canAskAgain]);
 
+  // Reducer clock while the camera is live: fallback offer + dev timer.
+  const cameraPhase = isCameraPhase(state.phase);
   useEffect(() => {
-    if (
-      state.phase === 'permission' ||
-      state.phase === 'countdown' ||
-      state.phase === 'unavailable' ||
-      state.phase === 'timed-out'
-    ) {
-      return;
-    }
-    const timer = setTimeout(() => dispatch({ type: 'TIMEOUT' }), Math.max(
-      0,
-      TRACKING_TIMEOUT_MS - (Date.now() - timeoutStartedRef.current),
-    ));
-    return () => clearTimeout(timer);
-  }, [dispatch, state.phase]);
+    if (!cameraPhase) return;
+    const timer = setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      dispatch({ type: 'TICK', now: current });
+    }, TICK_MS);
+    return () => clearInterval(timer);
+  }, [cameraPhase, dispatch]);
 
   useEffect(() => {
-    if (state.phase !== 'countdown') return;
-    const timer = setTimeout(() => dispatch({ type: 'COUNTDOWN_TICK' }), 1_000);
+    if (state.phase !== 'handoff') return;
+    setSyncLine(0);
+    const timer = setInterval(
+      () => setSyncLine((index) => (index + 1) % SYNC_LINES.length),
+      SYNC_LINE_MS,
+    );
+    return () => clearInterval(timer);
+  }, [state.phase]);
+
+  useEffect(() => {
+    if (state.phase !== 'handoff' || state.countdown === null) return;
+    const timer = setTimeout(
+      () => dispatch({ type: 'COUNTDOWN_TICK', now: Date.now() }),
+      1_000,
+    );
     return () => clearTimeout(timer);
   }, [dispatch, state.countdown, state.phase]);
 
   const launchWorkout = useCallback(
-    (tracking: 'calibrated' | 'off') => {
+    (outcome: PreflightOutcome) => {
       if (launchedRef.current) return;
+      const tracking: 'calibrated' | 'off' = outcome === 'off' ? 'off' : 'calibrated';
       if (isFirstRun) {
         // First-time ceremony: calibration is complete (onboarding_complete has
         // fired above), so hand off to the offer screen. The run launches from
@@ -255,18 +311,20 @@ export default function PreflightScreen() {
         return;
       }
       const capturedAt = Date.now();
-      if (tracking === 'calibrated') {
+      if (outcome === 'calibrated') {
         const snapshot = analyzerRef.current.calibrationSnapshot(capturedAt);
         if (
           !snapshot ||
           !stageTrackingHandoff(runIdRef.current, params.level, snapshot, capturedAt)
         ) {
-          setUnavailableReason('Calibration could not be transferred. Please retry.');
-          dispatch({ type: 'UNAVAILABLE' });
+          setUnavailableReason('Your setup could not be carried into the run. Please retry.');
+          dispatch({ type: 'UNAVAILABLE', now: capturedAt });
           return;
         }
         analyzerRef.current.markTrackingLost(capturedAt);
       } else {
+        // 'defaults': no snapshot on purpose — the run calibrates live from
+        // its first frames (workout.tsx already handles a missing handoff).
         clearTrackingHandoff();
       }
       launchedRef.current = true;
@@ -293,26 +351,40 @@ export default function PreflightScreen() {
     [campaignClass, dispatch, intensity, isFirstRun, params, router, setCheckpoint, startRun],
   );
 
+  // Route out once the flow completes. The first run holds the end card for
+  // END_CARD_MS (with a burst) unless the camera never worked at all. The
+  // launcher is read through a ref so a re-created callback cannot restart
+  // the end-card timer.
+  const launchRef = useRef(launchWorkout);
+  launchRef.current = launchWorkout;
+  const celebrate = state.phase === 'complete' && isFirstRun && state.outcome !== 'off';
+  const outcome = state.phase === 'complete' ? state.outcome : null;
   useEffect(() => {
-    if (state.phase === 'countdown' && state.countdown === 0) {
-      launchWorkout('calibrated');
+    if (!outcome) return;
+    if (!celebrate) {
+      launchRef.current(outcome);
+      return;
     }
-  }, [launchWorkout, state.countdown, state.phase]);
+    setBigBurst((count) => count + 1);
+    cue('celebrate');
+    const timer = setTimeout(() => launchRef.current(outcome), END_CARD_MS);
+    return () => clearTimeout(timer);
+  }, [celebrate, cue, outcome]);
 
-  // Calibration funnel instrumentation (Phase 4): one attempt per cycle, then a
-  // success (reached the countdown) or a failure with a detected reason.
+  // Calibration funnel instrumentation: one attempt per cycle, then a success
+  // (reached the Phase 3 countdown — where `onboarding_complete` fires on the
+  // first ever success) or a failure with a detected reason.
+  const lockedIn = state.phase === 'handoff' && state.countdown !== null;
   useEffect(() => {
     const phase = state.phase;
-    const calibrating =
-      phase === 'preparing' || phase === 'calibrating' || phase === 'stabilizing';
-    if (calibrating) {
+    if (phase === 'framing' || phase === 'moves' || (phase === 'handoff' && !lockedIn)) {
       if (!calibrationCycleRef.current) {
         calibrationCycleRef.current = true;
         logCalibrationAttempt();
       }
-      if (phase === 'stabilizing') {
+      if (phase === 'handoff') {
         // A body whose proportions no longer match the stored ones is most
-        // likely a different person on a shared device, so re-teach framing.
+        // likely a different person on a shared device, so keep the longer hold.
         const fresh = analyzerRef.current.calibrationSnapshot();
         const proportions = fresh ? proportionsFromBaseline(fresh.baseline) : null;
         if (proportionsMismatch(storedProportionsRef.current, proportions)) {
@@ -321,7 +393,7 @@ export default function PreflightScreen() {
       }
       return;
     }
-    if (phase === 'countdown') {
+    if (lockedIn) {
       if (calibrationCycleRef.current) {
         calibrationCycleRef.current = false;
         logCalibrationSuccess();
@@ -332,47 +404,47 @@ export default function PreflightScreen() {
       }
       return;
     }
-    if (phase === 'timed-out' || phase === 'unavailable') {
+    if (phase === 'unavailable' || (phase === 'complete' && state.outcome === 'defaults')) {
       if (calibrationCycleRef.current) {
         calibrationCycleRef.current = false;
         logCalibrationFailure(deriveCalibrationFailureReason(latestFrameRef.current));
       }
     }
-  }, [state.phase]);
+  }, [lockedIn, state.outcome, state.phase]);
+
+  // Feedback: framing lock, each detected move, each phase transition.
+  const framingOk = state.phase === 'framing' && state.framing === 'ok';
+  useEffect(() => {
+    if (framingOk) cue('tick');
+  }, [cue, framingOk]);
+  const completedCount = state.completedMoves.length;
+  useEffect(() => {
+    if (completedCount === 0) return;
+    setBurst((count) => count + 1);
+    cue('move');
+  }, [completedCount, cue]);
+  useEffect(() => {
+    if (state.phase !== 'moves' && state.phase !== 'handoff') return;
+    setBurst((count) => count + 1);
+    cue('phase');
+  }, [cue, state.phase]);
 
   const onPoseFrame = useCallback(
     (frame: PoseFrame) => {
       if (frame.origin !== 'native') return;
-      const phase = stateRef.current.phase;
-      if (phase === 'permission' || phase === 'unavailable' || phase === 'timed-out') return;
+      if (!isCameraPhase(stateRef.current.phase)) return;
       const result = analyzerRef.current.process(frame);
-      setPoseFrame({ ...frame, keypoints: result.keypoints });
+      const smoothed = { ...frame, keypoints: result.keypoints };
+      setPoseFrame(smoothed);
       setFeedback(result.feedback);
-      setTrackingStatus(result.status);
-
-      if (result.status === 'searching' || result.status === 'reconnecting') {
-        dispatch({ type: 'TRACKING_LOST' });
-      } else if (result.status === 'calibrating') {
-        dispatch({ type: 'CALIBRATION_PROGRESS' });
-      } else if (phase === 'preparing' || phase === 'calibrating') {
-        dispatch({ type: 'CALIBRATION_READY' });
-      } else if (phase === 'stabilizing') {
-        if (!result.move && result.feedback.readiness === 'ready') {
-          dispatch({
-            type: 'STABLE_FRAME',
-            countdownFrom: guidedRef.current
-              ? PREFLIGHT_COUNTDOWN_SECONDS
-              : PREFLIGHT_EXPRESS_COUNTDOWN_SECONDS,
-          });
-        } else {
-          dispatch({ type: 'TRACKING_LOST' });
-        }
-      } else if (
-        phase === 'countdown' &&
-        (result.move || result.feedback.readiness !== 'ready')
-      ) {
-        dispatch({ type: 'TRACKING_LOST' });
-      }
+      dispatch({
+        type: 'FRAME',
+        now: frame.timestamp,
+        framing: skeletonFraming(smoothed).verdict,
+        status: result.status,
+        move: result.move,
+        readiness: result.feedback.readiness,
+      });
     },
     [dispatch],
   );
@@ -383,15 +455,13 @@ export default function PreflightScreen() {
     try {
       const next = await requestPermission();
       if (next.granted) {
-        timeoutStartedRef.current = Date.now();
-        dispatch({ type: 'PERMISSION_GRANTED' });
+        setPermissionDenied(false);
+        dispatch({ type: 'PERMISSION_GRANTED', now: Date.now() });
       } else {
-        setUnavailableReason('Camera access is off. Enable it in Settings to track your body.');
-        dispatch({ type: 'UNAVAILABLE' });
+        setPermissionDenied(true);
       }
     } catch {
-      setUnavailableReason('Camera permission could not be requested. Please try again.');
-      dispatch({ type: 'UNAVAILABLE' });
+      setPermissionDenied(true);
     } finally {
       setRequesting(false);
     }
@@ -401,9 +471,14 @@ export default function PreflightScreen() {
     analyzerRef.current.reset();
     setPoseFrame(null);
     setFeedback(INITIAL_POSE_FEEDBACK);
-    setTrackingStatus('calibrating');
-    timeoutStartedRef.current = Date.now();
-    dispatch({ type: 'RETRY' });
+    dispatch({ type: 'RETRY', now: Date.now() });
+  };
+
+  const skipMove = () => {
+    const move = currentTestMove(stateRef.current);
+    if (!move) return;
+    logCalibrationMoveSkipped(move);
+    dispatch({ type: 'SKIP_MOVE', now: Date.now() });
   };
 
   const cancel = () => {
@@ -417,12 +492,10 @@ export default function PreflightScreen() {
     }
   };
 
-  const cameraActive =
-    permission?.granted === true &&
-    detectorAvailable &&
-    state.phase !== 'permission' &&
-    state.phase !== 'unavailable' &&
-    state.phase !== 'timed-out';
+  const cameraActive = permission?.granted === true && detectorAvailable && cameraPhase;
+  const openSettings = () => Linking.openSettings().catch(() => {});
+  const cameraOff = permission?.canAskAgain === false || permissionDenied;
+  const testMove = currentTestMove(state);
 
   return (
     <View style={styles.root}>
@@ -433,11 +506,11 @@ export default function PreflightScreen() {
           onPoseFrame={onPoseFrame}
           onTrackingStatus={() => {
             analyzerRef.current.markTrackingLost();
-            dispatch({ type: 'TRACKING_LOST' });
+            dispatch({ type: 'TRACKING_LOST', now: Date.now() });
           }}
           onUnavailable={() => {
-            setUnavailableReason('The Apple Vision body detector stopped unexpectedly.');
-            dispatch({ type: 'UNAVAILABLE' });
+            setUnavailableReason('The camera stopped unexpectedly.');
+            dispatch({ type: 'UNAVAILABLE', now: Date.now() });
           }}
           permission={permission}
           poseFrame={poseFrame}
@@ -454,6 +527,7 @@ export default function PreflightScreen() {
 
       {cameraActive ? (
         <>
+          {state.phase === 'framing' ? <BodyOutline verdict={state.framing} /> : null}
           <LinearGradient
             colors={['rgba(0,0,0,0.72)', 'rgba(0,0,0,0)']}
             pointerEvents="none"
@@ -467,6 +541,8 @@ export default function PreflightScreen() {
         </>
       ) : null}
 
+      <ParticleBurst trigger={burst} theme={hudTheme} />
+
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Cancel camera setup"
@@ -476,12 +552,26 @@ export default function PreflightScreen() {
         <Ionicons name="close" size={23} color={colors.white} />
       </Pressable>
 
-      <View style={[styles.header, { top: insets.top + spacing.md }]}>
-        <Text style={styles.eyebrow}>
-          {isFirstRun ? 'CALIBRATION' : guided ? 'ONE-TIME SETUP' : 'SENSOR CHECK'}
-        </Text>
-        <Text style={styles.runName} numberOfLines={1}>{params.name ?? 'Your run'}</Text>
-      </View>
+      {cameraPhase ? (
+        <View style={[styles.header, { top: insets.top + spacing.md }]}>
+          <Text style={styles.eyebrow}>
+            {state.phase === 'framing'
+              ? 'STEP 1 · FRAME UP'
+              : state.phase === 'moves'
+                ? 'STEP 2 · TEST DRIVE'
+                : isFirstRun
+                  ? 'STEP 3 · SYNC'
+                  : 'SYNC'}
+          </Text>
+          <Text style={styles.runName} numberOfLines={1}>{params.name ?? 'Your run'}</Text>
+          {__DEV__ ? (
+            <Text style={styles.devTimer}>
+              {flowElapsedSeconds(state, now).toFixed(1)}s · {state.phase} ·{' '}
+              {Math.max(0, (now - state.phaseStartedAt) / 1000).toFixed(1)}s
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
 
       {playScreen === 'tv' ? (
         <Pressable
@@ -504,136 +594,273 @@ export default function PreflightScreen() {
       <TvSetupGuide visible={tvGuideOpen} onClose={() => setTvGuideOpen(false)} detection={display} />
 
       {state.phase === 'permission' ? (
-        <SetupCard
-          icon="camera-outline"
-          title="Set up body tracking"
-          detail="One time, then it runs itself. Your camera is processed on-device and never recorded or uploaded."
-          primary={permission?.canAskAgain === false ? 'OPEN SETTINGS' : 'ENABLE CAMERA'}
-          loading={requesting}
-          onPrimary={permission?.canAskAgain === false
-            ? () => Linking.openSettings().catch(() => {})
-            : enableCamera}
-          onSecondary={() => launchWorkout('off')}
-          secondary="CONTINUE WITHOUT TRACKING"
-        />
-      ) : state.phase === 'unavailable' || state.phase === 'timed-out' ? (
-        <SetupCard
-          icon={state.phase === 'timed-out' ? 'body-outline' : 'warning-outline'}
-          title={state.phase === 'timed-out' ? 'No signal' : 'Tracking unavailable'}
-          detail={
-            state.phase === 'timed-out'
-              ? 'Step back until your shoulders and hips are in frame, then try again. You can also train without tracking.'
-              : unavailableReason
+        <IntroScreen
+          compact={!isFirstRun}
+          cameraOff={cameraOff}
+          loading={requesting || !permission}
+          topInset={insets.top}
+          bottomInset={insets.bottom}
+          hudTheme={hudTheme}
+          onEnable={enableCamera}
+          onOpenSettings={openSettings}
+          onContinueWithout={() =>
+            dispatch({ type: 'CONTINUE_WITHOUT_CAMERA', now: Date.now() })
           }
-          primary={permission?.canAskAgain === false ? 'OPEN SETTINGS' : 'TRY AGAIN'}
-          onPrimary={
-            permission?.canAskAgain === false
-              ? () => Linking.openSettings().catch(() => {})
-              : permission?.granted
-                ? retry
-                : enableCamera
-          }
-          onSecondary={() => launchWorkout('off')}
-          secondary="CONTINUE WITHOUT TRACKING"
         />
-      ) : (
-        <>
-          <View style={styles.centerGuide} pointerEvents="none">
-            <View style={styles.reticle}>
-              <View style={[styles.bracket, styles.bracketTL]} />
-              <View style={[styles.bracket, styles.bracketTR]} />
-              <View style={[styles.bracket, styles.bracketBL]} />
-              <View style={[styles.bracket, styles.bracketBR]} />
-            </View>
-            <View style={styles.floorGuide} />
+      ) : state.phase === 'unavailable' ? (
+        detectorAvailable ? (
+          <SetupCard
+            icon="warning-outline"
+            title="Camera tracking is off"
+            detail={unavailableReason}
+            primary={cameraOff ? 'OPEN SETTINGS' : 'TRY AGAIN'}
+            onPrimary={cameraOff ? openSettings : permission?.granted ? retry : enableCamera}
+            onSecondary={() =>
+              dispatch({ type: 'CONTINUE_WITHOUT_CAMERA', now: Date.now() })
+            }
+            secondary="CONTINUE WITH DEFAULT SETTINGS"
+          />
+        ) : (
+          // Simulator / Android / build without the detector: nothing to retry.
+          <SetupCard
+            icon="body-outline"
+            title="Camera tracking is off"
+            detail={unavailableReason}
+            primary="CONTINUE WITH DEFAULT SETTINGS"
+            onPrimary={() => dispatch({ type: 'CONTINUE_WITHOUT_CAMERA', now: Date.now() })}
+            onSecondary={cancel}
+            secondary="GO BACK"
+          />
+        )
+      ) : null}
+
+      {state.phase === 'framing' ? (
+        <View
+          accessible
+          accessibilityLiveRegion="polite"
+          accessibilityRole="summary"
+          accessibilityLabel={`${FRAMING_MESSAGE[state.framing]}. Stand inside the outline so your head and feet are both visible.`}
+          style={[styles.guidance, { bottom: insets.bottom + spacing.xl }]}
+        >
+          <View style={styles.statusRow}>
+            <View style={[styles.statusDot, state.framing === 'ok' && styles.statusDotReady]} />
+            <Text style={styles.statusLabel}>
+              {state.framing === 'ok'
+                ? state.calibrated
+                  ? 'LOCKED'
+                  : 'READING'
+                : state.trackingLost || state.framing === 'searching'
+                  ? 'LOOKING FOR YOU'
+                  : 'ADJUST'}
+            </Text>
           </View>
+          <Text style={[styles.guidanceTitle, state.framing === 'ok' && styles.guidanceTitleOk]}>
+            {FRAMING_MESSAGE[state.framing]}
+          </Text>
+          <Text style={styles.setupGuidance}>
+            {state.framing === 'searching'
+              ? 'Prop your phone up, then step back until you fill the outline.'
+              : state.framing === 'ok'
+                ? 'Stay right there for a second.'
+                : 'Head to feet inside the outline works best.'}
+          </Text>
+          {state.fallbackOffered ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                state.calibrated ? 'Good enough, continue' : 'Continue with default settings'
+              }
+              hitSlop={10}
+              onPress={() => dispatch({ type: 'FALLBACK_CONTINUE', now: Date.now() })}
+              style={styles.helpLink}
+            >
+              <Text style={styles.helpLinkText}>
+                Having trouble?{' '}
+                <Text style={styles.helpLinkStrong}>
+                  {state.calibrated ? 'Good enough, continue' : 'Continue with default settings'}
+                </Text>
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      {state.phase === 'moves' && testMove ? (
+        <>
           <View
             accessible
-            accessibilityLiveRegion="polite"
-            accessibilityRole="summary"
-            accessibilityLabel={
-              state.phase === 'countdown'
-                ? `Body locked. Starting in ${state.countdown}. Hold still.`
-                : `${trackingStatus === 'searching' ? 'No body detected. Step into frame.' : state.phase === 'stabilizing' ? 'Body locked. Hold still.' : 'Acquiring. Reading your body.'} Stand your phone up, then step back until your shoulders and hips are in frame. Signal ${Math.round(feedback.calibrationProgress * 100)} percent.`
-            }
-            style={[styles.guidance, { bottom: insets.bottom + spacing.xl }]}
+            accessibilityLiveRegion="assertive"
+            accessibilityLabel={`${MOVE_PROMPT[testMove]} Move ${state.moveIndex + 1} of ${MOVE_TEST_ORDER.length}.`}
+            pointerEvents="none"
+            style={styles.movePrompt}
           >
-            {state.phase === 'countdown' ? (
-              <>
-                <Text style={styles.readyLabel}>LOCKED</Text>
-                <Text style={styles.countdown}>{state.countdown}</Text>
-              </>
+            <Ionicons name={MOVE_ICON[testMove]} size={54} color={hudTheme.accent} />
+            <Text style={[styles.movePromptText, { color: hudTheme.accent }]}>
+              {MOVE_PROMPT[testMove]}
+            </Text>
+            {state.trackingLost ? (
+              <Text style={styles.moveHint}>Step back into view</Text>
             ) : (
-              <>
-                <View style={styles.statusRow}>
-                  <View
-                    style={[
-                      styles.statusDot,
-                      state.phase === 'stabilizing' && styles.statusDotReady,
-                    ]}
-                  />
-                  <Text style={styles.statusLabel}>
-                    {trackingStatus === 'searching'
-                      ? 'NO BODY DETECTED'
-                      : state.phase === 'stabilizing'
-                        ? 'BODY LOCKED'
-                        : 'ACQUIRING'}
-                  </Text>
-                </View>
-                <Text style={styles.guidanceTitle}>
-                  {trackingStatus === 'searching'
-                    ? 'Step into frame'
-                    : state.phase === 'stabilizing'
-                      ? 'Hold still'
-                      : 'Reading your body'}
-                </Text>
-                {guided ? (
-                  <Text style={styles.setupGuidance}>
-                    Stand your phone up, then step back until your shoulders and hips
-                    sit inside the brackets. Full body is ideal.
-                  </Text>
-                ) : null}
-                <SignalMeter value={feedback.calibrationProgress} />
-                {guided ? null : (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Show setup instructions"
-                    hitSlop={10}
-                    onPress={() => setGuided(true)}
-                    style={styles.helpLink}
-                  >
-                    <Text style={styles.helpLinkText}>Show setup guide</Text>
-                  </Pressable>
-                )}
-              </>
+              <Text style={styles.moveHint}>Do it once. The game reads it live.</Text>
             )}
           </View>
+          <View style={[styles.guidance, { bottom: insets.bottom + spacing.xl }]}>
+            <View style={styles.moveDots}>
+              {MOVE_TEST_ORDER.map((move, index) => (
+                <View
+                  key={move}
+                  style={[
+                    styles.moveDot,
+                    index < state.moveIndex && { backgroundColor: hudTheme.accent },
+                    index === state.moveIndex && styles.moveDotActive,
+                  ]}
+                />
+              ))}
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Skip this move"
+              hitSlop={10}
+              onPress={skipMove}
+              style={styles.helpLink}
+            >
+              <Text style={styles.helpLinkText}>
+                Having trouble? <Text style={styles.helpLinkStrong}>Skip this move</Text>
+              </Text>
+            </Pressable>
+          </View>
         </>
-      )}
+      ) : null}
+
+      {state.phase === 'handoff' ? (
+        <View
+          accessible
+          accessibilityLiveRegion="polite"
+          accessibilityRole="summary"
+          accessibilityLabel={
+            state.countdown !== null
+              ? `Locked. Starting in ${state.countdown}. Hold still.`
+              : `${SYNC_LINES[syncLine]} Stand still in the center.`
+          }
+          style={[styles.guidance, { bottom: insets.bottom + spacing.xl }]}
+        >
+          {state.countdown !== null ? (
+            <>
+              <Text style={styles.readyLabel}>LOCKED</Text>
+              <Text style={styles.countdown}>{state.countdown}</Text>
+            </>
+          ) : (
+            <>
+              <View style={styles.statusRow}>
+                <ActivityIndicator size="small" color={hudTheme.accent} />
+                <Text style={styles.statusLabel}>
+                  {state.trackingLost ? 'LOOKING FOR YOU' : 'HOLD STILL'}
+                </Text>
+              </View>
+              <Text style={styles.guidanceTitle}>{SYNC_LINES[syncLine]}</Text>
+            </>
+          )}
+        </View>
+      ) : null}
+
+      {celebrate ? (
+        <View style={styles.endCard} accessible accessibilityLiveRegion="assertive">
+          <ParticleBurst trigger={bigBurst} theme={hudTheme} big count={26} duration={1_100} />
+          <Text style={styles.endEyebrow}>YOU&apos;RE IN</Text>
+          <Text style={styles.endTitle}>Your body is the controller.</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
 
-const SIGNAL_SEGMENTS = 12;
-
 /**
- * Segmented signal readout. Reads as sensor acquisition rather than a loading
- * bar, which is the distinction between instrument UI and game UI here.
+ * Screen 1. Full ceremony on the first run; the compact variant (repeat runs
+ * that still lack camera access) keeps the same message with a smaller figure.
  */
-function SignalMeter({ value }: { value: number }) {
-  const clamped = Math.max(0, Math.min(1, value));
-  const lit = Math.round(clamped * SIGNAL_SEGMENTS);
+function IntroScreen({
+  compact,
+  cameraOff,
+  loading,
+  topInset,
+  bottomInset,
+  hudTheme,
+  onEnable,
+  onOpenSettings,
+  onContinueWithout,
+}: {
+  compact: boolean;
+  cameraOff: boolean;
+  loading: boolean;
+  topInset: number;
+  bottomInset: number;
+  hudTheme: HudTheme;
+  onEnable: () => void;
+  onOpenSettings: () => void;
+  onContinueWithout: () => void;
+}) {
   return (
-    <View style={styles.signal}>
-      <View style={styles.signalTrack}>
-        {Array.from({ length: SIGNAL_SEGMENTS }, (_, index) => (
-          <View
-            key={index}
-            style={[styles.segment, index < lit && styles.segmentLit]}
-          />
-        ))}
+    <View style={[styles.intro, { paddingTop: topInset + 64, paddingBottom: bottomInset + spacing.lg }]}>
+      <View style={styles.introFigure}>
+        <CalibrationIntroFigure
+          width={compact ? 132 : 180}
+          height={compact ? 220 : 300}
+          theme={hudTheme}
+        />
       </View>
-      <Text style={styles.signalValue}>{Math.round(clamped * 100)}%</Text>
+      <View style={styles.introCopy}>
+        <Text style={styles.introTitle}>Your body is the controller.</Text>
+        <Text style={styles.introSub}>Turn on your camera so the game can see your moves.</Text>
+        <View style={styles.tip}>
+          <Ionicons name="sunny-outline" size={15} color={colors.lime} />
+          <Text style={styles.tipText}>
+            Find some space and good lighting. You will need room to jump and dodge.
+          </Text>
+        </View>
+      </View>
+      <View style={styles.introActions}>
+        {cameraOff ? (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onOpenSettings}
+              style={({ pressed }) => [styles.primary, pressed && styles.pressed]}
+            >
+              <Ionicons name="settings-outline" size={18} color={colors.black} />
+              <Text style={styles.primaryText}>CAMERA ACCESS IS OFF — OPEN SETTINGS</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onContinueWithout}
+              style={styles.secondary}
+            >
+              <Text style={styles.secondaryText}>CONTINUE WITH DEFAULT SETTINGS</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: loading, busy: loading }}
+              disabled={loading}
+              onPress={onEnable}
+              style={({ pressed }) => [styles.primary, pressed && styles.pressed]}
+            >
+              {loading ? (
+                <ActivityIndicator color={colors.black} />
+              ) : (
+                <>
+                  <Ionicons name="videocam" size={18} color={colors.black} />
+                  <Text style={styles.primaryText}>TURN ON CAMERA</Text>
+                </>
+              )}
+            </Pressable>
+            <Text style={styles.privacy}>
+              Processed on your phone. Never recorded, never uploaded.
+            </Text>
+          </>
+        )}
+      </View>
     </View>
   );
 }
@@ -689,6 +916,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
   header: { position: 'absolute', left: 76, right: 76, alignItems: 'center' },
+  devTimer: {
+    ...metric,
+    marginTop: 4,
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 10,
+    fontWeight: font.bold,
+  },
   tvHelp: {
     position: 'absolute',
     right: spacing.lg,
@@ -706,29 +940,6 @@ const styles = StyleSheet.create({
   tvHelpTextConnected: { color: colors.lime },
   eyebrow: { ...type.micro, color: colors.lime, letterSpacing: 1.7 },
   runName: { ...type.h3, color: colors.white, marginTop: 3 },
-  centerGuide: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  reticle: { width: '62%', height: '58%' },
-  bracket: {
-    position: 'absolute',
-    width: 26,
-    height: 26,
-    borderColor: 'rgba(255,255,255,0.9)',
-  },
-  bracketTL: { top: 0, left: 0, borderTopWidth: 2, borderLeftWidth: 2 },
-  bracketTR: { top: 0, right: 0, borderTopWidth: 2, borderRightWidth: 2 },
-  bracketBL: { bottom: 0, left: 0, borderBottomWidth: 2, borderLeftWidth: 2 },
-  bracketBR: { bottom: 0, right: 0, borderBottomWidth: 2, borderRightWidth: 2 },
-  floorGuide: {
-    position: 'absolute',
-    bottom: '20%',
-    width: '46%',
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.34)',
-  },
   guidance: {
     position: 'absolute',
     left: spacing.xl,
@@ -760,6 +971,7 @@ const styles = StyleSheet.create({
     lineHeight: 34,
     textAlign: 'center',
   },
+  guidanceTitleOk: { color: colors.lime },
   setupGuidance: {
     ...type.body,
     color: 'rgba(255,255,255,0.82)',
@@ -780,32 +992,90 @@ const styles = StyleSheet.create({
     fontWeight: font.heavy,
     letterSpacing: -3,
   },
-  signal: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.lg,
-  },
-  signalTrack: { flexDirection: 'row', gap: 3, alignItems: 'center' },
-  segment: {
-    width: 9,
-    height: 3,
-    backgroundColor: 'rgba(255,255,255,0.24)',
-  },
-  segmentLit: { backgroundColor: colors.lime },
-  signalValue: {
-    ...metric,
-    ...type.micro,
-    color: colors.white,
-    minWidth: 34,
-    letterSpacing: 0.6,
-  },
   helpLink: { marginTop: spacing.lg, paddingVertical: spacing.xs },
   helpLinkText: {
     ...type.bodySm,
     color: 'rgba(255,255,255,0.66)',
     fontWeight: font.bold,
+    textAlign: 'center',
   },
+  helpLinkStrong: { color: colors.white, textDecorationLine: 'underline' },
+  movePrompt: {
+    position: 'absolute',
+    top: '26%',
+    left: spacing.xl,
+    right: spacing.xl,
+    alignItems: 'center',
+  },
+  movePromptText: {
+    ...type.hero,
+    fontSize: 58,
+    lineHeight: 62,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
+  },
+  moveHint: {
+    ...type.body,
+    color: 'rgba(255,255,255,0.86)',
+    marginTop: spacing.sm,
+    textAlign: 'center',
+  },
+  moveDots: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
+  moveDot: {
+    width: 10,
+    height: 10,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(255,255,255,0.28)',
+  },
+  moveDotActive: {
+    width: 14,
+    height: 14,
+    borderWidth: 2,
+    borderColor: colors.white,
+    backgroundColor: 'transparent',
+  },
+  endCard: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+    backgroundColor: colors.bg,
+  },
+  endEyebrow: { ...type.micro, color: colors.lime, letterSpacing: 2 },
+  endTitle: {
+    ...type.display,
+    color: colors.white,
+    textAlign: 'center',
+    marginTop: spacing.md,
+  },
+  intro: {
+    ...StyleSheet.absoluteFillObject,
+    paddingHorizontal: spacing.xl,
+    backgroundColor: colors.bg,
+    justifyContent: 'space-between',
+  },
+  introFigure: { alignItems: 'center', justifyContent: 'center', flexGrow: 1 },
+  introCopy: { gap: spacing.sm, paddingBottom: spacing.lg },
+  introTitle: { ...type.display, color: colors.white, fontSize: 36, lineHeight: 39 },
+  introSub: { ...type.body, color: colors.textDim, fontSize: 16 },
+  tip: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.bgElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  tipText: { ...type.bodySm, color: colors.textDim, flex: 1 },
+  introActions: { gap: spacing.xs },
+  privacy: { ...type.bodySm, color: colors.textFaint, textAlign: 'center', marginTop: spacing.sm },
+  pressed: { opacity: 0.82 },
   card: {
     position: 'absolute',
     left: spacing.lg,
@@ -835,13 +1105,16 @@ const styles = StyleSheet.create({
   cardDetail: { ...type.body, color: colors.textDim, marginTop: spacing.sm },
   primary: {
     minHeight: 54,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
     marginTop: spacing.xl,
     borderRadius: radius.button,
     backgroundColor: colors.lime,
   },
-  primaryText: { ...type.action, color: colors.black },
+  primaryText: { ...type.action, color: colors.black, textAlign: 'center', flexShrink: 1 },
   secondary: { minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: spacing.xs },
   secondaryText: { color: colors.textDim, fontSize: 12, fontWeight: font.bold, letterSpacing: 0.4 },
 });
