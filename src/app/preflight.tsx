@@ -127,6 +127,12 @@ export default function PreflightScreen() {
     intensity?: string;
     classKey?: string | string[];
     /**
+     * "Record my run" is on (level screen). Forwarded to the workout; also
+     * keeps this screen's camera at the recording preset so the calibration
+     * handoff sees the same frame size as the run.
+     */
+    record?: string;
+    /**
      * Set by the onboarding recap. Calibration is the first-time ceremony: on
      * lock it hands off to the "first run is ready" screen (where the offer is
      * presented) instead of launching the player directly.
@@ -345,6 +351,7 @@ export default function PreflightScreen() {
           intensity,
           tracking,
           trackingRunId: runIdRef.current,
+          ...(params.record === '1' && tracking !== 'off' ? { record: '1' } : {}),
         },
       });
     },
@@ -503,6 +510,7 @@ export default function PreflightScreen() {
       {cameraActive ? (
         <WorkoutCameraPreview
           active
+          recordingEnabled={params.record === '1'}
           onPoseFrame={onPoseFrame}
           onTrackingStatus={() => {
             analyzerRef.current.markTrackingLost();
@@ -601,6 +609,7 @@ export default function PreflightScreen() {
           topInset={insets.top}
           bottomInset={insets.bottom}
           hudTheme={hudTheme}
+          recording={params.record === '1'}
           onEnable={enableCamera}
           onOpenSettings={openSettings}
           onContinueWithout={() =>
@@ -785,6 +794,7 @@ function IntroScreen({
   topInset,
   bottomInset,
   hudTheme,
+  recording,
   onEnable,
   onOpenSettings,
   onContinueWithout,
@@ -795,6 +805,7 @@ function IntroScreen({
   topInset: number;
   bottomInset: number;
   hudTheme: HudTheme;
+  recording: boolean;
   onEnable: () => void;
   onOpenSettings: () => void;
   onContinueWithout: () => void;
@@ -856,7 +867,9 @@ function IntroScreen({
               )}
             </Pressable>
             <Text style={styles.privacy}>
-              Processed on your phone. Never recorded, never uploaded.
+              {recording
+                ? 'Processed on your phone. Your run video stays on this device unless you share it.'
+                : 'Processed on your phone. Not recorded unless you turn on "Record my run".'}
             </Text>
           </>
         )}

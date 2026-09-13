@@ -19,7 +19,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import { Card, GradientButton, Pill, ProgressTrack, SpeedPill, StatReadout } from '@/components/ui';
-import { logPoseLatency } from '@/lib/analytics';
+import { logPoseLatency, logRunRecordingFailed } from '@/lib/analytics';
 import { getBeatmap, getBeatmapHash } from '@/lib/beatmapRegistry';
 import { requestRunNonce } from '@/lib/leaderboards';
 import { peekRunNonce, stageRunNonce, stageRunSubmission } from '@/lib/runSubmission';
@@ -46,6 +46,7 @@ import {
 import { useProgress } from '@/lib/ProgressContext';
 import { CLASS_META, caloriesForRun } from '@/lib/progression';
 import { RunClock, TICK_INTERVAL_S } from '@/lib/runClock';
+import { RunRecordingSession, isRunRecordingAvailable, stageRecordedRun } from '@/lib/runRecording';
 import {
   clearTrackingHandoff,
   consumeTrackingHandoff,
@@ -77,7 +78,7 @@ function safe(fn: () => void): void {
 }
 
 export default function WorkoutScreen() {
-  const { level, speed, duration: durationParam, intensity: intensityParam, tracking, trackingRunId, fromOnboarding } =
+  const { level, speed, duration: durationParam, intensity: intensityParam, tracking, trackingRunId, fromOnboarding, record } =
     useLocalSearchParams<{
       level: string;
       name?: string;
@@ -89,6 +90,8 @@ export default function WorkoutScreen() {
       trackingRunId?: string;
       /** Set when launched from the onboarding ceremony; forwarded to the summary. */
       fromOnboarding?: string;
+      /** "Record my run" (level screen): record the camera + a run log for the share video. */
+      record?: string;
     }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -138,6 +141,13 @@ export default function WorkoutScreen() {
   // camera; returning to the phone restores the user's prior PiP choice.
   const [phonePipVisible, setPhonePipVisible] = useState(true);
   const [nativePoseUnavailable, setNativePoseUnavailable] = useState(false);
+  // "Record my run": the camera writer + run log live for this screen only.
+  // Recording needs the phone as the screen and a calibrated tracking run
+  // (onboarding never sets `record`). See docs/RUN_RECORDING.md.
+  const recordRequested =
+    record === '1' && tracking === 'calibrated' && fromOnboarding !== '1' && isRunRecordingAvailable;
+  const recordingRef = useRef<RunRecordingSession | null>(null);
+  const [recordingState, setRecordingState] = useState<'idle' | 'starting' | 'recording' | 'ended'>('idle');
   const initialCalibrationRef = useRef(
     tracking === 'calibrated'
       ? consumeTrackingHandoff(trackingRunId, level)
@@ -237,6 +247,60 @@ export default function WorkoutScreen() {
   const remaining = duration > 0 ? Math.max(0, duration - elapsed) : 0;
   const calories = caloriesForRun(elapsed / 60, classKey, intensityMeta?.effort ?? 1);
 
+  // Recording starts once the map is `readyToPlay` and the run is unblocked
+  // (not on a TV, tracking live). The session's first written frame is the
+  // run log's wall-time zero; nothing is logged before that.
+  const canRecord =
+    recordRequested && trackingMode === 'real' && !onExternalScreen && typeof trackingRunId === 'string';
+  useEffect(() => {
+    if (!canRecord || status !== 'ready' || recordingRef.current || finishedRef.current) return;
+    const session = new RunRecordingSession({
+      runId: trackingRunId as string,
+      levelId: level,
+      levelName: levelInfo?.name ?? worldInfo?.name ?? level,
+      intensity: intensityParam ?? null,
+      playbackRate,
+      targetSeconds,
+      hudThemeId: hudTheme.id,
+    });
+    recordingRef.current = session;
+    setRecordingState('starting');
+    session.log.anchor(runClock.lastPositionSec);
+    if (runClock.videoLengthSec > 0) session.log.setVideoLength(runClock.videoLengthSec);
+    session.start().then(
+      () => {
+        if (recordingRef.current === session) setRecordingState('recording');
+      },
+      (error: unknown) => {
+        if (recordingRef.current !== session) return;
+        logRunRecordingFailed('record');
+        console.warn('[recording] start failed', error);
+        recordingRef.current = null;
+        setRecordingState('ended');
+      },
+    );
+  }, [canRecord, hudTheme.id, intensityParam, level, levelInfo, playbackRate, runClock, status, targetSeconds, trackingRunId, worldInfo]);
+
+  // Moving the run to a TV mid-recording remounts the camera and the writer is
+  // released with it (docs/RUN_RECORDING.md, "v1 does not record AirPlay
+  // runs"); drop the recording rather than ship a truncated clip.
+  useEffect(() => {
+    if (!onExternalScreen || !recordingRef.current) return;
+    recordingRef.current.cancel();
+    recordingRef.current = null;
+    setRecordingState('ended');
+  }, [onExternalScreen]);
+
+  // Unmount without finish/exit (e.g. the app was killed into a fresh route):
+  // never leave the writer running.
+  useEffect(
+    () => () => {
+      recordingRef.current?.cancel();
+      recordingRef.current = null;
+    },
+    [],
+  );
+
   useEffect(() => {
     if (trackingMode !== 'unavailable') return;
     setPoseFrame(null);
@@ -277,13 +341,16 @@ export default function WorkoutScreen() {
       if (deltas) latencyRef.current.record(deltas);
       setPoseFrame({ ...frame, keypoints: result.keypoints });
       setPoseFeedback(result.feedback);
+      const recording = recordingRef.current;
+      if (recording?.recording) recording.log.onPose({ keypoints: result.keypoints });
       if (result.move && runClock.isScoringActive(classifiedTs)) {
         // Combos chain on the VIDEO clock, not wall time or frame timestamps.
         const videoSec = runClock.videoTimeSec(classifiedTs);
         if (cueJudge) {
           // Beatmap level: grade against the nearest cue; tally the move only.
-          cueJudge.onMove(result.move, videoSec);
+          const judgement = cueJudge.onMove(result.move, videoSec);
           setCueScore(cueJudge.score);
+          if (recording?.recording) recording.log.onJudgement(judgement, videoSec, cueJudge.score, classifiedTs);
           setPoseScore((current) => countRecognizedMove(current, result.move!));
         } else {
           setPoseScore((current) =>
@@ -321,6 +388,35 @@ export default function WorkoutScreen() {
     // With a beatmap the action points come from the cue judge; the playback
     // progress component is composed the same way in both modes.
     const actionScore = cue ? cue.score : poseScoreRef.current.score;
+    const totalScore = totalWorkoutScore(actionScore, elapsedRef.current, durationRef.current);
+    // Stop the camera writer BEFORE navigating: unmounting the camera view
+    // releases the writer, so the file must be finalized while this screen is
+    // still up. The clip + log are staged by runId for the summary to compose.
+    const recording = recordingRef.current;
+    recordingRef.current = null;
+    let navigateAfter: Promise<unknown> = Promise.resolve();
+    if (recording?.active && typeof trackingRunId === 'string') {
+      const recorded = recording.finish({
+        score: actionScore,
+        totalScore,
+        accuracy: cueJudgeRef.current?.accuracy ?? 0,
+        maxCombo: cue ? cue.maxCombo : poseScoreRef.current.maxCombo,
+        perfect: cue?.perfect ?? 0,
+        good: cue?.good ?? 0,
+        miss: cue?.miss ?? 0,
+        elapsedSeconds: elapsedRef.current,
+      });
+      recorded.catch(() => logRunRecordingFailed('record'));
+      stageRecordedRun(trackingRunId, recorded);
+      // The writer finalizes in well under a second; never hold the summary
+      // longer than that if it does not.
+      navigateAfter = Promise.race([
+        recorded.catch(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, 1500)),
+      ]);
+    } else {
+      recording?.cancel();
+    }
     // Stage the verbatim judgement log + nonce for the summary to submit. The
     // server replays this log, so it is the cue score (not the composed
     // workout score) that goes on the board.
@@ -343,16 +439,14 @@ export default function WorkoutScreen() {
         accuracy: judge.accuracy,
       });
     }
-    router.replace({
+    void navigateAfter.then(() => router.replace({
       pathname: '/summary',
       params: {
         completed: '1',
         runId: trackingRunId,
         elapsedSeconds: String(elapsedRef.current),
         actionCounts: JSON.stringify(poseScoreRef.current.counts),
-        poseScore: String(
-          totalWorkoutScore(actionScore, elapsedRef.current, durationRef.current),
-        ),
+        poseScore: String(totalScore),
         maxCombo: String(cue ? cue.maxCombo : poseScoreRef.current.maxCombo),
         hasBeatmap: cue ? '1' : '0',
         perfectCount: String(cue?.perfect ?? 0),
@@ -364,11 +458,14 @@ export default function WorkoutScreen() {
         staleFramesDropped: String(latency.staleFramesDropped),
         ...(fromOnboarding === '1' ? { fromOnboarding: '1' } : {}),
       },
-    });
+    }));
   }, [fromOnboarding, level, playbackRate, router, runClock, targetSeconds, timedRun, trackingRunId]);
 
   const exitEarly = useCallback(() => {
     clearTrackingHandoff();
+    // Abandoned runs are never kept: the writer is aborted and the file deleted.
+    recordingRef.current?.cancel();
+    recordingRef.current = null;
     // An abandoned run still reports its pipeline latency (no-op without frames).
     logPoseLatency(latencyRef.current.summary());
     // Backing out must not clear the map or unlock the next campaign step.
@@ -454,6 +551,7 @@ export default function WorkoutScreen() {
           // Anchor at resumeAt and adopt the new source's duration BEFORE
           // crediting resumes, so the first post-swap tick is a natural delta.
           runClock.endSwap(resumeAt, newLength);
+          recordingRef.current?.log.onGate(runClock.isAdvancing(), resumeAt);
         })
         .catch(() => {
           if (replacementGenerationRef.current !== generation) return;
@@ -479,6 +577,7 @@ export default function WorkoutScreen() {
       else if (e.status === 'readyToPlay') setStatus('ready');
       // Scoring gate: only `readyToPlay` counts; loading/buffering close it.
       runClock.setReady(e.status === 'readyToPlay');
+      recordingRef.current?.log.onGate(runClock.isAdvancing(), runClock.lastPositionSec);
     });
     // Scoring gate: playing flag from the player itself, so an external pause
     // (Control Center, lock screen, AirPlay remote) closes it. On resume the
@@ -489,6 +588,7 @@ export default function WorkoutScreen() {
         position = player.currentTime || 0;
       });
       runClock.setPlaying(isPlaying, position);
+      recordingRef.current?.log.onGate(runClock.isAdvancing(), position);
     });
     safe(() => {
       runClock.setReady(player.status === 'readyToPlay');
@@ -540,7 +640,12 @@ export default function WorkoutScreen() {
       });
       // Classify the tick (natural / wrap / seek / stall / ignored-during-swap)
       // and credit only natural playback and loop wraps. See runClock.ts.
-      runClock.tick(position);
+      const tickKind = runClock.tick(position);
+      const recording = recordingRef.current;
+      if (recording?.recording) {
+        if (runClock.videoLengthSec > 0) recording.log.setVideoLength(runClock.videoLengthSec);
+        recording.log.onTick(tickKind, position, runClock.isAdvancing(), Date.now());
+      }
       if (cueJudge) {
         // Cues follow the accumulated video clock; expire missed ones and
         // surface the next cue for the HUD. Loops wrap at the REAL source
@@ -557,9 +662,15 @@ export default function WorkoutScreen() {
           }
         }
         const videoSec = runClock.videoTimeSec();
-        if (cueJudge.onTick(videoSec) > 0) setCueScore(cueJudge.score);
+        const expired = cueJudge.onTick(videoSec);
+        if (expired > 0) setCueScore(cueJudge.score);
         const next = cueJudge.upcoming(videoSec)[0];
         setUpcomingCue(next ? { move: next.move, inMs: Math.round((next.at - videoSec) * 1000) } : null);
+        if (recording?.recording) {
+          const now = Date.now();
+          if (expired > 0) recording.log.onExpiry(expired, videoSec, cueJudge.score, now);
+          recording.log.onUpcoming(next ? { move: next.move, at: next.at } : null, now);
+        }
       }
       if (__DEV__) {
         setDevLatency({
@@ -629,6 +740,7 @@ export default function WorkoutScreen() {
             <View style={styles.companionCameraFrame}>
               <WorkoutCameraPreview
                 active={screenFocused && onExternalScreen}
+                recordingEnabled={recordRequested}
                 onPoseFrame={handlePoseFrame}
                 onStaleFrame={handleStaleFrame}
                 onTrackingStatus={handleTrackingStatus}
@@ -693,6 +805,7 @@ export default function WorkoutScreen() {
             <View style={styles.pipFrame} pointerEvents="none">
               <WorkoutCameraPreview
                 active={screenFocused}
+                recordingEnabled={recordRequested}
                 onPoseFrame={handlePoseFrame}
                 onStaleFrame={handleStaleFrame}
                 onTrackingStatus={handleTrackingStatus}
@@ -711,19 +824,33 @@ export default function WorkoutScreen() {
                 variant="pip"
               />
             </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Hide camera preview"
-              accessibilityHint="Hides the corner form preview for this workout"
-              hitSlop={10}
-              onPress={() => setPhonePipVisible(false)}
-              style={({ pressed }) => [
-                styles.pipCloseButton,
-                pressed && styles.controlPressed,
-              ]}
-            >
-              <Ionicons name="close" size={16} color={colors.white} />
-            </Pressable>
+            {recordingState === 'starting' || recordingState === 'recording' ? (
+              // The camera view is the recorder: hiding the PiP would unmount
+              // it and end the clip, so the control is withheld while recording.
+              <View
+                style={styles.pipRecBadge}
+                accessible
+                accessibilityLabel="Recording your run"
+                accessibilityLiveRegion="polite"
+              >
+                <View style={styles.pipRecDot} />
+                <Text style={styles.pipRecText}>REC</Text>
+              </View>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Hide camera preview"
+                accessibilityHint="Hides the corner form preview for this workout"
+                hitSlop={10}
+                onPress={() => setPhonePipVisible(false)}
+                style={({ pressed }) => [
+                  styles.pipCloseButton,
+                  pressed && styles.controlPressed,
+                ]}
+              >
+                <Ionicons name="close" size={16} color={colors.white} />
+              </Pressable>
+            )}
           </View>
         ) : (
           <Pressable
@@ -802,9 +929,16 @@ export default function WorkoutScreen() {
         </View>
       ) : null}
 
-      {/* Additive (AirPlay): AirPlay control + on-TV status pill. */}
+      {/* Additive (AirPlay): AirPlay control + on-TV status pill. The REC
+          indicator is never hidden while the writer is running. */}
       {Platform.OS === 'ios' ? (
         <View style={[styles.tvControls, { top: insets.top + spacing.sm }]} pointerEvents="box-none">
+          {recordingState === 'starting' || recordingState === 'recording' ? (
+            <View style={styles.recPill} accessible accessibilityLabel="Recording your run">
+              <View style={styles.recDot} />
+              <Text style={styles.recPillText}>REC</Text>
+            </View>
+          ) : null}
           {onExternalScreen ? (
             <View style={styles.tvPill}>
               <Ionicons name="tv" size={13} color={colors.lime} />
@@ -888,6 +1022,31 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.35)',
   },
   tvPillText: { color: colors.white, fontSize: 13, fontWeight: font.bold },
+  recPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 38,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  recDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: '#FF3B30' },
+  recPillText: { color: colors.white, fontSize: 12, fontWeight: font.black, letterSpacing: 1.2 },
+  pipRecBadge: {
+    position: 'absolute',
+    top: spacing.xs,
+    right: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    height: 24,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.82)',
+  },
+  pipRecDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#FF3B30' },
+  pipRecText: { color: colors.white, fontSize: 10, fontWeight: font.black, letterSpacing: 1 },
   airplayBtn: {
     width: 38,
     height: 38,

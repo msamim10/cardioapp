@@ -28,6 +28,12 @@ import { colors, font, radius, spacing } from '@/theme';
 
 type WorkoutCameraPreviewProps = {
   active: boolean;
+  /**
+   * The run may record the camera: the native session runs at 720p from its
+   * first frame (see cardiosurf-pose `recordingEnabled`). Must be the same
+   * for every preview of one run, preflight included.
+   */
+  recordingEnabled?: boolean;
   onUnavailable?: () => void;
   onPoseFrame: (frame: PoseFrame) => void;
   /**
@@ -57,6 +63,7 @@ type WorkoutCameraPreviewProps = {
 
 export function WorkoutCameraPreview({
   active,
+  recordingEnabled = false,
   onUnavailable,
   onPoseFrame,
   onStaleFrame,
@@ -147,6 +154,7 @@ export function WorkoutCameraPreview({
       {realCameraReady ? (
         <NativePoseCamera
           active={cameraActive}
+          recordingEnabled={recordingEnabled}
           onPose={({ nativeEvent }) => {
             // Stamp receipt first so the bridge delta excludes our own work.
             const receivedTs = Date.now();

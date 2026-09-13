@@ -86,6 +86,11 @@ export const EVENTS = {
   poseLatency: 'pose_latency',
   // First-run calibration test drive: the user skipped one of the four moves.
   calibrationMoveSkipped: 'calibration_move_skipped',
+  // "Record my run" (docs/RUN_RECORDING.md): opt-in, composed, shared, failed.
+  runRecordingEnabled: 'run_recording_enabled',
+  runRecordingCompleted: 'run_recording_completed',
+  runRecordingShared: 'run_recording_shared',
+  runRecordingFailed: 'run_recording_failed',
 } as const;
 
 let initialized = false;
@@ -298,6 +303,40 @@ export function logPoseLatency(summary: LatencySummary): void {
     }
     singularEvent(EVENTS.poseLatency, args);
   });
+}
+
+// --- Run recording ----------------------------------------------------------
+
+/** The user switched "Record my run" on (level screen). */
+export function logRunRecordingEnabled(): void {
+  safely('logRunRecordingEnabled', () => singularEvent(EVENTS.runRecordingEnabled));
+}
+
+/** A share video was composed: clip length, compose time and output size. */
+export function logRunRecordingCompleted(attrs: {
+  durationMs: number;
+  composeMs: number;
+  fileBytes: number;
+}): void {
+  safely('logRunRecordingCompleted', () =>
+    singularEvent(EVENTS.runRecordingCompleted, {
+      duration_ms: Math.round(finiteOr(attrs?.durationMs, 0)),
+      compose_ms: Math.round(finiteOr(attrs?.composeMs, 0)),
+      file_bytes: Math.round(finiteOr(attrs?.fileBytes, 0)),
+    }),
+  );
+}
+
+/** The user exported the video. `target` is our surface (photos / share sheet), not the destination app. */
+export function logRunRecordingShared(target?: 'photos' | 'share'): void {
+  safely('logRunRecordingShared', () =>
+    singularEvent(EVENTS.runRecordingShared, target ? { target } : undefined),
+  );
+}
+
+/** Recording or composition failed at `stage`. */
+export function logRunRecordingFailed(stage: 'record' | 'asset' | 'log' | 'plan' | 'compose' | 'export'): void {
+  safely('logRunRecordingFailed', () => singularEvent(EVENTS.runRecordingFailed, { stage }));
 }
 
 /**

@@ -73,6 +73,10 @@ export type PlaySetup = {
   runSettings: RunSettings | null;
   /** Set when the user chose to run without body tracking during onboarding. */
   firstRunTrackingOff: boolean;
+  /** "Record my run" toggle on the level screen; off until the user opts in. */
+  recordRun: boolean;
+  /** The one-time "what gets recorded" explainer has been shown. */
+  recordExplainerSeen: boolean;
 };
 
 export const DEFAULT_PLAY_SCREEN: PlayScreen = 'tv';
@@ -83,6 +87,8 @@ function emptySetup(): PlaySetup {
     firstRunLevelId: null,
     runSettings: null,
     firstRunTrackingOff: false,
+    recordRun: false,
+    recordExplainerSeen: false,
   };
 }
 
@@ -113,6 +119,8 @@ function parse(raw: string | null): PlaySetup {
           : null,
       runSettings: parseRunSettings(parsed.runSettings),
       firstRunTrackingOff: parsed.firstRunTrackingOff === true,
+      recordRun: parsed.recordRun === true,
+      recordExplainerSeen: parsed.recordExplainerSeen === true,
     };
   } catch {
     return emptySetup();
@@ -178,6 +186,18 @@ export function saveRunSettings(settings: RunSettings): Promise<PlaySetup> {
 export function saveFirstRunTrackingOff(off: boolean): Promise<PlaySetup> {
   return mutate((setup) => {
     setup.firstRunTrackingOff = off;
+  });
+}
+
+export function saveRecordRun(enabled: boolean): Promise<PlaySetup> {
+  return mutate((setup) => {
+    setup.recordRun = enabled;
+  });
+}
+
+export function saveRecordExplainerSeen(): Promise<PlaySetup> {
+  return mutate((setup) => {
+    setup.recordExplainerSeen = true;
   });
 }
 

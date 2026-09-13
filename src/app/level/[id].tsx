@@ -2,6 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCameraPermissions } from 'expo-camera';
+import * as Device from 'expo-device';
 import { VideoAirPlayButton } from 'expo-video';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -10,13 +12,22 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RecordRunExplainerSheet } from '@/components/RecordRunExplainerSheet';
 import { RunSettingsSheet } from '@/components/RunSettingsSheet';
 import { OptionCard, SectionHeader } from '@/components/ui';
+import { logRunRecordingEnabled } from '@/lib/analytics';
 import { hasBeatmap } from '@/lib/beatmapRegistry';
+import {
+  checkCompositeAvailable,
+  hasCachedCompositeAsset,
+  prefetchCompositeAsset,
+  type CompositeAvailability,
+} from '@/lib/compositeAssetCache';
 import { discoveryClassForMode } from '@/lib/dailyRecommendations';
 import { displayHandle, fetchChallenge, type ChallengeCard } from '@/lib/leaderboards';
 import { getMode, modes } from '@/lib/gameData';
@@ -27,10 +38,13 @@ import {
   loadPlaySetup,
   resolveRunSettings,
   savePlayScreen,
+  saveRecordExplainerSeen,
+  saveRecordRun,
   saveRunSettings,
   type RunSettings,
 } from '@/lib/playSetup';
 import { useProgress } from '@/lib/ProgressContext';
+import { isRunRecordingAvailable } from '@/lib/runRecording';
 import {
   caloriesForRun,
   CLASS_META,
@@ -78,6 +92,15 @@ export default function LevelDetailScreen() {
   const [editOpen, setEditOpen] = useState(false);
   // Beat-my-score deep link: `?challenge={runId}` → public `challenges/{runId}`.
   const [challenge, setChallenge] = useState<ChallengeCard | null>(null);
+  // "Record my run": persisted opt-in, one-time explainer, and whether this
+  // map's composite game asset (needed to build the share video) is hosted
+  // and cached. See docs/RUN_RECORDING.md.
+  const [cameraPermission] = useCameraPermissions();
+  const [recordRun, setRecordRun] = useState(false);
+  const [recordExplainerSeen, setRecordExplainerSeen] = useState(false);
+  const [recordExplainerOpen, setRecordExplainerOpen] = useState(false);
+  const [compositeState, setCompositeState] = useState<CompositeAvailability | 'checking'>('checking');
+  const [compositeCached, setCompositeCached] = useState(false);
 
   useEffect(() => {
     if (!challengeId) {
@@ -99,6 +122,8 @@ export default function LevelDetailScreen() {
       if (!mounted) return;
       setRunSettings(resolveRunSettings(setup, answers));
       if (setup.screen) setPlaybackDestination(setup.screen);
+      setRecordRun(setup.recordRun);
+      setRecordExplainerSeen(setup.recordExplainerSeen);
     });
     return () => {
       mounted = false;
@@ -106,6 +131,85 @@ export default function LevelDetailScreen() {
     // Only the initial resolve should read answers; later edits are explicit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Recording needs the writer + composer (iOS native build, physical device),
+  // the phone as the screen (v1 does not record AirPlay runs), camera access
+  // and a hosted composite asset for this map.
+  const recordingDeviceCapable = Platform.OS === 'ios' && Device.isDevice && isRunRecordingAvailable;
+  const recordBlockedReason: string | null =
+    playbackDestination === 'tv'
+      ? 'Not available for TV runs yet. Choose Phone to record.'
+      : !recordingDeviceCapable
+        ? 'Body tracking is unavailable in this build, so runs cannot be recorded.'
+        : cameraPermission?.granted === false
+          ? 'Camera access is off. Enable it in Settings to record.'
+          : compositeState === 'missing'
+            ? "Recording isn't available for this map yet."
+            : null;
+  const recordEffective = recordRun && recordBlockedReason === null;
+
+  useEffect(() => {
+    if (!id || !recordingDeviceCapable) return undefined;
+    let mounted = true;
+    setCompositeCached(hasCachedCompositeAsset(id));
+    setCompositeState('checking');
+    checkCompositeAvailable(id).then((state) => {
+      if (mounted) setCompositeState(state);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [id, recordingDeviceCapable]);
+
+  // Background prefetch as soon as the toggle is on and the asset is hosted;
+  // the summary falls back to a foreground download if this never lands.
+  useEffect(() => {
+    if (!id || !recordEffective || compositeState !== 'available' || compositeCached) return undefined;
+    let mounted = true;
+    prefetchCompositeAsset(id).then((path) => {
+      if (!mounted) return;
+      if (path) setCompositeCached(true);
+      else setCompositeState('unknown');
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [compositeCached, compositeState, id, recordEffective]);
+
+  const enableRecording = () => {
+    setRecordRun(true);
+    void saveRecordRun(true);
+    logRunRecordingEnabled();
+    if (!recordExplainerSeen) {
+      setRecordExplainerSeen(true);
+      void saveRecordExplainerSeen();
+    }
+  };
+
+  const onToggleRecord = (next: boolean) => {
+    if (!next) {
+      setRecordRun(false);
+      void saveRecordRun(false);
+      return;
+    }
+    if (!recordExplainerSeen) {
+      setRecordExplainerOpen(true);
+      return;
+    }
+    enableRecording();
+  };
+
+  const recordStatusCopy = recordBlockedReason
+    ? recordBlockedReason
+    : !recordRun
+      ? 'Get a shareable video of your run: the map on top, you below, with your hits and score.'
+      : compositeState === 'checking'
+        ? 'Checking this map…'
+        : compositeCached
+          ? 'Ready to record. Stays on your phone until you share it.'
+          : compositeState === 'available'
+            ? 'Preparing your recording…'
+            : 'Could not prepare this map right now. It will retry when your run ends.';
 
   const intensityMeta = INTENSITY_META[runSettings.intensity];
   const sessionLabel = useMemo(
@@ -157,6 +261,7 @@ export default function LevelDetailScreen() {
     duration: String(runSettings.durationMin),
     intensity: runSettings.intensity,
     ...(campaignClass ? { classKey: campaignClass } : {}),
+    ...(recordEffective ? { record: '1' } : {}),
   };
 
   const saveEdits = (next: RunSettings) => {
@@ -446,6 +551,45 @@ export default function LevelDetailScreen() {
             </View>
           </View>
         ) : null}
+
+        {Platform.OS === 'ios' ? (
+          <View style={styles.section}>
+            <SectionHeader title="Share" />
+            <View
+              style={[styles.recordCard, recordBlockedReason && styles.recordCardDisabled]}
+              accessible
+              accessibilityRole="switch"
+              accessibilityLabel="Record my run"
+              accessibilityHint={recordStatusCopy}
+              accessibilityState={{ checked: recordEffective, disabled: recordBlockedReason !== null }}
+            >
+              <View style={[styles.sessionIcon, recordEffective && styles.recordIconOn]}>
+                <Ionicons
+                  name={recordEffective ? 'videocam' : 'videocam-outline'}
+                  size={18}
+                  color={recordEffective ? '#FF3B30' : colors.lime}
+                />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <View style={styles.recordTitleRow}>
+                  <Text style={styles.sessionValue}>Record my run</Text>
+                  {recordEffective && compositeState === 'available' && !compositeCached ? (
+                    <ActivityIndicator size="small" color={colors.lime} />
+                  ) : null}
+                </View>
+                <Text style={styles.sessionDetail}>{recordStatusCopy}</Text>
+              </View>
+              <Switch
+                value={recordEffective}
+                onValueChange={onToggleRecord}
+                disabled={recordBlockedReason !== null}
+                trackColor={{ true: colors.lime, false: colors.surface3 }}
+                thumbColor={colors.white}
+                ios_backgroundColor={colors.surface3}
+              />
+            </View>
+          </View>
+        ) : null}
       </ScrollView>
 
       <View
@@ -495,6 +639,14 @@ export default function LevelDetailScreen() {
         value={runSettings}
         onClose={() => setEditOpen(false)}
         onSave={saveEdits}
+      />
+      <RecordRunExplainerSheet
+        visible={recordExplainerOpen}
+        onConfirm={() => {
+          setRecordExplainerOpen(false);
+          enableRecording();
+        }}
+        onClose={() => setRecordExplainerOpen(false)}
       />
     </View>
   );
@@ -668,6 +820,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   playDestinationGroup: { gap: spacing.sm },
+  recordCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  recordCardDisabled: { opacity: 0.7 },
+  recordIconOn: { backgroundColor: 'rgba(255,59,48,0.12)' },
+  recordTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 },
   playDestinationOptions: { gap: spacing.sm },
   tvAirplayCardWrap: {
     position: 'relative',

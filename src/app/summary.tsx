@@ -6,6 +6,7 @@ import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RunVideoCard } from '@/components/RunVideoCard';
 import { ShareScoreSheet, type ShareScoreInput } from '@/components/ShareScoreCard';
 import { GhostButton, GradientButton, Mascot } from '@/components/ui';
 import { useAuth } from '@/lib/AuthContext';
@@ -258,6 +259,7 @@ export default function SummaryScreen() {
     coins: totalCoins,
     activeClass,
     username,
+    hudThemeId,
   } = useProgress();
   const { user } = useAuth();
 
@@ -639,6 +641,21 @@ export default function SummaryScreen() {
                 />
               </View>
             </View>
+          ) : null}
+
+          {/* "Record my run": the clip staged by the workout becomes a share
+              video here. Renders nothing when the run was not recorded. */}
+          {params.completed === '1' && params.runId ? (
+            <RunVideoCard
+              runId={params.runId}
+              ready={recapReady}
+              levelName={playedMode?.name ?? 'CardioSurf'}
+              score={poseScore}
+              accuracy={accuracy}
+              maxCombo={maxCombo}
+              personalBest={personalBest !== null}
+              hudThemeId={hudThemeId}
+            />
           ) : null}
 
           {/* Leaderboard: server-verified rank for cued runs, or why it didn't post. */}
