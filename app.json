@@ -14,6 +14,8 @@
       "associatedDomains": ["applinks:cardiosurf.com"],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "CardioSurf uses the camera to track your movements so your body controls the game. If you turn on \"Record my run\", your camera video is saved on your device so you can share it. Nothing is uploaded unless you share it.",
+        "NSPhotoLibraryAddUsageDescription": "Lets CardioSurf save your run videos to your Photos when you choose to.",
         "SKAdNetworkItems": [
           { "SKAdNetworkIdentifier": "v9wttpbfk9.skadnetwork" },
           { "SKAdNetworkIdentifier": "n38lu8286q.skadnetwork" },
@@ -112,12 +114,21 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "CardioSurf uses the camera to track your full-body movement so your real workout controls the game. Video stays on your device and is never recorded or uploaded.",
+          "cameraPermission": "CardioSurf uses the camera to track your movements so your body controls the game. If you turn on \"Record my run\", your camera video is saved on your device so you can share it. Nothing is uploaded unless you share it.",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
       ],
       "expo-video",
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "Lets CardioSurf save your run videos to your Photos when you choose to.",
+          "photosPermission": "CardioSurf only adds run videos you save; it does not read your library.",
+          "isAccessMediaLocationEnabled": false,
+          "granularPermissions": []
+        }
+      ],
       "expo-apple-authentication",
       [
         "@react-native-google-signin/google-signin",

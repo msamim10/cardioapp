@@ -93,8 +93,14 @@ This one 6.9" set auto-scales to all smaller iPhones. (App is iPhone-only — no
 - Usage Data → Product Interaction (progress/level completion)
 
 **Data NOT collected:**
-- Camera / Photos / Video — motion tracking runs 100% on-device (Apple Vision, keypoints only); no image/video is stored or transmitted.
+- Camera / Photos / Video — motion tracking runs 100% on-device (Apple Vision, keypoints only); no image/video is transmitted.
+- **User Content → Photos or Videos — NOT collected.** "Record my run" (opt-in, off by default) records the user's camera and composes a share video, but the file never leaves the device unless the user saves it to Photos or shares it through the system share sheet. Apple's definition of "collected" is data transmitted off the device to the developer or a third-party SDK; on-device-only processing that the user exports themselves is not collection. Keep the answer **No** — but the Review Notes must disclose the recording (below), and `NSCameraUsageDescription` / `NSPhotoLibraryAddUsageDescription` in `app.json` already describe it.
 - Location, Diagnostics, Crash data — not collected (no analytics/crash SDK).
+
+**Owner action when shipping run recording (docs/RUN_RECORDING.md):**
+1. App Privacy → leave "Photos or Videos" unchecked (reasoning above). If you later add any upload of run videos (cloud share links, moderation), change this to *Collected, Linked to You, App Functionality* before submitting that build.
+2. Re-read the camera permission string in App Store Connect's screenshots/preview if it appears in marketing material — it no longer says "never recorded".
+3. Update the Review Notes with the sentence below.
 
 ---
 
@@ -114,7 +120,7 @@ This one 6.9" set auto-scales to all smaller iPhones. (App is iPhone-only — no
 Thanks for reviewing CardioSurf!
 
 HOW THE APP WORKS
-CardioSurf is a movement-based cardio game. Stand a few feet from the device in a clear space. The front camera is used ONLY for on-device full-body motion tracking (Apple Vision) so your jumps, ducks and side-steps control an endless-runner game. No photos or video are ever recorded, stored, or uploaded — only skeletal keypoints are processed on-device in real time.
+CardioSurf is a movement-based cardio game. Stand a few feet from the device in a clear space. The front camera is used for on-device full-body motion tracking (Apple Vision) so your jumps, ducks and side-steps control an endless-runner game; by default only skeletal keypoints are processed on-device in real time and no video is stored. There is an optional, off-by-default "Record my run" toggle on the pre-run screen: when the user turns it on, the camera video of that run is recorded to the device and composed locally into a silent share video (game on top, camera below). That video stays on the device — it is never uploaded by the app — and is only exported if the user taps "Save to Photos" (add-only Photos permission) or "Share" (system share sheet). No microphone access is requested.
 
 GETTING STARTED
 1. Sign in with the provided demo account (appreview@cardiosurf.app).
