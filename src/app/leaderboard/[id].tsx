@@ -4,12 +4,22 @@ import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { localDateKey } from '@shared/scoring/daily';
+import { GHOST_DAILY_TARGET, GHOST_TARGET_TOTAL } from '@shared/scoring/ghosts';
 import { LeaderboardEmpty, LeaderboardRow } from '@/components/LeaderboardRow';
 import { LivePill } from '@/components/LivePill';
 import { ShareScoreSheet, type ShareScoreInput } from '@/components/ShareScoreCard';
 import { useAuth } from '@/lib/AuthContext';
+import { useBeatmapCacheVersion } from '@/lib/beatmapRegistry';
+import {
+  dailyBoardKey,
+  friendsBoardKey,
+  levelBoardKey,
+  rememberBoard,
+  useBoardCacheVersion,
+} from '@/lib/boardCache';
 import { getDailyChallenge } from '@/lib/dailyRecommendations';
 import { getMode, modes } from '@/lib/gameData';
+import { instantDailyBoard, instantFriendsBoard, instantLevelBoard } from '@/lib/instantBoards';
 import {
   fetchDailyMyEntry,
   fetchDailyRank,
@@ -18,6 +28,7 @@ import {
   fetchMyEntry,
   fetchRank,
   fetchTopEntries,
+  LEADERBOARD_PAGE,
   rankRows,
   type LeaderboardEntry,
 } from '@/lib/leaderboards';
@@ -53,40 +64,66 @@ export default function LeaderboardScreen() {
   const hasDaily = Boolean(dateKey);
   const [tab, setTab] = useState<Tab>(first(params.board) === 'daily' && hasDaily ? 'daily' : 'global');
 
-  const [state, setState] = useState<Record<Tab, BoardState | null>>({ global: null, friends: null, daily: null });
+  // Live results per tab. Until one lands the tab shows its instant board:
+  // the cached last result merged with the deterministic ghost set the server
+  // keeps on that board (see instantBoards.ts) — never a spinner or an empty
+  // state. Friends has no ghosts: cache or nothing while it loads.
+  const [live, setLive] = useState<Partial<Record<Tab, BoardState>>>({});
+  const [refreshing, setRefreshing] = useState(false);
   const [share, setShare] = useState<ShareScoreInput | null>(null);
+  const cacheVersion = useBoardCacheVersion();
+  const chartVersion = useBeatmapCacheVersion();
+  const instant = useMemo<BoardState | null>(() => {
+    if (!id) return null;
+    if (tab === 'daily' && dateKey) return instantDailyBoard(dateKey, LEADERBOARD_PAGE);
+    if (tab === 'friends') return instantFriendsBoard(id, uid);
+    return instantLevelBoard(id, LEADERBOARD_PAGE);
+    // cacheVersion / chartVersion re-run this when hydration or a chart lands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheVersion, chartVersion, dateKey, id, tab, uid]);
 
   useFocusEffect(
     useCallback(() => {
       if (!id) return undefined;
       let cancelled = false;
-      const load = async (): Promise<BoardState> => {
+      const load = async (): Promise<{ key: string; board: BoardState; empty: boolean }> => {
         if (tab === 'daily' && dateKey) {
           const [rows, mine] = await Promise.all([fetchDailyTop(dateKey), uid ? fetchDailyMyEntry(dateKey, uid) : null]);
           const rank = mine ? await fetchDailyRank(dateKey, mine.score) : null;
-          return { rows, me: mine && rank ? { entry: mine, rank } : null };
+          return { key: dailyBoardKey(dateKey), board: { rows, me: mine && rank ? { entry: mine, rank } : null }, empty: rows.length === 0 };
         }
         if (tab === 'friends') {
           const following = uid ? await fetchFollowing(uid) : [];
           const rows = await fetchEntriesForUids(id, uid ? [...following, uid] : following);
           const mine = rows.find((row) => row.uid === uid) ?? null;
           const rank = mine ? rankRows(rows).find((row) => row.uid === uid)?.rank ?? null : null;
-          return { rows, me: mine && rank ? { entry: mine, rank } : null };
+          return { key: friendsBoardKey(id, uid ?? ''), board: { rows, me: mine && rank ? { entry: mine, rank } : null }, empty: false };
         }
         const [rows, mine] = await Promise.all([fetchTopEntries(id), uid ? fetchMyEntry(id, uid) : null]);
         const rank = mine ? await fetchRank(id, mine.score) : null;
-        return { rows, me: mine && rank ? { entry: mine, rank } : null };
+        return { key: levelBoardKey(id), board: { rows, me: mine && rank ? { entry: mine, rank } : null }, empty: rows.length === 0 };
       };
-      load().then((next) => {
-        if (!cancelled) setState((prev) => ({ ...prev, [tab]: next }));
-      });
+      setRefreshing(true);
+      load()
+        .then(({ key, board, empty }) => {
+          if (cancelled) return;
+          // While the server seeds boards they are never empty, so an empty
+          // reply is the fetchers' offline / not-configured fallback, not a
+          // real board state: keep showing the instant rows.
+          if (empty && (tab === 'daily' ? GHOST_DAILY_TARGET : GHOST_TARGET_TOTAL) > 0) return;
+          if (uid || tab !== 'friends') rememberBoard(key, board.rows, board.me);
+          setLive((prev) => ({ ...prev, [tab]: board }));
+        })
+        .finally(() => {
+          if (!cancelled) setRefreshing(false);
+        });
       return () => {
         cancelled = true;
       };
     }, [dateKey, id, tab, uid])
   );
 
-  const board = state[tab];
+  const board = live[tab] ?? instant;
   const ranked = rankRows(board?.rows ?? []);
   const meInList = board?.me ? ranked.some((row) => row.uid === board.me?.entry.uid) : false;
 
@@ -151,6 +188,10 @@ export default function LeaderboardScreen() {
             <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
           </Pressable>
         ))}
+        <View style={styles.tabsTrail}>
+          {/* Subtle background-refresh hint; the rows are already on screen. */}
+          {refreshing ? <ActivityIndicator size="small" color={colors.textFaint} /> : null}
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xl }]}>
@@ -162,9 +203,7 @@ export default function LeaderboardScreen() {
         ) : null}
         {!mode ? (
           <LeaderboardEmpty icon="alert-circle-outline" title="Level not found" />
-        ) : board === null ? (
-          <ActivityIndicator color={colors.lime} style={styles.loading} />
-        ) : ranked.length === 0 ? (
+        ) : board === null ? null : ranked.length === 0 ? (
           <LeaderboardEmpty
             title={tab === 'friends' ? 'No friends on this board yet' : 'No scores yet — be the first'}
             detail={
@@ -232,7 +271,8 @@ const styles = StyleSheet.create({
   headerText: { flex: 1, minWidth: 0 },
   headerEyebrow: { ...type.micro, color: colors.textFaint },
   headerTitle: { ...type.h2, color: colors.text, fontSize: 20 },
-  tabs: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  tabs: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  tabsTrail: { flex: 1, minHeight: 20, alignItems: 'flex-end', justifyContent: 'center' },
   tab: {
     paddingHorizontal: spacing.md,
     paddingVertical: 8,
@@ -245,9 +285,16 @@ const styles = StyleSheet.create({
   tabText: { color: colors.textDim, fontSize: 13, fontWeight: font.bold },
   tabTextActive: { color: colors.black },
   content: { paddingHorizontal: spacing.lg, gap: spacing.md },
-  loading: { paddingVertical: spacing.xxl },
   list: { borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: spacing.xs },
-  boardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: -spacing.xs },
+  // Label left, LIVE pill on the right edge (same placement as the Home card).
+  boardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    paddingRight: spacing.xs,
+    marginBottom: -spacing.xs,
+  },
   meBlock: { gap: spacing.xs },
   meLabel: { ...type.label, color: colors.textDim, paddingHorizontal: spacing.xs },
   footer: {

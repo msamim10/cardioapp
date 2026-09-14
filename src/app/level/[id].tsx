@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { recordBlockedReasonFor, RunSettingsSheet } from '@/components/RunSettingsSheet';
+import { TopRunnersCard } from '@/components/TopRunnersCard';
 import { logRunRecordingEnabled } from '@/lib/analytics';
 import { useAuth } from '@/lib/AuthContext';
 import { refreshBeatmap } from '@/lib/beatmapRegistry';
@@ -18,7 +19,7 @@ import {
   type CompositeAvailability,
 } from '@/lib/compositeAssetCache';
 import { discoveryClassForMode } from '@/lib/dailyRecommendations';
-import { displayHandle, fetchChallenge, fetchMyEntry, fetchRank, type ChallengeCard } from '@/lib/leaderboards';
+import { displayHandle, fetchChallenge, type ChallengeCard } from '@/lib/leaderboards';
 import { getMode, modes } from '@/lib/gameData';
 import { getModeCover } from '@/lib/modeCovers';
 import { useOnboarding } from '@/lib/OnboardingContext';
@@ -34,7 +35,12 @@ import {
 } from '@/lib/playSetup';
 import { useProgress } from '@/lib/ProgressContext';
 import { isRunRecordingAvailable } from '@/lib/runRecording';
-import { CLASS_META, lockReasonCopy, parseOptionalClassKeyParam } from '@/lib/progression';
+import {
+  caloriesForRun,
+  CLASS_META,
+  lockReasonCopy,
+  parseOptionalClassKeyParam,
+} from '@/lib/progression';
 import { useSubscription } from '@/lib/SubscriptionContext';
 import { canStartRun, requestSubscriptionAccess } from '@/lib/subscriptionAccess';
 import { colors, font, metric, radius, spacing, type } from '@/theme';
@@ -64,7 +70,8 @@ export default function LevelDetailScreen() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Beat-my-score deep link: `?challenge={runId}` → public `challenges/{runId}`.
   const [challenge, setChallenge] = useState<ChallengeCard | null>(null);
-  // Board rank for the user's best on this level; null while loading or unranked.
+  // Global rank for the user's best on this level (reported by the Top
+  // runners card, which fetches the board); null while loading or unranked.
   const [myRank, setMyRank] = useState<number | null>(null);
   // "Record my runs": persisted opt-in (Settings / run settings sheet) and
   // whether this map's composite game asset (needed to build the clip) is
@@ -128,21 +135,6 @@ export default function LevelDetailScreen() {
   }, [id, runs]);
 
   const uid = user?.id ?? null;
-  useEffect(() => {
-    if (!id || !uid) {
-      setMyRank(null);
-      return undefined;
-    }
-    let mounted = true;
-    fetchMyEntry(id, uid)
-      .then((entry) => (entry ? fetchRank(id, entry.score) : null))
-      .then((rank) => {
-        if (mounted) setMyRank(rank);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [id, uid]);
 
   // Recording needs the writer + composer (iOS native build, physical device),
   // the phone as the screen (v1 does not record AirPlay runs), camera access
@@ -232,6 +224,7 @@ export default function LevelDetailScreen() {
   const classMeta = CLASS_META[displayClass];
   const destinationLabel = playbackDestination === 'tv' ? 'TV' : 'Phone';
   const sessionLine = `${runSettings.durationMin} min · ${intensityMeta.label} · ${destinationLabel}`;
+  const calories = caloriesForRun(runSettings.durationMin, displayClass, intensityMeta.effort);
   const bestLine =
     personalBest === null
       ? 'No runs yet · your first score sets the bar'
@@ -310,15 +303,17 @@ export default function LevelDetailScreen() {
 
   return (
     <View style={styles.root}>
+      {/*
+        The brief fills the screen: the cover grows to take whatever height is
+        left after the fixed rows, so there is never a blank band between the
+        content and Start. If banners push the content past the viewport
+        (small phone + challenge + lock) the body scrolls; Start stays pinned.
+      */}
       <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          {
-            paddingTop: insets.top + spacing.sm,
-            paddingBottom: insets.bottom + 96,
-          },
-        ]}
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.sm }]}
         showsVerticalScrollIndicator={false}
+        bounces={false}
       >
         <View style={styles.header}>
           <Pressable
@@ -346,8 +341,13 @@ export default function LevelDetailScreen() {
         <View style={styles.hero}>
           {cover ? <Image source={cover} contentFit="cover" style={StyleSheet.absoluteFill} /> : null}
           <LinearGradient
-            colors={['rgba(6,6,10,0.02)', 'rgba(6,6,10,0.3)', 'rgba(6,6,10,0.92)']}
-            locations={[0.2, 0.6, 1]}
+            colors={[
+              'rgba(6,6,10,0.04)',
+              'rgba(6,6,10,0.22)',
+              'rgba(6,6,10,0.78)',
+              'rgba(6,6,10,0.98)',
+            ]}
+            locations={[0.08, 0.42, 0.7, 1]}
             style={StyleSheet.absoluteFill}
           />
           {recordEffective ? (
@@ -356,23 +356,34 @@ export default function LevelDetailScreen() {
               <Text style={styles.recText}>REC</Text>
             </View>
           ) : null}
+          <View style={styles.heroText}>
+            <Text style={styles.heroTitle}>{mode.name}</Text>
+            <Text style={styles.heroSubtitle} numberOfLines={1}>
+              {mode.tagline}
+            </Text>
+            <View
+              style={styles.heroSummaryRow}
+              accessible
+              accessibilityLabel={`${classMeta.label}, ${runSettings.durationMin} minutes, ${intensityMeta.label} intensity, approximately ${calories} calories, on your ${destinationLabel}`}
+            >
+              <HeroSummaryItem icon={classMeta.icon} value={classMeta.label} />
+              <HeroSummaryItem icon="time-outline" value={`${runSettings.durationMin} min`} />
+              <HeroSummaryItem icon={`${intensityMeta.icon}-outline`} value={intensityMeta.label} />
+              <HeroSummaryItem icon="flame-outline" value={`~${calories} kcal`} />
+              {playbackDestination === 'tv' ? <HeroSummaryItem icon="tv-outline" value="TV" /> : null}
+            </View>
+          </View>
         </View>
 
-        <View style={styles.titleBlock}>
-          <Text style={styles.title}>{mode.name}</Text>
-          <Text style={styles.sessionLine} accessibilityLabel={sessionLine}>
-            {sessionLine}
+        <View style={styles.bestRow}>
+          <Ionicons
+            name={personalBest === null ? 'flag-outline' : 'trending-up'}
+            size={14}
+            color={personalBest === null ? colors.textFaint : colors.lime}
+          />
+          <Text style={styles.bestLine} numberOfLines={1}>
+            {bestLine}
           </Text>
-          <View style={styles.bestRow}>
-            <Ionicons
-              name={personalBest === null ? 'flag-outline' : 'trending-up'}
-              size={14}
-              color={personalBest === null ? colors.textFaint : colors.lime}
-            />
-            <Text style={styles.bestLine} numberOfLines={1}>
-              {bestLine}
-            </Text>
-          </View>
         </View>
 
         {challenge ? (
@@ -393,16 +404,13 @@ export default function LevelDetailScreen() {
           </Pressable>
         ) : null}
 
-        <Pressable
-          onPress={() => router.push(`/leaderboard/${mode.id}` as Href)}
-          accessibilityRole="button"
-          accessibilityLabel="Open leaderboard"
-          style={({ pressed }) => [styles.boardLink, pressed && styles.pressed]}
-        >
-          <Ionicons name="podium-outline" size={18} color={colors.lime} />
-          <Text style={styles.boardLinkText}>Leaderboard</Text>
-          <Ionicons name="chevron-forward" size={16} color={colors.textFaint} />
-        </Pressable>
+        {/* Top 5 of the Global board (instant via the seeded ghost set) + your row. */}
+        <TopRunnersCard
+          levelId={mode.id}
+          uid={uid}
+          onOpen={() => router.push(`/leaderboard/${mode.id}` as Href)}
+          onMyRank={setMyRank}
+        />
 
         {lockCopy ? (
           <View
@@ -466,6 +474,23 @@ export default function LevelDetailScreen() {
   );
 }
 
+function HeroSummaryItem({
+  icon,
+  value,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  value: string;
+}) {
+  return (
+    <View style={styles.heroSummaryItem}>
+      <Ionicons name={icon} size={15} color={colors.lime} />
+      <Text style={styles.heroSummaryValue} maxFontSizeMultiplier={1.2}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { alignItems: 'center', justifyContent: 'center', gap: spacing.md },
@@ -477,7 +502,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   missingBackText: { color: colors.lime, fontSize: 14, fontWeight: font.bold },
-  content: { paddingHorizontal: spacing.lg, gap: spacing.md },
+  scroll: { flex: 1 },
+  // flexGrow lets the cover absorb the remaining height on tall phones.
+  content: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingBottom: spacing.md, gap: spacing.md },
   header: { minHeight: 44, flexDirection: 'row', alignItems: 'center' },
   iconBtn: {
     width: 42,
@@ -490,12 +517,61 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   hero: {
-    height: 300,
+    // The cover absorbs whatever height the fixed rows (best line, Top
+    // runners, banners) leave over, so there is no blank band above Start on
+    // a 6.1" or a 6.9" phone. Never less than this, so the title block always
+    // has art behind it; with a challenge banner on a small phone the body
+    // scrolls a little instead.
+    flexGrow: 1,
+    minHeight: 240,
     borderRadius: radius.xl,
     overflow: 'hidden',
+    justifyContent: 'flex-end',
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  heroText: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xxl + spacing.xl,
+    paddingBottom: spacing.lg,
+  },
+  heroTitle: {
+    ...type.h1,
+    color: colors.white,
+    fontSize: 32,
+    lineHeight: 35,
+  },
+  heroSubtitle: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 14,
+    fontWeight: font.medium,
+    marginTop: 4,
+  },
+  heroSummaryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  heroSummaryItem: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(6,6,10,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  heroSummaryValue: {
+    ...metric,
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: font.bold,
+    letterSpacing: 0.3,
   },
   recBadge: {
     position: 'absolute',
@@ -511,27 +587,11 @@ const styles = StyleSheet.create({
   },
   recDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF3B30' },
   recText: { color: colors.white, fontSize: 11, fontWeight: font.black, letterSpacing: 1.2 },
-  titleBlock: { gap: 6, paddingHorizontal: spacing.xs },
-  title: {
-    ...type.h1,
-    color: colors.white,
-    fontSize: 32,
-    lineHeight: 36,
-  },
-  sessionLine: {
-    ...metric,
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: font.bold,
-    letterSpacing: 0.2,
-  },
-  bestRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  bestRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: spacing.xs },
   bestLine: { ...metric, ...type.bodySm, color: colors.textDim, flexShrink: 1 },
+  // A flex sibling of the scroll view (not absolute): the body can never
+  // hide behind it, and there is no phantom padding to leave a gap above it.
   footer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     backgroundColor: colors.bg,
@@ -577,16 +637,4 @@ const styles = StyleSheet.create({
   },
   challengeTitle: { ...type.h3, color: colors.black },
   challengeDetail: { ...type.bodySm, color: 'rgba(0,0,0,0.7)', marginTop: 2 },
-  boardLink: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  boardLinkText: { flex: 1, color: colors.text, fontSize: 14, fontWeight: font.bold },
 });
