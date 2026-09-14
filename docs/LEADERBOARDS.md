@@ -14,8 +14,8 @@ link into the level. This replaces the simulated Home leaderboard (cohorts,
 | Rules / indexes / hosting | `firestore.rules`, `firestore.indexes.json`, `firebase.json`, `web/` |
 | Client data layer | `src/lib/leaderboards.ts`, `src/lib/beatmapRegistry.ts` (chart mirror), `src/lib/profileSync.ts`, `src/lib/functionsClient.ts`, `src/lib/runSubmission.ts`, `src/lib/communityActivity.ts` |
 | Deep links | `src/lib/challengeLinks.ts`, `src/lib/pendingDeepLink.ts`, `src/app/l/[id].tsx`, `src/app/_layout.tsx` |
-| UI | `src/app/leaderboard/[id].tsx`, `src/app/runner/[uid].tsx`, `src/app/find-friends.tsx`, `src/app/edit-username.tsx`, `src/components/DailyChallengeBoard.tsx`, `src/components/LeaderboardRow.tsx`, `src/components/ShareScoreCard.tsx` |
-| Admin | `scripts/publish-beatmap.ts` (hand-tuned chart, locks the level), `rebuildConsensusBeatmaps` callable (Profile → "Rebuild charts now", dev screen → "Force rebuild charts") |
+| UI | `src/app/leaderboard/[id].tsx`, `src/app/runner/[uid].tsx`, `src/app/find-friends.tsx`, `src/app/edit-username.tsx`, `src/components/DailyChallengeBoard.tsx`, `src/components/LeaderboardRow.tsx`, `src/components/LivePill.tsx`, `src/components/ShareScoreCard.tsx` |
+| Admin | `scripts/publish-beatmap.ts` (hand-tuned chart, locks the level), `rebuildConsensusBeatmaps` callable (Profile → "Rebuild charts now", dev screen → "Force rebuild charts"), `reconcileGhostsNow` callable (Profile → "Seed boards now", wrapped by `seedBoardsNow` in `src/lib/functionsClient.ts`) |
 | Tests | `npm run test:consensus`, `npm run test:submit-validation`, `npm run test:daily-key` |
 
 The app imports the shared package through the `@shared/*` path alias
@@ -177,9 +177,11 @@ instead of the replay:
 The client's score is accepted as-is and the entry is written with
 `provisional: true`, `beatmapVersion: 0`, `accuracy: 0`. The nonce is what
 stops a client from *choosing* this path on a charted level: the server, not
-the payload, decides whether a run started without a chart. Boards show these
-rows with an **EARLY** tag and no accuracy figure; the summary appends
-"· Early score". Once the level has a chart every new run is verified
+the payload, decides whether a run started without a chart. Boards render
+these rows exactly like verified ones (`LeaderboardRow` never special-cases
+`provisional`; the stored `accuracy: 0` shows as "0% acc"), and the run
+summary does not mention it: chart state is never surfaced to users. Once
+the level has a chart every new run is verified
 (`provisional: false`); existing provisional rows stay on the board (see
 "Chart versions and boards").
 
@@ -297,8 +299,8 @@ later"). Future **season reset** option: when charts have matured, copy
 `leaderboards/{levelId}/entries` to `leaderboards/{levelId}/seasons/{n}` and
 delete entries with `beatmapVersion < current` (or all of them), in one
 admin callable; the client needs no change beyond an optional "Season n"
-label. Until then the board footer reads "Scoring gets sharper as more people
-play this map."
+label. The board carries no footer note about this: users never see copy
+about charts or scoring maturity.
 
 ## Usernames
 
@@ -335,6 +337,7 @@ existing UI renders them, tapping a row opens `runner/[uid]`, and the
 | --- | --- |
 | Generator (pure, deterministic) | `shared/scoring/ghosts.ts` |
 | Reconcile (hourly schedule + admin callable) | `functions/src/seed.ts` → `reconcileGhosts`, `reconcileGhostsNow` |
+| In-app trigger (admin) | Profile → "Seed boards now (admin)", shown only when `admins/{uid}` exists; `seedBoardsNow()` / `describeSeedBoards()` in `src/lib/functionsClient.ts` alert the `ReconcileResult` (writes, deletes, ms, per-board `total/real → target · +added ~refreshed -removed`, swept daily keys) |
 | Test | `npm run test:ghosts` (`scripts/replay-ghosts.ts`) |
 
 **What a ghost is.** `(levelId, n)` — or `(dateKey, n)` for daily boards —

@@ -115,8 +115,8 @@ export const worldOptions = modes.map((mode) => ({
 }));
 
 /**
- * Six recognizable canonical levels, led by the same three maps shown in
- * Home's "Recommended for you" row. Selection still persists the existing
+ * Six recognizable canonical levels (Home's "Recommended for you" row now
+ * rotates daily and is not tied to this list). Selection still persists the existing
  * mode/level id, while the cover resolves through the exact helper used by
  * Home, Levels, and All Maps.
  */

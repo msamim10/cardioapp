@@ -12,36 +12,22 @@ import { ModeCard } from '@/components/ModeCard';
 import { Card, StatChip, WeekTracker } from '@/components/ui';
 import { useAuth } from '@/lib/AuthContext';
 import { useRunnerCounts } from '@/lib/communityActivity';
-import { getDailyChallenge, isDailyChallengeCompleted } from '@/lib/dailyRecommendations';
-import { getMode, modes } from '@/lib/gameData';
+import {
+  getDailyChallenge,
+  isDailyChallengeCompleted,
+  pickDailyRecommendations,
+  RECOMMENDATION_RECENT_EXCLUSIONS,
+} from '@/lib/dailyRecommendations';
+import { modes } from '@/lib/gameData';
 import { nextRewardLevel } from '@/lib/levels';
 import { getModeCover } from '@/lib/modeCovers';
+import { useOnboarding } from '@/lib/OnboardingContext';
 import { calendarWeekStart, MAX_LEVEL } from '@/lib/progressAggregation';
 import { useProgress } from '@/lib/ProgressContext';
 import { DAILY_CHALLENGE_XP_BONUS } from '@/lib/progression';
 import { colors, font, metric, radius, spacing, type } from '@/theme';
 
 const HERO_HEIGHT = Math.round(Dimensions.get('window').height * 0.4);
-const POPULAR_CHALLENGE_IDS = [
-  'neon-rails',
-  'prison-escape-run',
-  'dino-escape',
-] as const;
-
-// Missing/invalid selections are skipped; names and covers always come from
-// the same canonical mode object used by the Levels screen.
-const POPULAR_CHALLENGES = POPULAR_CHALLENGE_IDS.flatMap((id) => {
-  const mode = getMode(id);
-  return mode
-    ? [
-        {
-          id,
-          mode,
-          cornerLabel: id === 'neon-rails' ? 'FEATURED' : undefined,
-        },
-      ]
-    : [];
-});
 
 function WeekMetric({
   icon,
@@ -72,6 +58,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
+  const { answers } = useOnboarding();
   const {
     hydrated,
     streak,
@@ -84,8 +71,6 @@ export default function HomeScreen() {
     isLevelCompleted,
     levelProgress,
   } = useProgress();
-  // Real leaderboard player counts for the recommended cards (no fabrication).
-  const runnerCounts = useRunnerCounts(POPULAR_CHALLENGE_IDS, hydrated && user !== null);
 
   // Daily challenge is keyed to the local date; refresh the date on focus so a
   // session that straddles midnight picks up the new video.
@@ -103,6 +88,32 @@ export default function HomeScreen() {
     () => isDailyChallengeCompleted(runs, challenge),
     [challenge, runs]
   );
+  const challengeDateKey = localDateKey(challengeDate);
+
+  // "Recommended for you": five maps, rotating daily per person, biased toward
+  // the onboarding answers and skipping the two most recent plays.
+  const recentLevelIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const run of [...runs].sort((a, b) => b.at - a.at)) {
+      if (!ids.includes(run.levelId)) ids.push(run.levelId);
+      if (ids.length >= RECOMMENDATION_RECENT_EXCLUSIONS) break;
+    }
+    return ids;
+  }, [runs]);
+  const recommended = useMemo(
+    () =>
+      pickDailyRecommendations({
+        modes,
+        seedKey: user?.id ?? 'local',
+        dateKey: challengeDateKey,
+        answers,
+        recentLevelIds,
+      }),
+    [answers, challengeDateKey, recentLevelIds, user?.id]
+  );
+  const recommendedIds = useMemo(() => recommended.map((mode) => mode.id), [recommended]);
+  // Real leaderboard player counts for the recommended cards (no fabrication).
+  const runnerCounts = useRunnerCounts(recommendedIds, hydrated && user !== null);
 
   // Training load for the current calendar week, on the same Monday boundary
   // the weekly goal tracker uses.
@@ -117,8 +128,6 @@ export default function HomeScreen() {
     }
     return { minutes: Math.round(minutes), calories: Math.round(calories) };
   }, [runs]);
-
-  const challengeDateKey = localDateKey(challengeDate);
 
   return (
     <ScrollView
@@ -259,7 +268,7 @@ export default function HomeScreen() {
           </Pressable>
         ) : null}
 
-        {/* 24h board for today's challenge — real scores, server-verified. */}
+        {/* Live board for today's challenge — real scores, server-verified. */}
         {challenge && hydrated ? (
           <DailyChallengeBoard
             dateKey={challengeDateKey}
@@ -320,20 +329,19 @@ export default function HomeScreen() {
             contentContainerStyle={styles.challengeRow}
             style={styles.challengeScroller}
           >
-            {POPULAR_CHALLENGES.map((challenge) => (
+            {recommended.map((mode) => (
               <ModeCard
-                key={challenge.id}
-                mode={challenge.mode}
-                completed={isLevelCompleted(challenge.id)}
-                cornerLabel={challenge.cornerLabel}
-                participantCount={runnerCounts[challenge.id]}
+                key={mode.id}
+                mode={mode}
+                completed={isLevelCompleted(mode.id)}
+                participantCount={runnerCounts[mode.id]}
                 showMeta={false}
                 showAction={false}
                 style={styles.challengeCard}
                 onPress={() =>
                   router.push({
                     pathname: '/level/[id]',
-                    params: { id: challenge.id },
+                    params: { id: mode.id },
                   })
                 }
               />

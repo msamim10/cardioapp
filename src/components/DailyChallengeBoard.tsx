@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Card } from '@/components/ui';
 import { LeaderboardEmpty, LeaderboardRow } from '@/components/LeaderboardRow';
+import { LivePill } from '@/components/LivePill';
 import {
   fetchDailyMyEntry,
   fetchDailyRank,
@@ -11,12 +12,12 @@ import {
   rankRows,
   type LeaderboardEntry,
 } from '@/lib/leaderboards';
-import { colors, font, metric, radius, spacing, type } from '@/theme';
+import { colors, font, metric, spacing, type } from '@/theme';
 
 const PREVIEW_ROWS = 3;
 
 /**
- * Compact 24h board for today's challenge on Home: top 3 plus your row.
+ * Compact live board for today's challenge on Home: top 3 plus your row.
  * Refreshes on focus so a run that just finished shows up when you return.
  */
 export function DailyChallengeBoard({
@@ -68,9 +69,7 @@ export function DailyChallengeBoard({
         <View style={styles.headerLeft}>
           <Ionicons name="trophy" size={14} color={colors.lime} />
           <Text style={styles.title}>Today&apos;s board</Text>
-          <View style={styles.livePill}>
-            <Text style={styles.liveText}>24H</Text>
-          </View>
+          <LivePill />
         </View>
         <View style={styles.headerRight}>
           {me && me.rank > 0 ? <Text style={styles.myRank}>#{me.rank}</Text> : null}
@@ -107,13 +106,6 @@ const styles = StyleSheet.create({
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   title: { ...type.label, color: colors.textDim },
-  livePill: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.xs,
-    backgroundColor: 'rgba(215,255,62,0.12)',
-  },
-  liveText: { color: colors.lime, fontSize: 9, fontWeight: font.black, letterSpacing: 0.6 },
   myRank: { ...metric, color: colors.lime, fontSize: 13, fontWeight: font.heavy },
   loading: { paddingVertical: spacing.lg },
   rows: { marginHorizontal: -spacing.xs },

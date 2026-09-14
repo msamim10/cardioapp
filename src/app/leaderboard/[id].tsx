@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { localDateKey } from '@shared/scoring/daily';
 import { LeaderboardEmpty, LeaderboardRow } from '@/components/LeaderboardRow';
+import { LivePill } from '@/components/LivePill';
 import { ShareScoreSheet, type ShareScoreInput } from '@/components/ShareScoreCard';
 import { useAuth } from '@/lib/AuthContext';
 import { getDailyChallenge } from '@/lib/dailyRecommendations';
@@ -153,6 +154,12 @@ export default function LeaderboardScreen() {
       </View>
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xl }]}>
+        {mode && tab === 'daily' ? (
+          <View style={styles.boardHead}>
+            <Text style={styles.meLabel}>Today&apos;s board</Text>
+            <LivePill />
+          </View>
+        ) : null}
         {!mode ? (
           <LeaderboardEmpty icon="alert-circle-outline" title="Level not found" />
         ) : board === null ? (
@@ -187,10 +194,6 @@ export default function LeaderboardScreen() {
             <Text style={styles.meLabel}>Your best</Text>
             <LeaderboardRow entry={board.me.entry} rank={board.me.rank} isMe />
           </View>
-        ) : null}
-
-        {mode && board !== null ? (
-          <Text style={styles.note}>Scoring gets sharper as more people play this map.</Text>
         ) : null}
       </ScrollView>
 
@@ -244,9 +247,9 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: spacing.lg, gap: spacing.md },
   loading: { paddingVertical: spacing.xxl },
   list: { borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: spacing.xs },
+  boardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: -spacing.xs },
   meBlock: { gap: spacing.xs },
   meLabel: { ...type.label, color: colors.textDim, paddingHorizontal: spacing.xs },
-  note: { ...type.bodySm, color: colors.textFaint, textAlign: 'center', paddingTop: spacing.xs },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,

@@ -96,6 +96,7 @@
     "test:submit-validation": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-submit-validation.ts",
     "test:consensus": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-consensus.ts",
     "test:daily-key": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-daily-key.ts",
+    "test:recommendations": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-recommendations.ts",
     "test:ghosts": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-ghosts.ts",
     "test:preflight-flow": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-preflight-flow.ts",
     "test:recording-log": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-recording-log.ts",
