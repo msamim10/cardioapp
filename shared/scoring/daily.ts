@@ -5,11 +5,19 @@
  * for the same local date key — `npm run test:daily-key` asserts it.
  *
  * Rule: `hash(dateKey + ':' + salt) mod pool.length` over the pool of level ids
- * WITH a published beatmap, in canonical (`CANONICAL_LEVEL_IDS`) order. While
- * no beatmap is published the pool falls back to every level ("practice").
+ * in canonical (`CANONICAL_LEVEL_IDS`) order.
+ *
+ * Since consensus charts (see `consensus.ts`) every level is scorable — with
+ * a chart, or provisionally without one — so BOTH sides pass
+ * `EVERY_LEVEL_SCORABLE` and the pool is always the full roster. Charts
+ * appear at unpredictable times; keying the pool on them would move "today's
+ * challenge" mid-day. The `hasBeatmap` parameter is kept for the replay test.
  */
 
 import { CANONICAL_LEVEL_IDS } from './levelIds';
+
+/** Pool predicate used by the app and the server: every level is on the board. */
+export const EVERY_LEVEL_SCORABLE = (_levelId: string): boolean => true;
 
 /** Salt so the challenge pick is independent of the featured/recommended rotation. */
 export const DAILY_CHALLENGE_SALT = 'daily-challenge';

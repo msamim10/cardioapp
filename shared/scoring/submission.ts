@@ -21,6 +21,7 @@
  */
 
 import { cuesForLoopedPlayback, type Beatmap } from './beatmap';
+import { MAX_MOVE_SAMPLES, parseMoveSamples, type MoveSample } from './consensus';
 import {
   CUE_LOOKAHEAD_S,
   CUE_WINDOW_MS,
@@ -33,6 +34,29 @@ import {
 } from './grading';
 
 export const ALLOWED_PLAYBACK_RATES: readonly number[] = [0.85, 1, 1.2];
+/**
+ * `beatmapHash` a run carries when the server had no published chart for the
+ * level at run start. Such runs are scored with the free-move rules and land
+ * on the board as `provisional: true, beatmapVersion: 0`.
+ */
+export const PROVISIONAL_BEATMAP_HASH = 'none';
+/**
+ * Free-scoring plausibility (provisional runs). The analyzer needs
+ * COOLDOWN 280 ms + REARM 220 ms between moves, so ~120/min is the physical
+ * ceiling; 100/min leaves headroom for a real sprint and still rejects a
+ * fabricated log.
+ */
+export const PROVISIONAL_MAX_MOVES_PER_MIN = 100;
+/** Free scoring awards 30 + min(70, (combo − 1) × 5) per move (`applyRecognizedMove`). */
+export const FREE_MOVE_MIN_POINTS = 30;
+export const FREE_MOVE_MAX_POINTS = 100;
+/**
+ * The sample list and the move tally are kept in the same code path, but the
+ * tally is React state (flushed a frame later); allow a few moves of drift.
+ */
+export const SAMPLE_COUNT_TOLERANCE = 3;
+/** Sample-bearing submissions stored per uid per UTC day (any board outcome). */
+export const SAMPLE_DAILY_LIMIT = 60;
 export const MIN_ELAPSED_SECONDS = 60;
 export const MAX_ELAPSED_SECONDS = 3 * 3600;
 export const TIMED_RUN_EARLY_TOLERANCE_S = 2;
@@ -59,8 +83,13 @@ export const SUBMIT_COOLDOWN_MARGIN_S = 30;
 export type SubmitRunPayload = {
   runId: string;
   levelId: string;
+  /** Hash of the chart the run was scored against, or PROVISIONAL_BEATMAP_HASH. */
   beatmapHash: string;
+  /** Chart revision (`beatmaps/{levelId}.chartVersion`); 0 for a provisional run. */
+  beatmapVersion: number;
   classKey: string | null;
+  /** Intensity key the player chose (light / active / intense), if known. */
+  intensity: string | null;
   playbackRate: number;
   /** Wall-clock target of a timed run. Only timed runs are accepted today. */
   targetSeconds: number | null;
@@ -80,10 +109,19 @@ export type SubmitRunPayload = {
   appVersion: string;
   /** Client-local `YYYY-MM-DD` of the run, for the daily board. */
   dateKey: string;
+  /** Every recognized move (any scoring mode), for the free-scoring check. */
+  moveCount: number;
+  /** Detected moves on the video timeline (≤ MAX_MOVE_SAMPLES), for consensus charts. */
+  samples: MoveSample[];
+  /** Seconds of natural playback the run accumulated (RunClock credit). */
+  naturalPlaySec: number;
 };
 
 export type RejectCode =
   | 'bad-payload'
+  | 'bad-version'
+  | 'bad-samples'
+  | 'bad-moves'
   | 'level-mismatch'
   | 'hash-mismatch'
   | 'bad-rate'
@@ -133,8 +171,14 @@ export function parseSubmitRunPayload(
   if (!nonEmptyString(p.runId)) return { ok: false, reason: 'runId' };
   if (!nonEmptyString(p.levelId)) return { ok: false, reason: 'levelId' };
   if (!nonEmptyString(p.beatmapHash)) return { ok: false, reason: 'beatmapHash' };
+  if (!Number.isInteger(p.beatmapVersion) || (p.beatmapVersion as number) < 0) {
+    return { ok: false, reason: 'beatmapVersion' };
+  }
   if (!(p.classKey === null || p.classKey === undefined || nonEmptyString(p.classKey))) {
     return { ok: false, reason: 'classKey' };
+  }
+  if (!(p.intensity === null || p.intensity === undefined || nonEmptyString(p.intensity))) {
+    return { ok: false, reason: 'intensity' };
   }
   if (!finite(p.playbackRate)) return { ok: false, reason: 'playbackRate' };
   if (!(p.targetSeconds === null || p.targetSeconds === undefined || finite(p.targetSeconds))) {
@@ -158,13 +202,23 @@ export function parseSubmitRunPayload(
   if (typeof p.recorded !== 'boolean') return { ok: false, reason: 'recorded' };
   if (typeof p.appVersion !== 'string' || p.appVersion.length > 40) return { ok: false, reason: 'appVersion' };
   if (!nonEmptyString(p.dateKey)) return { ok: false, reason: 'dateKey' };
+  const moveCount = p.moveCount === undefined ? 0 : p.moveCount;
+  if (!Number.isInteger(moveCount) || (moveCount as number) < 0) return { ok: false, reason: 'moveCount' };
+  // Samples sit on the video timeline; a generous ceiling here, the exact
+  // bound against the source length is applied in the semantic checks.
+  const samples = parseMoveSamples(p.samples ?? [], MAX_ELAPSED_SECONDS);
+  if (!samples) return { ok: false, reason: 'samples' };
+  const naturalPlaySec = p.naturalPlaySec === undefined ? 0 : p.naturalPlaySec;
+  if (!finite(naturalPlaySec) || naturalPlaySec < 0) return { ok: false, reason: 'naturalPlaySec' };
   return {
     ok: true,
     payload: {
       runId: p.runId,
       levelId: p.levelId,
       beatmapHash: p.beatmapHash,
+      beatmapVersion: p.beatmapVersion as number,
       classKey: typeof p.classKey === 'string' ? p.classKey : null,
+      intensity: typeof p.intensity === 'string' ? p.intensity : null,
       playbackRate: p.playbackRate,
       targetSeconds: typeof p.targetSeconds === 'number' ? p.targetSeconds : null,
       elapsedSeconds: p.elapsedSeconds,
@@ -178,6 +232,9 @@ export function parseSubmitRunPayload(
       recorded: p.recorded,
       appVersion: p.appVersion,
       dateKey: p.dateKey,
+      moveCount: moveCount as number,
+      samples,
+      naturalPlaySec,
     },
   };
 }
@@ -191,19 +248,17 @@ export function videoEndForRun(elapsedSeconds: number, playbackRate: number): nu
   return elapsedSeconds * playbackRate;
 }
 
-/**
- * Verify a shape-checked payload against the server's copy of the chart.
- * `serverBeatmapHash` is the hash stored alongside the published beatmap.
- */
-export function validateSubmission(
-  payload: SubmitRunPayload,
-  beatmap: Beatmap,
-  serverBeatmapHash: string,
-): SubmissionVerdict {
-  if (payload.levelId !== beatmap.levelId) return { ok: false, code: 'level-mismatch' };
-  if (payload.beatmapHash !== serverBeatmapHash) return { ok: false, code: 'hash-mismatch' };
-  if (!isAllowedPlaybackRate(payload.playbackRate)) return { ok: false, code: 'bad-rate' };
+/** Whether a payload claims the provisional (no chart at run start) path. */
+export function isProvisionalPayload(payload: Pick<SubmitRunPayload, 'beatmapHash' | 'beatmapVersion'>): boolean {
+  return payload.beatmapHash === PROVISIONAL_BEATMAP_HASH || payload.beatmapVersion === 0;
+}
 
+/**
+ * Session checks shared by the verified and provisional paths: rate, elapsed
+ * bounds, timed-run target tolerance.
+ */
+function validateSession(payload: SubmitRunPayload): SubmissionVerdict | null {
+  if (!isAllowedPlaybackRate(payload.playbackRate)) return { ok: false, code: 'bad-rate' };
   const elapsed = payload.elapsedSeconds;
   if (elapsed < MIN_ELAPSED_SECONDS || elapsed > MAX_ELAPSED_SECONDS) {
     return { ok: false, code: 'bad-elapsed', detail: `${elapsed}s` };
@@ -220,6 +275,81 @@ export function validateSubmission(
   ) {
     return { ok: false, code: 'bad-target', detail: `${elapsed}s vs target ${payload.targetSeconds}s` };
   }
+  return null;
+}
+
+/**
+ * Whether the sample list is consistent with the run: every sample inside
+ * the source length (+ tail slack) and the count matching the move tally up
+ * to the cap and a small tolerance. Samples that fail this are dropped from
+ * a verified run and reject a provisional one (there they are the evidence).
+ */
+export function samplesConsistent(payload: SubmitRunPayload): boolean {
+  if (payload.samples.length > MAX_MOVE_SAMPLES) return false;
+  if (!(payload.videoLengthSec > 0)) return payload.samples.length === 0;
+  for (const sample of payload.samples) {
+    if (sample.t < 0 || sample.t > payload.videoLengthSec + TAIL_SLACK_S) return false;
+  }
+  const expected = Math.min(payload.moveCount, MAX_MOVE_SAMPLES);
+  return Math.abs(payload.samples.length - expected) <= SAMPLE_COUNT_TOLERANCE;
+}
+
+/**
+ * Verify a run scored with the FREE-move rules because the server had no
+ * chart for the level when the run started. Nothing can be replayed, so this
+ * is a plausibility check: session bounds, a move rate a human can produce,
+ * a score inside what `applyRecognizedMove` can award for that many moves,
+ * and a sample list that matches the move tally. The nonce/timing checks in
+ * the Function guarantee the run took at least as long as it claims.
+ */
+export function validateProvisionalSubmission(payload: SubmitRunPayload): SubmissionVerdict {
+  if (payload.beatmapHash !== PROVISIONAL_BEATMAP_HASH || payload.beatmapVersion !== 0) {
+    return { ok: false, code: 'bad-version', detail: 'provisional runs carry no chart' };
+  }
+  const session = validateSession(payload);
+  if (session) return session;
+  if (payload.cues.length !== 0 || payload.spurious !== 0 || payload.accuracy !== 0) {
+    return { ok: false, code: 'bad-event', detail: 'provisional runs have no judgements' };
+  }
+  if (!(payload.videoLengthSec > 0)) return { ok: false, code: 'bad-video-length' };
+  const minutes = payload.elapsedSeconds / 60;
+  if (payload.moveCount > PROVISIONAL_MAX_MOVES_PER_MIN * minutes) {
+    return { ok: false, code: 'bad-moves', detail: `${payload.moveCount} moves in ${minutes.toFixed(1)} min` };
+  }
+  if (payload.maxCombo > payload.moveCount) return { ok: false, code: 'combo-mismatch' };
+  const minScore = payload.moveCount * FREE_MOVE_MIN_POINTS;
+  const maxScore = payload.moveCount * FREE_MOVE_MAX_POINTS;
+  if (payload.score < minScore || payload.score > maxScore) {
+    return { ok: false, code: 'score-mismatch', detail: `${payload.score} for ${payload.moveCount} moves` };
+  }
+  if (!samplesConsistent(payload)) return { ok: false, code: 'bad-samples' };
+  const totals: ReplayTotals = {
+    score: payload.score,
+    maxCombo: payload.maxCombo,
+    perfect: 0,
+    good: 0,
+    miss: 0,
+    spurious: 0,
+    accuracy: 0,
+  };
+  return { ok: true, totals, videoEndSec: videoEndForRun(payload.elapsedSeconds, payload.playbackRate) };
+}
+
+/**
+ * Verify a shape-checked payload against the server's copy of the chart.
+ * `serverBeatmapHash` is the hash stored alongside the published beatmap.
+ */
+export function validateSubmission(
+  payload: SubmitRunPayload,
+  beatmap: Beatmap,
+  serverBeatmapHash: string,
+): SubmissionVerdict {
+  if (payload.levelId !== beatmap.levelId) return { ok: false, code: 'level-mismatch' };
+  if (payload.beatmapHash !== serverBeatmapHash) return { ok: false, code: 'hash-mismatch' };
+  if (payload.beatmapVersion < 1) return { ok: false, code: 'bad-version' };
+  const session = validateSession(payload);
+  if (session) return session;
+  const elapsed = payload.elapsedSeconds;
   if (
     !(payload.videoLengthSec > 0) ||
     Math.abs(payload.videoLengthSec - beatmap.videoDurationSec) > VIDEO_LENGTH_TOLERANCE_S
@@ -336,6 +466,8 @@ export type RateLimitState = {
   /** Server ms of the last accepted submission (0 = never). */
   lastAcceptedAt: number;
   lastAcceptedElapsed: number;
+  /** Sample-bearing runs stored today (consensus input), any board outcome. */
+  sampleCount: number;
 };
 
 export const EMPTY_RATE_LIMIT: RateLimitState = {
@@ -344,6 +476,7 @@ export const EMPTY_RATE_LIMIT: RateLimitState = {
   submitCount: 0,
   lastAcceptedAt: 0,
   lastAcceptedElapsed: 0,
+  sampleCount: 0,
 };
 
 export function utcDayKey(ms: number): string {
@@ -354,8 +487,23 @@ export function utcDayKey(ms: number): string {
 function rolled(state: RateLimitState | null | undefined, nowMs: number): RateLimitState {
   const day = utcDayKey(nowMs);
   const base = state ?? EMPTY_RATE_LIMIT;
-  if (base.dayKey === day) return { ...base };
-  return { ...base, dayKey: day, startCount: 0, submitCount: 0 };
+  if (base.dayKey === day) return { ...base, sampleCount: base.sampleCount ?? 0 };
+  return { ...base, dayKey: day, startCount: 0, submitCount: 0, sampleCount: 0 };
+}
+
+/**
+ * Count a stored sample set; `allowed` false once today's budget is spent.
+ * Independent of the board budget so a rate-limited score still teaches the
+ * chart (the run itself was still real).
+ */
+export function consumeSampleReport(
+  state: RateLimitState | null | undefined,
+  nowMs: number,
+): { allowed: boolean; next: RateLimitState } {
+  const next = rolled(state, nowMs);
+  if (next.sampleCount >= SAMPLE_DAILY_LIMIT) return { allowed: false, next };
+  next.sampleCount += 1;
+  return { allowed: true, next };
 }
 
 /** Count a `startRun` call; `allowed` false when today's budget is spent. */

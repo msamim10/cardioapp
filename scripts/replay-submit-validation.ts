@@ -13,20 +13,32 @@ import assert from 'node:assert/strict';
 import { CueJudge } from '../src/lib/cueScoring.ts';
 import {
   beatmapHash,
+  consumeSampleReport,
   consumeStartRun,
   consumeSubmitRun,
   cuesForLoopedPlayback,
   DETECTION_LATENCY_COMPENSATION_MS,
   EMPTY_RATE_LIMIT,
+  FREE_MOVE_MAX_POINTS,
+  FREE_MOVE_MIN_POINTS,
+  isProvisionalPayload,
+  MAX_MOVE_SAMPLES,
   nonceTimingOk,
   NONCE_MAX_AGE_S,
   parseBeatmap,
   parseSubmitRunPayload,
+  PROVISIONAL_BEATMAP_HASH,
+  PROVISIONAL_MAX_MOVES_PER_MIN,
   replayJudgements,
+  SAMPLE_COUNT_TOLERANCE,
+  SAMPLE_DAILY_LIMIT,
+  samplesConsistent,
   START_RUN_DAILY_LIMIT,
   SUBMIT_DAILY_LIMIT,
+  validateProvisionalSubmission,
   validateSubmission,
   type JudgeEvent,
+  type MoveSample,
   type SubmitRunPayload,
 } from '../shared/scoring/index.ts';
 
@@ -92,13 +104,23 @@ function simulateRun(plan: (loop: number, index: number) => number | null | 'wro
   return judge;
 }
 
+/** Consensus samples the workout would have recorded for a judged run: one per judged cue. */
+function samplesFor(judge: CueJudge): MoveSample[] {
+  return judge.events
+    .filter((e) => e.i >= 0)
+    .map((e) => ({ m: beatmap.cues[e.i].move, t: Math.round((e.t % beatmap.videoDurationSec) * 1000) / 1000 }));
+}
+
 function payloadFor(judge: CueJudge, overrides: Partial<SubmitRunPayload> = {}): SubmitRunPayload {
   const score = judge.score;
+  const samples = samplesFor(judge);
   return {
     runId: 'run-1',
     levelId: beatmap.levelId,
     beatmapHash: hash,
+    beatmapVersion: 1,
     classKey: 'beginner',
+    intensity: 'steady',
     playbackRate: RATE,
     targetSeconds: TARGET_S,
     elapsedSeconds: TARGET_S + 0.4,
@@ -110,8 +132,11 @@ function payloadFor(judge: CueJudge, overrides: Partial<SubmitRunPayload> = {}):
     maxCombo: score.maxCombo,
     accuracy: judge.accuracy,
     recorded: true,
-    appVersion: '1.0.3',
+    appVersion: '1.1.0',
     dateKey: '2026-09-13',
+    moveCount: samples.length,
+    samples,
+    naturalPlaySec: TARGET_S,
     ...overrides,
   };
 }
@@ -173,6 +198,8 @@ const reject = (overrides: Partial<SubmitRunPayload>, code: string, label = code
 
 reject({ levelId: 'dino-escape' }, 'level-mismatch');
 reject({ beatmapHash: 'b1-deadbeef' }, 'hash-mismatch', 'wrong hash');
+reject({ beatmapVersion: 0 }, 'bad-version', 'verified run claiming version 0');
+assert.equal(isProvisionalPayload(payloadFor(base)), false, 'charted payload is not provisional');
 reject({ playbackRate: 1.5 }, 'bad-rate');
 reject({ targetSeconds: 45, elapsedSeconds: 45.2 }, 'bad-elapsed', 'under 60 s');
 reject({ targetSeconds: 4 * 3600, elapsedSeconds: 4 * 3600 }, 'bad-elapsed', 'impossible duration (4 h)');
@@ -239,6 +266,122 @@ reject({ accuracy: base.accuracy - 0.01 }, 'accuracy-mismatch');
   assert.equal(parseSubmitRunPayload(null).ok, false);
   assert.equal(parseSubmitRunPayload({ ...payloadFor(base), score: 12.5 }).ok, false);
   assert.equal(parseSubmitRunPayload({ ...payloadFor(base), accuracy: 1.2 }).ok, false);
+  assert.equal(parseSubmitRunPayload({ ...payloadFor(base), beatmapVersion: -1 }).ok, false, 'negative version');
+  assert.equal(parseSubmitRunPayload({ ...payloadFor(base), beatmapVersion: 1.5 }).ok, false, 'fractional version');
+  assert.equal(parseSubmitRunPayload({ ...payloadFor(base), samples: [{ m: 'spin', t: 1 }] }).ok, false, 'unknown move');
+  assert.equal(parseSubmitRunPayload({ ...payloadFor(base), samples: [{ m: 'jump', t: -1 }] }).ok, false, 'negative time');
+  assert.equal(parseSubmitRunPayload({ ...payloadFor(base), moveCount: 2.5 }).ok, false, 'fractional moveCount');
+  const legacy = parseSubmitRunPayload({ ...payloadFor(base), moveCount: undefined, samples: undefined, naturalPlaySec: undefined });
+  assert.ok(legacy.ok, 'payload without sample fields still parses');
+  assert.equal(legacy.payload.moveCount, 0);
+  assert.deepEqual(legacy.payload.samples, []);
+}
+
+// ---------------------------------------------------------------------------
+// Samples ride along with verified runs: consistent → kept, else dropped
+// (the verdict itself is unaffected; the Function skips storage).
+// ---------------------------------------------------------------------------
+{
+  const payload = payloadFor(base);
+  assert.equal(samplesConsistent(payload), true, 'one sample per judged move');
+  assert.equal(validateSubmission(payload, beatmap, hash).ok, true);
+  const short = payloadFor(base, { samples: payload.samples.slice(0, payload.samples.length - SAMPLE_COUNT_TOLERANCE) });
+  assert.equal(samplesConsistent(short), true, 'inside the count tolerance');
+  const shorter = payloadFor(base, { samples: payload.samples.slice(0, payload.samples.length - SAMPLE_COUNT_TOLERANCE - 1) });
+  assert.equal(samplesConsistent(shorter), false, 'count drifts from the move tally');
+  assert.equal(validateSubmission(shorter, beatmap, hash).ok, true, 'verified verdict does not depend on samples');
+  const outside = payloadFor(base, { samples: [...payload.samples, { m: 'jump', t: beatmap.videoDurationSec + 5 }], moveCount: payload.moveCount + 1 });
+  assert.equal(samplesConsistent(outside), false, 'sample past the source length');
+  const flood = payloadFor(base, { samples: Array.from({ length: MAX_MOVE_SAMPLES + 1 }, () => ({ m: 'jump', t: 1 })), moveCount: MAX_MOVE_SAMPLES + 1 });
+  assert.equal(samplesConsistent(flood), false, 'over the per-run cap');
+  // Capped runs: the tally may exceed the cap; the sample count matches the cap.
+  const capped = payloadFor(base, { samples: Array.from({ length: MAX_MOVE_SAMPLES }, () => ({ m: 'jump', t: 1 })), moveCount: MAX_MOVE_SAMPLES + 50 });
+  assert.equal(samplesConsistent(capped), true);
+}
+
+// ---------------------------------------------------------------------------
+// Provisional path: no chart when the run started → free-move score accepted
+// after plausibility checks (session bounds, human move rate, score inside
+// the free-scoring band, samples matching the tally). Nothing replays.
+// ---------------------------------------------------------------------------
+{
+  const moves = 120; // 80/min over 90 s — a busy but human run
+  const samples: MoveSample[] = Array.from({ length: moves }, (_, i) => ({
+    m: (['jump', 'duck', 'left', 'right'] as const)[i % 4],
+    t: Math.round(((i * 0.75) % beatmap.videoDurationSec) * 1000) / 1000,
+  }));
+  const provisional = (overrides: Partial<SubmitRunPayload> = {}): SubmitRunPayload => ({
+    ...payloadFor(base),
+    beatmapHash: PROVISIONAL_BEATMAP_HASH,
+    beatmapVersion: 0,
+    cues: [],
+    spurious: 0,
+    accuracy: 0,
+    score: moves * 45,
+    maxCombo: 30,
+    moveCount: moves,
+    samples,
+    ...overrides,
+  });
+  assert.equal(isProvisionalPayload(provisional()), true);
+  const wire = parseSubmitRunPayload(JSON.parse(JSON.stringify(provisional())));
+  assert.ok(wire.ok, 'provisional wire shape parses');
+  const verdict = validateProvisionalSubmission(wire.payload);
+  assert.ok(verdict.ok, `provisional run accepted (${!verdict.ok && `${verdict.code} ${verdict.detail ?? ''}`})`);
+  assert.equal(verdict.totals.score, moves * 45, 'client score is taken as-is');
+  assert.equal(verdict.totals.maxCombo, 30);
+  assert.equal(verdict.totals.accuracy, 0);
+  assert.equal(verdict.videoEndSec, (TARGET_S + 0.4) * RATE);
+
+  const rejectProvisional = (overrides: Partial<SubmitRunPayload>, code: string, label = code) => {
+    const result = validateProvisionalSubmission(provisional(overrides));
+    assert.equal(result.ok, false, `${label} must be rejected`);
+    assert.equal(result.code, code, `${label}: ${result.ok ? 'ok' : result.detail ?? ''}`);
+  };
+  // A provisional claim on a charted run is not a way around the replay.
+  rejectProvisional({ beatmapHash: hash }, 'bad-version', 'real hash with version 0');
+  rejectProvisional({ beatmapVersion: 1 }, 'bad-version', 'none hash with version 1');
+  assert.equal(validateSubmission(provisional({ beatmapHash: hash }), beatmap, hash).code, 'bad-version', 'verified path refuses version 0 too');
+  // Session bounds are shared with the verified path.
+  rejectProvisional({ playbackRate: 1.5 }, 'bad-rate');
+  rejectProvisional({ targetSeconds: null }, 'bad-target', 'untimed run');
+  rejectProvisional({ elapsedSeconds: TARGET_S + 6 }, 'bad-target', 'past the late tolerance');
+  rejectProvisional({ targetSeconds: 45, elapsedSeconds: 45.2 }, 'bad-elapsed', 'under 60 s');
+  // No judgements can exist without a chart.
+  rejectProvisional({ cues: base.events.slice(0, 1) }, 'bad-event', 'judgement log present');
+  rejectProvisional({ spurious: 1 }, 'bad-event');
+  rejectProvisional({ accuracy: 0.5 }, 'bad-event');
+  rejectProvisional({ videoLengthSec: 0 }, 'bad-video-length');
+  // Plausibility.
+  const tooMany = Math.floor(PROVISIONAL_MAX_MOVES_PER_MIN * ((TARGET_S + 0.4) / 60)) + 1;
+  rejectProvisional({ moveCount: tooMany, score: tooMany * 45, samples: Array.from({ length: Math.min(tooMany, MAX_MOVE_SAMPLES) }, () => ({ m: 'jump', t: 1 })) }, 'bad-moves', 'inhuman move rate');
+  rejectProvisional({ maxCombo: moves + 1 }, 'combo-mismatch', 'combo longer than the move tally');
+  rejectProvisional({ score: moves * FREE_MOVE_MAX_POINTS + 1 }, 'score-mismatch', 'score above the free-scoring ceiling');
+  rejectProvisional({ score: moves * FREE_MOVE_MIN_POINTS - 1 }, 'score-mismatch', 'score below the floor');
+  assert.equal(validateProvisionalSubmission(provisional({ score: moves * FREE_MOVE_MAX_POINTS })).ok, true, 'ceiling inclusive');
+  assert.equal(validateProvisionalSubmission(provisional({ score: moves * FREE_MOVE_MIN_POINTS })).ok, true, 'floor inclusive');
+  // Samples ARE the evidence on this path.
+  rejectProvisional({ samples: samples.slice(0, moves - SAMPLE_COUNT_TOLERANCE - 1) }, 'bad-samples', 'sample count off the tally');
+  rejectProvisional({ samples: [] }, 'bad-samples', 'no samples for a run with moves');
+  rejectProvisional({ samples: samples.map((s, i) => (i === 0 ? { ...s, t: beatmap.videoDurationSec + 9 } : s)) }, 'bad-samples', 'sample outside the video');
+  // A run with zero moves is plausible (score 0) and carries no samples.
+  assert.equal(validateProvisionalSubmission(provisional({ moveCount: 0, score: 0, maxCombo: 0, samples: [] })).ok, true, 'idle run');
+}
+
+// ---------------------------------------------------------------------------
+// Sample storage budget: per uid per UTC day, independent of submit budget.
+// ---------------------------------------------------------------------------
+{
+  const day = Date.UTC(2026, 8, 13, 12);
+  let state = EMPTY_RATE_LIMIT;
+  for (let i = 0; i < SAMPLE_DAILY_LIMIT; i += 1) {
+    const step = consumeSampleReport(state, day + i * 1000);
+    assert.equal(step.allowed, true, `sample report #${i + 1}`);
+    state = step.next;
+  }
+  assert.equal(consumeSampleReport(state, day + 90_000).allowed, false, 'over the daily sample budget');
+  assert.equal(consumeSampleReport(state, day + 24 * 3_600_000).allowed, true, 'fresh day');
+  assert.equal(state.submitCount, 0, 'sample budget does not touch the submit budget');
 }
 
 // The replay is the single source of truth for totals.

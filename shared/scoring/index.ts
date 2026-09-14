@@ -6,6 +6,7 @@
  * Firebase or Node built-ins.
  */
 export * from './beatmap';
+export * from './consensus';
 export * from './grading';
 export * from './daily';
 export * from './levelIds';
