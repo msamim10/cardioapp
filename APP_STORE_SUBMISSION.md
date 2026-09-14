@@ -120,7 +120,7 @@ This one 6.9" set auto-scales to all smaller iPhones. (App is iPhone-only — no
 Thanks for reviewing CardioSurf!
 
 HOW THE APP WORKS
-CardioSurf is a movement-based cardio game. Stand a few feet from the device in a clear space. The front camera is used for on-device full-body motion tracking (Apple Vision) so your jumps, ducks and side-steps control an endless-runner game; by default only skeletal keypoints are processed on-device in real time and no video is stored. There is an optional, off-by-default "Record my run" toggle on the pre-run screen: when the user turns it on, the camera video of that run is recorded to the device and composed locally into a silent share video (game on top, camera below). That video stays on the device — it is never uploaded by the app — and is only exported if the user taps "Save to Photos" (add-only Photos permission) or "Share" (system share sheet). No microphone access is requested.
+CardioSurf is a movement-based cardio game. Stand a few feet from the device in a clear space. The front camera is used for on-device full-body motion tracking (Apple Vision) so your jumps, ducks and side-steps control an endless-runner game; by default only skeletal keypoints are processed on-device in real time and no video is stored. There is an optional, off-by-default "Record my runs" toggle in Settings (Profile) and in the run settings sheet: when the user turns it on, the camera video of each finished run is recorded to the device and composed locally into a silent share clip (game on top, camera below). Clips stay on the device (Profile → Clips keeps the latest ten) — they are never uploaded by the app — and are only exported if the user taps "Save to Photos" (add-only Photos permission) or "Share" (system share sheet). No microphone access is requested.
 
 GETTING STARTED
 1. Sign in with the provided demo account (appreview@cardiosurf.app).
@@ -162,8 +162,8 @@ work today.
 ```
 Record my run, climb the ranks, and make every workout count.
 
-RECORD MY RUN
-Turn on "Record my run" before a workout and CardioSurf builds a shareable video of your run: the map on top, you below, with your score, combo and every PERFECT lighting up as you hit it. It's made entirely on your phone — nothing is uploaded unless you save it to Photos or share it yourself. The toggle is off by default and lives on the level screen.
+RECORD MY RUNS
+Turn on "Record my runs" in Settings and CardioSurf builds a shareable clip of every run you finish: the map on top, you below, with your score, combo and every PERFECT lighting up as you hit it. It's made entirely on your phone — nothing is uploaded unless you save it to Photos or share it yourself. Your latest clips live in Profile → Clips. Off by default.
 
 LEADERBOARDS, FRIENDS AND CHALLENGES
 - Pick a username and set up your public runner profile.
@@ -196,8 +196,8 @@ Sign in with appreview@cardiosurf.app / CardioReview2026!. This account already 
 HOW THE APP WORKS
 CardioSurf is a movement-based cardio game. Stand a few feet from the device in a clear space. The front camera runs on-device full-body motion tracking (Apple Vision) so jumps, ducks and side-steps control an endless-runner game. By default only skeletal keypoints are processed in real time and no video is stored or sent anywhere. A short calibration game runs before each workout so the tracker locks onto the player.
 
-NEW IN 1.1.0 — "RECORD MY RUN" (optional, off by default)
-On the level screen there is a "Record my run" toggle. When the user turns it on, the camera video of that run is recorded to the device and composed locally into a silent share video (game on top, camera below, with the score HUD). The video never leaves the device — the app does not upload it — and is only exported if the user taps "Save to Photos" (add-only Photos permission, NSPhotoLibraryAddUsageDescription) or "Share" (system share sheet). No microphone access is requested. The camera permission string discloses this recording.
+NEW IN 1.1.0 — "RECORD MY RUNS" (optional, off by default)
+In Settings (Profile → Tracking) and in the run settings sheet there is a "Record my runs" toggle. When the user turns it on, the camera video of each finished run is recorded to the device and composed locally into a silent share clip (game on top, camera below, with the score HUD); the latest ten are listed under Profile → Clips. The clip never leaves the device — the app does not upload it — and is only exported if the user taps "Save to Photos" (add-only Photos permission, NSPhotoLibraryAddUsageDescription) or "Share" (system share sheet). No microphone access is requested. The camera permission string discloses this recording.
 
 NEW IN 1.1.0 — LEADERBOARDS, PROFILES AND CHALLENGES
 Users pick a username (Profile → Leaderboards → Username), can find and follow other runners, and can share a "Beat my score" card that deep-links into the level (https://cardiosurf.com/l/... and cardiosurf://). Per-level boards and score submission are verified by our backend (Cloud Functions); boards are live on every map. Entries tagged "EARLY" were posted before a map's timing chart existed and are accepted after server-side plausibility checks. Nothing about the camera or video is involved in leaderboards — only the score, accuracy, combo and the timing of detected moves (no images) are sent.

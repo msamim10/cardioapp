@@ -98,7 +98,8 @@
     "test:daily-key": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-daily-key.ts",
     "test:ghosts": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-ghosts.ts",
     "test:preflight-flow": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-preflight-flow.ts",
-    "test:recording-log": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-recording-log.ts"
+    "test:recording-log": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-recording-log.ts",
+    "test:clips-library": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-clips-library.ts"
   },
   "private": true
 }

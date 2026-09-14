@@ -9,8 +9,9 @@
  * `RunRecordingLog`: it starts both, mirrors the writer's terminal states
  * (interrupted on backgrounding, error) into the log, and on `finish` writes
  * the log next to the clip. `composeRecordedRun` builds the pure-TS
- * `CompositionPlan` from that log and hands it to the Swift composer, then
- * deletes the raw clip + log, keeping the last `MAX_KEPT_VIDEOS` composites.
+ * `CompositionPlan` from that log and hands it to the Swift composer, which
+ * writes straight into the clips library (`clipsLibrary.ts`, Documents/clips,
+ * newest 10 or 1 GiB); the raw camera clip + log are then deleted.
  *
  * All file paths are absolute (no `file://`) because the native modules take
  * plain paths; `toFileUri` converts for expo-sharing / expo-media-library.
@@ -24,9 +25,10 @@ import {
   stopRunRecording,
   type RecordingStateEvent,
 } from 'cardiosurf-pose';
-import { Directory, File, Paths } from 'expo-file-system';
+import { File } from 'expo-file-system';
 import { composeRunVideo, isComposerSupported, probeVideo } from '../../modules/cardiosurf-composer';
-import { getCachedCompositeAsset, prefetchCompositeAsset, toPath } from '@/lib/compositeAssetCache';
+import { clipThumbnailPath, clipVideoPath, deleteClip, registerClip } from '@/lib/clipsLibrary';
+import { getCachedCompositeAsset, prefetchCompositeAsset } from '@/lib/compositeAssetCache';
 import {
   buildCompositionPlan,
   validateCompositionPlan,
@@ -42,9 +44,6 @@ import {
   type RunLogSummary,
 } from '@/lib/runRecordingLog';
 
-export const MAX_KEPT_VIDEOS = 3;
-const VIDEOS_DIR = 'cardiosurf-run-videos';
-
 /** The raw material one recorded run leaves behind for the summary. */
 export type RecordedRun = {
   runId: string;
@@ -58,11 +57,14 @@ export type RecordedRun = {
 
 export type ComposedRunVideo = {
   runId: string;
+  /** Absolute path inside the clips library (no `file://`). */
   path: string;
   thumbnailPath: string | null;
   durationMs: number;
   fileBytes: number;
   composeMs: number;
+  /** Set when the video is registered in the clips library (`/clip/[id]`). */
+  clipId: string | null;
 };
 
 /** Sharing a run video needs the writer, the composer and iOS. */
@@ -231,30 +233,6 @@ export class ComposeError extends Error {
   }
 }
 
-function videosDir(): Directory {
-  const dir = new Directory(Paths.cache, VIDEOS_DIR);
-  if (!dir.exists) {
-    try {
-      dir.create({ intermediates: true, idempotent: true });
-    } catch {
-      // Exists.
-    }
-  }
-  return dir;
-}
-
-export function runVideoPath(runId: string): string {
-  return toPath(new File(videosDir(), `${safeName(runId)}.mp4`).uri);
-}
-
-export function runThumbnailPath(runId: string): string {
-  return toPath(new File(videosDir(), `${safeName(runId)}.jpg`).uri);
-}
-
-function safeName(runId: string): string {
-  return runId.replace(/[^a-zA-Z0-9_-]/g, '_');
-}
-
 /** Build the plan for a recorded run (exported for diagnostics / tests via the pure builder). */
 export async function planForRecordedRun(
   recorded: RecordedRun,
@@ -292,8 +270,9 @@ export async function planForRecordedRun(
 /**
  * Compose the share video for a recorded run. Ensures the level's composite
  * game asset is cached (foreground download if the prefetch did not land),
- * builds the plan, runs the Swift composer, then removes the raw clip and log
- * and prunes older composites.
+ * builds the plan, runs the Swift composer straight into the clips directory,
+ * registers the clip (which evicts what the retention policy drops), then
+ * removes the raw clip and log.
  */
 export async function composeRecordedRun(
   recorded: RecordedRun,
@@ -303,8 +282,8 @@ export async function composeRecordedRun(
   const gamePath = getCachedCompositeAsset(recorded.levelId) ?? (await prefetchCompositeAsset(recorded.levelId));
   if (!gamePath) throw new ComposeError('asset', "Recording isn't available for this map yet.");
   const { plan } = await planForRecordedRun(recorded, gamePath, options);
-  const outputPath = runVideoPath(recorded.runId);
-  const thumbnailPath = runThumbnailPath(recorded.runId);
+  const outputPath = clipVideoPath(recorded.runId);
+  const thumbnailPath = clipThumbnailPath(recorded.runId);
   let result;
   try {
     result = await composeRunVideo({
@@ -320,43 +299,31 @@ export async function composeRecordedRun(
   }
   safeDelete(recorded.cameraPath);
   safeDelete(recorded.logPath);
-  pruneRunVideos(MAX_KEPT_VIDEOS, recorded.runId);
+  const clip = registerClip({
+    id: recorded.runId,
+    levelId: recorded.levelId,
+    score: options.endCard.score,
+    accuracy: options.endCard.accuracyPct / 100,
+    createdAt: recorded.startedAtEpochMs || Date.now(),
+    durationMs: result.durationMs,
+    sourcePath: result.path,
+    sourceThumbPath: result.thumbnailPath,
+  });
   return {
     runId: recorded.runId,
-    path: result.path,
-    thumbnailPath: result.thumbnailPath,
+    path: clip?.filePath ?? result.path,
+    thumbnailPath: clip ? clip.thumbFilePath : result.thumbnailPath,
     durationMs: result.durationMs,
-    fileBytes: result.fileBytes,
+    fileBytes: clip?.bytes ?? result.fileBytes,
     composeMs: result.composeMs,
+    clipId: clip?.id ?? null,
   };
 }
 
-/** Keep the `keep` newest composites (and always the one just made). */
-export function pruneRunVideos(keep = MAX_KEPT_VIDEOS, protectRunId?: string): void {
-  try {
-    const entries = videosDir()
-      .list()
-      .filter((entry): entry is File => entry instanceof File && /\.mp4$/.test(entry.uri))
-      .map((file) => ({ file, at: file.modificationTime ?? 0 }))
-      .sort((a, b) => b.at - a.at);
-    const protectedName = protectRunId ? `${safeName(protectRunId)}.mp4` : null;
-    let kept = 0;
-    for (const { file } of entries) {
-      const name = file.uri.split('/').pop() ?? '';
-      if (kept < keep || name === protectedName) {
-        kept += 1;
-        continue;
-      }
-      safeDelete(toPath(file.uri));
-      safeDelete(toPath(file.uri).replace(/\.mp4$/, '.jpg'));
-    }
-  } catch {
-    // Best effort.
-  }
-}
-
-/** Delete one composite (and its thumbnail). */
-export function deleteRunVideo(video: Pick<ComposedRunVideo, 'path' | 'thumbnailPath'>): void {
+/** Delete one composite: its clips-library entry, video and thumbnail. */
+export function deleteRunVideo(video: Pick<ComposedRunVideo, 'runId' | 'path' | 'thumbnailPath'>): void {
+  deleteClip(video.runId);
+  // The library and the compose output share a path, so these are normally already gone.
   safeDelete(video.path);
   if (video.thumbnailPath) safeDelete(video.thumbnailPath);
 }

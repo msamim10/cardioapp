@@ -4,11 +4,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Constants from 'expo-constants';
 import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RECORD_RUNS_BLURB } from '@/components/RunSettingsSheet';
 import { RunVideoCard } from '@/components/RunVideoCard';
 import { ShareScoreSheet, type ShareScoreInput } from '@/components/ShareScoreCard';
 import { GhostButton, GradientButton, Mascot } from '@/components/ui';
+import { logRunRecordingEnabled } from '@/lib/analytics';
 import { useAuth } from '@/lib/AuthContext';
 import { submitRunIfEligible, type SubmitOutcome } from '@/lib/leaderboards';
 import { hasStagedSubmission } from '@/lib/runSubmission';
@@ -22,6 +24,7 @@ import { getMode } from '@/lib/gameData';
 import { getHudTheme } from '@/lib/hudThemes';
 import { effectiveLevel, MAX_LEVEL, rewardsBetween, type LevelReward } from '@/lib/levels';
 import { getModeCover } from '@/lib/modeCovers';
+import { loadPlaySetup, saveRecordInviteSeen, saveRecordRun, type PlaySetup } from '@/lib/playSetup';
 import {
   normalizeActionCounts,
   TRACKED_ACTIONS,
@@ -272,6 +275,22 @@ export default function SummaryScreen() {
   // affects it: a rejected or offline submission still leaves the run saved.
   const [submission, setSubmission] = useState<SubmitOutcome | { status: 'pending' } | null>(null);
   const [share, setShare] = useState<ShareScoreInput | null>(null);
+  // "Want a clip of your next run?" — shown once ever, on the first completed
+  // run outside onboarding, only while recording is off. Sticky for this
+  // mount so toggling it does not make it vanish mid-read.
+  const [playSetup, setPlaySetup] = useState<PlaySetup | null>(null);
+  const [inviteShown, setInviteShown] = useState(false);
+  const [inviteRecordOn, setInviteRecordOn] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    loadPlaySetup().then((setup) => {
+      if (mounted) setPlaySetup(setup);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (recordedRef.current) return;
@@ -408,6 +427,33 @@ export default function SummaryScreen() {
   // Both sides derive from persisted totals (context xp already includes the
   // run once it is in `runs`), so a remount shows the same moment, not a new one.
   const runInHistory = run !== null && runs.some((r) => r.runId === run.runId);
+
+  // The invitation fires on the first completed run that is not the
+  // onboarding ceremony (`recordInviteSeen` makes it once ever), and only when
+  // recording is off. Marked seen the moment it renders, whatever the choice.
+  useEffect(() => {
+    if (
+      inviteShown ||
+      !playSetup ||
+      playSetup.recordRun ||
+      playSetup.recordInviteSeen ||
+      fromOnboarding ||
+      params.completed !== '1' ||
+      !runInHistory ||
+      totalRuns < 1
+    ) {
+      return;
+    }
+    setInviteShown(true);
+    void saveRecordInviteSeen();
+  }, [fromOnboarding, inviteShown, params.completed, playSetup, runInHistory, totalRuns]);
+
+  const onInviteToggle = (next: boolean) => {
+    setInviteRecordOn(next);
+    void saveRecordRun(next);
+    if (next) logRunRecordingEnabled();
+  };
+
   const levelUp = useMemo(() => {
     if (!run || !runInHistory) return null;
     const before = effectiveLevel(Math.max(0, totalXp - run.xp), legacyLevelFloor);
@@ -598,7 +644,7 @@ export default function SummaryScreen() {
             <View style={styles.card}>
               <View style={styles.cardHead}>
                 <Text style={styles.cardTitle}>Rewards breakdown</Text>
-                <Text style={styles.cardMeta}>{hasBeatmap ? 'Cued map' : 'Free run'}</Text>
+                <Text style={styles.cardMeta}>{hasBeatmap ? 'Timed run' : 'Free run'}</Text>
               </View>
               <View>
                 <BreakdownRow
@@ -646,7 +692,37 @@ export default function SummaryScreen() {
             </View>
           ) : null}
 
-          {/* "Record my run": the clip staged by the workout becomes a share
+          {/* One-time invitation to record the next run (recording is off by default). */}
+          {inviteShown ? (
+            <View
+              style={styles.card}
+              accessible
+              accessibilityRole="switch"
+              accessibilityLabel="Want a clip of your next run? Record my runs"
+              accessibilityHint={RECORD_RUNS_BLURB}
+              accessibilityState={{ checked: inviteRecordOn }}
+            >
+              <View style={styles.inviteRow}>
+                <View style={styles.inviteIcon}>
+                  <Ionicons name={inviteRecordOn ? 'videocam' : 'videocam-outline'} size={18} color={inviteRecordOn ? '#FF3B30' : colors.lime} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.cardTitle}>Want a clip of your next run?</Text>
+                  <Text style={styles.inviteLabel}>Record my runs</Text>
+                  <Text style={styles.calloutDetail}>{RECORD_RUNS_BLURB}</Text>
+                </View>
+                <Switch
+                  value={inviteRecordOn}
+                  onValueChange={onInviteToggle}
+                  trackColor={{ true: colors.lime, false: colors.surface3 }}
+                  thumbColor={colors.white}
+                  ios_backgroundColor={colors.surface3}
+                />
+              </View>
+            </View>
+          ) : null}
+
+          {/* "Record my runs": the clip staged by the workout becomes a share
               video here. Renders nothing when the run was not recorded. */}
           {params.completed === '1' && params.runId ? (
             <RunVideoCard
@@ -686,7 +762,6 @@ export default function SummaryScreen() {
                         {submission.result.improved
                           ? `New best: ${submission.result.best.toLocaleString()} points`
                           : `Your best stays ${submission.result.best.toLocaleString()} points`}
-                        {submission.result.provisional ? ' · Early score' : ''}
                       </Text>
                     </View>
                   </View>
@@ -1023,6 +1098,16 @@ const styles = StyleSheet.create({
   },
   calloutTitle: { ...type.h3, color: colors.text },
   calloutDetail: { ...type.bodySm, color: colors.textDim, marginTop: 2 },
+  inviteRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  inviteIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(215,255,62,0.14)',
+  },
+  inviteLabel: { color: colors.text, fontSize: 14, fontWeight: font.semibold, marginTop: 4 },
 
   card: {
     padding: spacing.lg,

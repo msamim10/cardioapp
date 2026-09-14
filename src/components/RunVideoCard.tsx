@@ -23,6 +23,50 @@ import { colors, font, radius, spacing, type } from '@/theme';
 
 const MISS_RED = '#FF3B30';
 
+export type SaveToPhotosOutcome = 'saved' | 'denied' | 'failed';
+export type ShareVideoOutcome = 'shared' | 'unavailable' | 'dismissed';
+
+/**
+ * Save a local video to Photos with the add-only permission (iOS shows the
+ * "Add Photos Only" prompt, NSPhotoLibraryAddUsageDescription). Shared by the
+ * summary card and the clip screen; the caller owns the alerts.
+ */
+export async function saveVideoToPhotos(path: string): Promise<SaveToPhotosOutcome> {
+  try {
+    const permission = await MediaLibrary.requestPermissionsAsync(true);
+    if (!permission.granted) return 'denied';
+    await MediaLibrary.saveToLibraryAsync(toFileUri(path));
+    logRunRecordingShared('photos');
+    return 'saved';
+  } catch {
+    return 'failed';
+  }
+}
+
+/** Open the system share sheet for a local video. */
+export async function shareVideoFile(path: string): Promise<ShareVideoOutcome> {
+  if (!(await Sharing.isAvailableAsync())) return 'unavailable';
+  try {
+    await Sharing.shareAsync(toFileUri(path), {
+      mimeType: 'video/mp4',
+      UTI: 'public.mpeg-4',
+      dialogTitle: 'Share your run',
+    });
+    logRunRecordingShared('share');
+    return 'shared';
+  } catch {
+    return 'dismissed';
+  }
+}
+
+export function alertPhotosOutcome(outcome: SaveToPhotosOutcome): void {
+  if (outcome === 'denied') {
+    Alert.alert('Photos access needed', 'Allow CardioSurf to add to your Photos to save the video.');
+  } else if (outcome === 'failed') {
+    Alert.alert('Could not save', 'The video could not be saved to Photos. Try sharing it instead.');
+  }
+}
+
 type Phase =
   | { kind: 'hidden' }
   | { kind: 'waiting' }
@@ -147,17 +191,9 @@ export function RunVideoCard({
     if (!video || busy) return;
     setBusy('photos');
     try {
-      // Add-only: iOS shows the "Add Photos Only" prompt (NSPhotoLibraryAddUsageDescription).
-      const permission = await MediaLibrary.requestPermissionsAsync(true);
-      if (!permission.granted) {
-        Alert.alert('Photos access needed', 'Allow CardioSurf to add to your Photos to save the video.');
-        return;
-      }
-      await MediaLibrary.saveToLibraryAsync(toFileUri(video.path));
-      logRunRecordingShared('photos');
-      setSaved(true);
-    } catch {
-      Alert.alert('Could not save', 'The video could not be saved to Photos. Try sharing it instead.');
+      const outcome = await saveVideoToPhotos(video.path);
+      if (outcome === 'saved') setSaved(true);
+      else alertPhotosOutcome(outcome);
     } finally {
       setBusy(null);
     }
@@ -167,18 +203,9 @@ export function RunVideoCard({
     if (!video || busy) return;
     setBusy('share');
     try {
-      if (!(await Sharing.isAvailableAsync())) {
+      if ((await shareVideoFile(video.path)) === 'unavailable') {
         Alert.alert('Sharing unavailable', 'Save the video to Photos and share it from there.');
-        return;
       }
-      await Sharing.shareAsync(toFileUri(video.path), {
-        mimeType: 'video/mp4',
-        UTI: 'public.mpeg-4',
-        dialogTitle: 'Share your run',
-      });
-      logRunRecordingShared('share');
-    } catch {
-      // Dismissed.
     } finally {
       setBusy(null);
     }
@@ -186,7 +213,7 @@ export function RunVideoCard({
 
   const removeVideo = () => {
     if (!video) return;
-    Alert.alert('Delete this video?', 'It is only stored on this phone; deleting cannot be undone.', [
+    Alert.alert('Delete this clip?', 'It is only stored on this phone; deleting cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -205,7 +232,7 @@ export function RunVideoCard({
       <View style={styles.head}>
         <View style={styles.titleRow}>
           <Ionicons name="videocam" size={16} color={MISS_RED} />
-          <Text style={styles.title}>Your run video</Text>
+          <Text style={styles.title}>Your run clip</Text>
         </View>
         {video ? <Text style={styles.meta}>{formatDuration(video.durationMs)}</Text> : null}
       </View>
@@ -229,7 +256,7 @@ export function RunVideoCard({
               ]}
             />
           </View>
-          <Text style={styles.note}>Stays on your phone. Nothing is uploaded unless you share it.</Text>
+          <Text style={styles.note}>Saved to your clips on this phone. Nothing is uploaded unless you share it.</Text>
         </View>
       ) : null}
 
@@ -332,7 +359,7 @@ function ExportSheet({
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.md) + spacing.sm }]}>
           <View style={styles.sheetHead}>
-            <Text style={styles.sheetTitle}>Your run video</Text>
+            <Text style={styles.sheetTitle}>Your run clip</Text>
             <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
               <Ionicons name="close" size={22} color={colors.textDim} />
             </Pressable>
@@ -359,7 +386,7 @@ function ExportSheet({
           </Pressable>
           <Pressable onPress={onDelete} accessibilityRole="button" style={styles.deleteBtn}>
             <Ionicons name="trash-outline" size={15} color={MISS_RED} />
-            <Text style={styles.deleteText}>Delete video</Text>
+            <Text style={styles.deleteText}>Delete clip</Text>
           </Pressable>
         </View>
       </View>

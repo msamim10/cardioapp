@@ -1,14 +1,16 @@
-# Run recording ("Record my run")
+# Run recording ("Record my runs") and the clips library
 
-An opt-in, off-by-default way to get a shareable 720×1280 video of a run:
+An opt-in, off-by-default way to get a shareable 720×1280 clip of a run:
 the map on top, the player's camera below, with score/combo/judgement HUD
 and a 4 s end card. Everything happens on the phone; nothing is uploaded
-unless the user saves or shares the file.
+unless the user saves or shares the file. Finished clips live in an
+on-device library (Profile → Clips, newest 10 or 1 GiB).
 
 ```
-level/[id].tsx   "Record my run" toggle (persisted, explainer once)
-                 background prefetch of composite/<level>/game-576.mp4
-      │ record=1
+profile.tsx      Settings ▸ "Record my runs" Switch (persisted `recordRun`) · Clips grid → /clip/[id]
+level/[id].tsx   sliders button → RunSettingsSheet (intensity, duration, Phone/TV, "Record my runs")
+                 background prefetch of composite/<level>/game-576.mp4 while recording is on
+      │ record=1  (recordRun && no blocked reason)
 preflight.tsx    camera at the recording preset (same frame size as the run)
       │ record=1
 workout.tsx      RunRecordingSession
@@ -18,8 +20,11 @@ workout.tsx      RunRecordingSession
       │ router.replace('/summary')
 summary.tsx      RunVideoCard: consumeRecordedRun(runId)
                    ├─ compositionPlan.ts  RunLogFile → CompositionPlan (pure TS)
-                   └─ cardiosurf-composer compose(plan) → Caches/cardiosurf-run-videos/<runId>.mp4 + .jpg
+                   ├─ cardiosurf-composer compose(plan) → Documents/clips/<runId>.mp4 + .jpg
+                   └─ clipsLibrary.registerClip → clips/index.json (+ retention eviction)
                  Export sheet: Save to Photos (add-only) · Share (system sheet) · Delete
+                 First non-onboarding run with recording off: one-time "Want a clip of your next run?" card
+clip/[id].tsx    full-screen expo-video player · Share · Save to Photos · Delete
 ```
 
 Source of truth for each piece:
@@ -31,11 +36,12 @@ Source of truth for each piece:
 | Composition plan (pure TS) | `src/lib/compositionPlan.ts` |
 | Composer (Swift, dumb) | `modules/cardiosurf-composer/ios/CardioSurfComposerModule.swift`, `modules/cardiosurf-composer/index.ts` |
 | Orchestration | `src/lib/runRecording.ts` |
+| Clips library (I/O) + retention policy (pure) | `src/lib/clipsLibrary.ts`, `src/lib/clipsLibraryPolicy.ts` |
 | Composite asset URL + cache | `src/lib/videoSources.ts` (`getCompositeGameSource`), `src/lib/compositeAssetCache.ts`, `src/lib/compositeCachePolicy.ts` |
 | Asset pipeline | `scripts/transcode-composite.sh`, `scripts/upload-hls.sh` |
-| UX | `src/app/level/[id].tsx`, `src/components/RecordRunExplainerSheet.tsx`, `src/app/workout.tsx`, `src/components/RunVideoCard.tsx` |
-| Preference | `src/lib/playSetup.ts` (`recordRun`, `recordExplainerSeen`) |
-| Tests | `npm run test:recording-log` (`scripts/replay-recording-log.ts`) |
+| UX | `src/app/level/[id].tsx`, `src/components/RunSettingsSheet.tsx`, `src/app/(tabs)/profile.tsx` (Settings toggle + Clips), `src/app/clip/[id].tsx`, `src/app/workout.tsx`, `src/components/RunVideoCard.tsx`, `src/app/summary.tsx` (invitation card) |
+| Preference | `src/lib/playSetup.ts` (`recordRun`, `recordInviteSeen`; `recordExplainerSeen` is legacy, no longer read) |
+| Tests | `npm run test:recording-log` (`scripts/replay-recording-log.ts`), `npm run test:clips-library` (`scripts/replay-clips-library.ts`) |
 
 ## 1. Camera recording (pose module)
 
@@ -177,8 +183,8 @@ In the app, `getCompositeGameSource(levelId)` resolves the URL and
 `Caches/cardiosurf-composite/`, with an `index.json` of `{levelId, file,
 bytes, lastUsedAt}`. `checkCompositeAvailable` HEADs the URL; a 404 disables
 the toggle with "Recording isn't available for this map yet." The level screen
-prefetches as soon as the toggle is on ("Preparing your recording…"); the
-summary falls back to a foreground download if that never landed.
+prefetches in the background as soon as recording is effective for that
+level; the summary falls back to a foreground download if that never landed.
 
 ## 5. Composition plan (`compositionPlan.ts` → Swift)
 
@@ -258,13 +264,60 @@ interval and pop. Export uses `AVAssetExportSession` preset 1280×720,
 events at 4 Hz; a JPEG thumbnail is written next to the output. `probe(path)`
 returns duration and size for the plan builder.
 
-## 6. UX rules
+## 6. Clips library
 
-- The toggle lives on the level screen's "Share" section, default OFF,
-  persisted per install. It is disabled with a reason when the destination is
-  TV (v1 does not record AirPlay runs — the companion remount would release
-  the writer), when tracking is unavailable, when camera access is denied, or
-  when the composite asset 404s. First ON shows `RecordRunExplainerSheet` once.
+Composed videos are written by the composer straight into
+`<Documents>/clips/<runId>.mp4` (+ `<runId>.jpg` thumbnail, produced by the
+composer at the run's midpoint) — Documents, not Caches, so iOS never purges
+a clip behind the user's back. `clipsLibrary.registerClip` then adds an
+entry to `clips/index.json`:
+
+```jsonc
+{ "version": 1, "entries": [
+  { "id": "<runId>", "levelId": "neon-rails", "score": 8420, "accuracy": 0.91,
+    "createdAt": 1789000000000, "path": "<runId>.mp4", "thumbPath": "<runId>.jpg",
+    "bytes": 61234567, "durationMs": 184000 }
+] }
+```
+
+`path`/`thumbPath` are file names relative to the clips directory because the
+container path changes between installs; `Clip` (the resolved form) carries
+`filePath`/`thumbFilePath` as absolute paths.
+
+**Retention** (`clipsLibraryPolicy.ts`, pure, pinned by
+`npm run test:clips-library`): `applyClipRetention(entries, { maxCount: 10,
+maxBytes: 1 GiB })` walks newest → oldest and keeps a clip while both the
+count and the running byte total fit; the newest clip is always kept. `addClip`
+pins the new clip first and lets the others compete for the remaining budget;
+`removeClip` / `findClip` / `parseClipsIndex` (tolerant, dedupes by id) round
+it out. Evicted entries have their video + thumbnail deleted. `listClips()`
+also drops index entries whose file has vanished.
+
+Screens: Profile → **Clips** is a 3-column grid (thumbnail, level name,
+score, short date; empty state offers "Turn on recording"). Tapping opens
+`/clip/[id]`: full-screen `expo-video` player with native controls, Save to
+Photos (add-only, permission asked on demand), Share (system sheet) and
+Delete (confirm → file + thumb + index entry → back). `deleteRunVideo` on the
+summary goes through `deleteClip` too.
+
+## 7. UX rules
+
+- "Record my runs" is default OFF, persisted per install (`recordRun`), and
+  lives in two places: Profile → Tracking (Settings) and the level brief's run
+  settings sheet (top-right sliders button, next to intensity, duration and
+  Phone/TV). One line under both: "Saved on your phone. Share whenever you
+  like." The sheet disables it with a reason when the destination is TV (v1
+  does not record AirPlay runs — the companion remount would release the
+  writer), when tracking is unavailable, when camera access is denied, or when
+  the composite asset 404s (`recordBlockedReasonFor`, shared with the level
+  screen so the `record=1` param agrees). There is no explainer sheet.
+- **Invitation card** (`summary.tsx`): on the first completed run that is not
+  the onboarding ceremony, while recording is off and `recordInviteSeen` is
+  false, an inline card renders where the run video card would: "Want a clip
+  of your next run?", a "Record my runs" Switch, the one-line blurb.
+  `recordInviteSeen` is persisted the moment it renders, so it appears once
+  ever regardless of the choice; switching it on calls `saveRecordRun(true)`
+  + `logRunRecordingEnabled()`.
 - Onboarding never passes `record=1`, so the first run is never recorded.
 - `workout.tsx` starts the session on the first `readyToPlay`, shows a red
   dot + "REC" pill next to the AirPlay control and on the PiP; hiding the PiP
@@ -273,19 +326,22 @@ returns duration and size for the plan builder.
   cancels.
 - `summary.tsx` shows `RunVideoCard` only for recorded runs: "Saving your
   recording…" → "Building your video… NN%" → thumbnail + Save/Share, with an
-  export sheet (inline preview, Save to Photos, Share…, Delete). The last 3
-  composites are kept in `Caches/cardiosurf-run-videos/`; raw clips and logs
-  are deleted after a successful compose (or on failure).
+  export sheet (inline preview, Save to Photos, Share…, Delete). The result is
+  registered in the clips library (§6); raw clips and logs are deleted after a
+  successful compose (or on failure).
 - Analytics (facade, `safely`): `run_recording_enabled`,
   `run_recording_completed {duration_ms, compose_ms, file_bytes}`,
   `run_recording_shared {target: photos|share}`,
   `run_recording_failed {stage: record|asset|log|plan|compose|export}`.
 
-## 7. Verifying without a device
+## 8. Verifying without a device
 
 - `npm run test:recording-log` — log round-trip, segment → insert planning
   (rates, loops, pauses, clipping), HUD keyframes, bounded memory, camera crop
   bias, asset URL resolver, cache LRU policy.
+- `npm run test:clips-library` — clip retention (count cap, byte cap, newest
+  always kept, newest→oldest walk), `addClip`/`removeClip`, tolerant index
+  parse + round trip.
 - `npx tsc --noEmit`, eslint on the changed files, `xcrun swiftc -parse` on
   both Swift modules. The AVFoundation/CoreAnimation parts of both Swift files
   were also type-checked against the iphoneos SDK with a stub of the
@@ -296,7 +352,7 @@ backgrounding), the preset switch and calibration handoff, the composer's
 actual output (layer geometry, text rendering, export duration), Save to
 Photos and the share sheet, and the latency gate in §2.
 
-## 8. Owner TODOs (in order)
+## 9. Owner TODOs (in order)
 
 1. ~~Cut and upload the composites~~ — done 2026-09-13 for all 13 hosted
    levels (`composite/level{1..11,13,14}/game-576.mp4`), cut from the hosted

@@ -212,6 +212,7 @@ function RootStack() {
       <Stack.Screen name="level/[id]" options={{ presentation: 'card' }} />
       <Stack.Screen name="l/[id]" options={{ animation: 'none' }} />
       <Stack.Screen name="leaderboard/[id]" options={{ presentation: 'card' }} />
+      <Stack.Screen name="clip/[id]" options={{ presentation: 'card' }} />
       <Stack.Screen name="runner/[uid]" options={{ presentation: 'card' }} />
       <Stack.Screen name="find-friends" options={{ presentation: 'card' }} />
       <Stack.Screen name="edit-username" options={{ presentation: 'card' }} />

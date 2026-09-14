@@ -1,17 +1,25 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { type Href, useRouter } from 'expo-router';
+import * as Device from 'expo-device';
+import { Image } from 'expo-image';
+import { type Href, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RECORD_RUNS_BLURB } from '@/components/RunSettingsSheet';
 import { Mascot, SectionHeader } from '@/components/ui';
+import { logRunRecordingEnabled } from '@/lib/analytics';
 import { useAuth } from '@/lib/AuthContext';
+import { listClips, toFileUri, type Clip } from '@/lib/clipsLibrary';
 import {
   loadCalibrationProfile,
   requestCalibrationGuidance,
   type CalibrationProfile,
 } from '@/lib/calibrationProfile';
-import type { IconName } from '@/lib/gameData';
+import { describeSeedBoards, seedBoardsNow } from '@/lib/functionsClient';
+import { getMode, type IconName } from '@/lib/gameData';
 import { DEFAULT_HUD_THEME_ID, hudThemeOptions, resolveHudTheme } from '@/lib/hudThemes';
+import { loadPlaySetup, saveCalibrationBaseline, saveRecordRun, saveVoicePrompts } from '@/lib/playSetup';
+import { isRunRecordingAvailable } from '@/lib/runRecording';
 import { describeChartRebuild, fetchIsAdmin, rebuildChartsNow } from '@/lib/leaderboards';
 import { levelBadges, nextRewardLevel } from '@/lib/levels';
 import { useOnboarding } from '@/lib/OnboardingContext';
@@ -30,6 +38,36 @@ export default function ProfileScreen() {
   const { isPremium, presentCustomerCenter, presentPaywall, restore } = useSubscription();
   const [restoring, setRestoring] = useState(false);
   const [calibration, setCalibration] = useState<CalibrationProfile | null>(null);
+  // "Record my runs" (default off) + the clips it produced. Re-read on focus so
+  // a clip composed on the summary, or deleted on its own screen, shows up.
+  const [recordRun, setRecordRun] = useState(false);
+  // Spoken camera-check prompts ("Step back", "Hold still"), default on.
+  const [voicePrompts, setVoicePrompts] = useState(true);
+  const [clips, setClips] = useState<Clip[]>([]);
+  const recordingDeviceCapable = Platform.OS === 'ios' && Device.isDevice && isRunRecordingAvailable;
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      loadPlaySetup().then((setup) => {
+        if (!active) return;
+        setRecordRun(setup.recordRun);
+        setVoicePrompts(setup.voicePrompts);
+      });
+      setClips(listClips());
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
+  const handleRecordRunChange = useCallback((next: boolean) => {
+    setRecordRun(next);
+    void saveRecordRun(next);
+    if (next) logRunRecordingEnabled();
+  }, []);
+  const handleVoicePromptsChange = useCallback((next: boolean) => {
+    setVoicePrompts(next);
+    void saveVoicePrompts(next);
+  }, []);
   // Chart admin (owner): `admins/{uid}` exists. The callable re-checks server-side.
   const [isAdmin, setIsAdmin] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
@@ -51,6 +89,15 @@ export default function ProfileScreen() {
       .catch((error: unknown) => Alert.alert('Rebuild failed', (error as Error).message))
       .finally(() => setRebuilding(false));
   }, [rebuilding]);
+  const [seeding, setSeeding] = useState(false);
+  const forceSeedBoards = useCallback(() => {
+    if (seeding) return;
+    setSeeding(true);
+    seedBoardsNow()
+      .then((result) => Alert.alert('Boards seeded', describeSeedBoards(result)))
+      .catch((error: unknown) => Alert.alert('Seed failed', (error as Error).message))
+      .finally(() => setSeeding(false));
+  }, [seeding]);
 
   useEffect(() => {
     let active = true;
@@ -68,20 +115,21 @@ export default function ProfileScreen() {
     calibration === null
       ? 'Checking…'
       : calibration.guidanceRequested
-        ? 'Guided setup runs on your next workout'
+        ? 'Re-centers on your next run'
         : calibration.completedCount === 0
           ? 'Runs automatically on your first workout'
-          : `Calibrated ${calibration.completedCount === 1 ? 'once' : `${calibration.completedCount} times`} · tap to redo the guided setup`;
+          : `Set up ${calibration.completedCount === 1 ? 'once' : `${calibration.completedCount} times`} · tap to re-center on your next run`;
 
-  // Calibration itself is measured every session, so this only re-arms the
-  // guided instructions for users who changed shoes, treadmill, or phone spot.
+  // Re-center: forget the once-per-session baseline so the next run does the
+  // full three-second hold again, and re-arm the guided instructions.
   const handleRecalibrate = useCallback(() => {
+    void saveCalibrationBaseline(null).catch(() => {});
     requestCalibrationGuidance()
       .then((profile) => setCalibration(profile))
       .catch(() => {});
     Alert.alert(
-      'Guided setup re-armed',
-      'Your next workout will walk you through camera placement and framing again.',
+      'Re-center on your next run',
+      'Your next run starts with the three-second camera check again.',
     );
   }, []);
   const {
@@ -324,6 +372,64 @@ export default function ProfileScreen() {
         <Text style={styles.sectionHint}>{activeTheme.tagline}</Text>
       </View>
 
+      {/* Clips: composed run videos kept on this phone (Documents/clips). */}
+      <View style={styles.section}>
+        <SectionHeader
+          title="Clips"
+          action={clips.length > 0 ? <Text style={styles.link}>{clips.length}</Text> : undefined}
+        />
+        {clips.length > 0 ? (
+          <View style={styles.clipGrid}>
+            {clips.map((clip) => {
+              const levelName = getMode(clip.levelId)?.name ?? 'Run';
+              return (
+                <Pressable
+                  key={clip.id}
+                  onPress={() => router.push(`/clip/${clip.id}` as Href)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${levelName}, ${clip.score.toLocaleString()} points, ${formatShortDate(clip.createdAt)}. Open clip`}
+                  style={({ pressed }) => [styles.clipTile, pressed && { opacity: 0.85 }]}
+                >
+                  {clip.thumbFilePath ? (
+                    <Image source={{ uri: toFileUri(clip.thumbFilePath) }} style={StyleSheet.absoluteFill} contentFit="cover" />
+                  ) : (
+                    <View style={[StyleSheet.absoluteFill, styles.clipFallback]}>
+                      <Ionicons name="film-outline" size={22} color={colors.textFaint} />
+                    </View>
+                  )}
+                  <View style={styles.clipShade} />
+                  <View style={styles.clipText}>
+                    <Text style={styles.clipLevel} numberOfLines={1}>
+                      {levelName}
+                    </Text>
+                    <Text style={styles.clipScore}>{clip.score.toLocaleString()}</Text>
+                    <Text style={styles.clipDate}>{formatShortDate(clip.createdAt)}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={styles.clipEmpty}>
+            <Text style={styles.settingHint}>
+              {recordRun
+                ? 'Recording is on. Your next finished run lands here.'
+                : 'Your run clips will appear here.'}
+            </Text>
+            {!recordRun && recordingDeviceCapable ? (
+              <Pressable
+                onPress={() => handleRecordRunChange(true)}
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.clipEmptyBtn, pressed && { opacity: 0.85 }]}
+              >
+                <Ionicons name="videocam-outline" size={16} color={colors.black} />
+                <Text style={styles.clipEmptyBtnText}>Turn on recording</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        )}
+      </View>
+
       {/* Leaderboard identity + friends */}
       <View style={styles.section}>
         <SectionHeader title="Leaderboards" />
@@ -362,6 +468,49 @@ export default function ProfileScreen() {
           </View>
           <Ionicons name="refresh" size={18} color={colors.textFaint} />
         </Pressable>
+        <View
+          style={styles.settingRow}
+          accessible
+          accessibilityRole="switch"
+          accessibilityLabel="Spoken prompts"
+          accessibilityHint="Says “Step back” and “Hold still” during the camera check."
+          accessibilityState={{ checked: voicePrompts }}
+        >
+          <View style={styles.settingLead}>
+            <Text style={styles.settingText}>Spoken prompts</Text>
+            <Text style={styles.settingHint}>Hear “Step back” and “Hold still” during the camera check.</Text>
+          </View>
+          <Switch
+            value={voicePrompts}
+            onValueChange={handleVoicePromptsChange}
+            trackColor={{ true: colors.lime, false: colors.surface3 }}
+            thumbColor={colors.white}
+            ios_backgroundColor={colors.surface3}
+          />
+        </View>
+        <View
+          style={styles.settingRow}
+          accessible
+          accessibilityRole="switch"
+          accessibilityLabel="Record my runs"
+          accessibilityHint={recordingDeviceCapable ? RECORD_RUNS_BLURB : 'Not available in this build.'}
+          accessibilityState={{ checked: recordRun, disabled: !recordingDeviceCapable }}
+        >
+          <View style={styles.settingLead}>
+            <Text style={styles.settingText}>Record my runs</Text>
+            <Text style={styles.settingHint}>
+              {recordingDeviceCapable ? RECORD_RUNS_BLURB : 'Not available in this build.'}
+            </Text>
+          </View>
+          <Switch
+            value={recordRun}
+            onValueChange={handleRecordRunChange}
+            disabled={!recordingDeviceCapable}
+            trackColor={{ true: colors.lime, false: colors.surface3 }}
+            thumbColor={colors.white}
+            ios_backgroundColor={colors.surface3}
+          />
+        </View>
       </View>
 
       {/* Support */}
@@ -390,6 +539,17 @@ export default function ProfileScreen() {
           >
             <Text style={styles.settingText}>{rebuilding ? 'Rebuilding charts…' : 'Rebuild charts now (admin)'}</Text>
             <Ionicons name="cloud-upload-outline" size={18} color={colors.lime} />
+          </Pressable>
+        ) : null}
+        {isAdmin ? (
+          <Pressable
+            onPress={forceSeedBoards}
+            disabled={seeding}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.settingRow, (pressed || seeding) && { opacity: 0.85 }]}
+          >
+            <Text style={styles.settingText}>{seeding ? 'Seeding boards…' : 'Seed boards now (admin)'}</Text>
+            <Ionicons name="people-outline" size={18} color={colors.lime} />
           </Pressable>
         ) : null}
         {__DEV__ ? (
@@ -482,9 +642,60 @@ export default function ProfileScreen() {
   );
 }
 
+function formatShortDate(epochMs: number): string {
+  const date = new Date(epochMs);
+  if (!Number.isFinite(date.getTime())) return '';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   content: { paddingHorizontal: spacing.lg, gap: spacing.lg },
+  clipGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  clipTile: {
+    width: '31%',
+    flexGrow: 1,
+    maxWidth: '32%',
+    aspectRatio: 9 / 14,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    justifyContent: 'flex-end',
+  },
+  clipFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface2 },
+  clipShade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '55%',
+    backgroundColor: 'rgba(8,9,10,0.62)',
+  },
+  clipText: { padding: spacing.sm, gap: 1 },
+  clipLevel: { color: colors.text, fontSize: 11, fontWeight: font.bold },
+  clipScore: { ...metric, color: colors.lime, fontSize: 15, fontWeight: font.heavy, letterSpacing: -0.3 },
+  clipDate: { ...metric, color: colors.textDim, fontSize: 10, fontWeight: font.semibold },
+  clipEmpty: {
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  clipEmptyBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.button,
+    backgroundColor: colors.lime,
+  },
+  clipEmptyBtnText: { color: colors.black, fontSize: 13, fontWeight: font.heavy, letterSpacing: 0.4 },
   header: { alignItems: 'center', gap: 4, marginTop: spacing.sm },
   avatar: {
     width: 84,

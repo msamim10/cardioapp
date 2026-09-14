@@ -1,30 +1,71 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { VideoAirPlayButton } from 'expo-video';
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { GradientButton } from '@/components/ui';
+import { GradientButton, OptionCard } from '@/components/ui';
+import type { CompositeAvailability } from '@/lib/compositeAssetCache';
 import {
   DURATION_OPTIONS,
   INTENSITY_META,
   INTENSITY_ORDER,
+  type PlayScreen,
   type RunSettings,
 } from '@/lib/playSetup';
 import { colors, font, metric, radius, spacing, type } from '@/theme';
 
+/** One line under every "Record my runs" toggle (sheet, Settings, invitation). */
+export const RECORD_RUNS_BLURB = 'Saved on your phone. Share whenever you like.';
+
+export type RecordBlockers = {
+  /** iOS physical device with the writer + composer linked. */
+  deviceCapable: boolean;
+  /** Camera permission explicitly denied. */
+  cameraDenied: boolean;
+  /** Whether this level's composite game asset is hosted. */
+  compositeState: CompositeAvailability | 'checking';
+};
+
 /**
- * Per-run Edit sheet. Intensity maps to the map's playback rate (0.85 / 1.0 /
- * 1.2x); duration is the wall-clock length of the run, met by looping the map
- * video until the target is reached. Changes are only committed on Save so a
- * swipe-down leaves the previous settings untouched.
+ * Why recording cannot run right now, or null. Pure so the level screen (for
+ * the `record` preflight param) and the sheet (live, as the destination
+ * changes) agree.
+ */
+export function recordBlockedReasonFor(destination: PlayScreen, blockers: RecordBlockers): string | null {
+  if (destination === 'tv') return 'Not available for TV runs yet. Choose Phone to record.';
+  if (!blockers.deviceCapable) return 'Body tracking is unavailable in this build, so runs cannot be recorded.';
+  if (blockers.cameraDenied) return 'Camera access is off. Enable it in Settings to record.';
+  if (blockers.compositeState === 'missing') return "Recording isn't available for this map yet.";
+  return null;
+}
+
+/**
+ * Run settings sheet (the top-right sliders button on the level brief).
+ * Intensity maps to the playback rate (0.85 / 1.0 / 1.2x); duration is the
+ * wall-clock length of the run. Those two are a draft committed on Save so a
+ * swipe-down leaves them untouched. The screen (Phone / TV) and "Record my
+ * runs" are reported immediately through their callbacks — the AirPlay
+ * picker is a native side effect that cannot wait for Save — and the caller
+ * persists them and re-reads the play setup when the sheet closes.
  */
 export function RunSettingsSheet({
   visible,
   value,
+  destination,
+  recordRun,
+  recordBlockers,
+  onDestinationChange,
+  onRecordRunChange,
   onClose,
   onSave,
 }: {
   visible: boolean;
   value: RunSettings;
+  destination: PlayScreen;
+  recordRun: boolean;
+  recordBlockers: RecordBlockers;
+  onDestinationChange: (next: PlayScreen) => void;
+  onRecordRunChange: (next: boolean) => void;
   onClose: () => void;
   onSave: (next: RunSettings) => void;
 }) {
@@ -36,6 +77,8 @@ export function RunSettingsSheet({
   }, [value, visible]);
 
   const rate = INTENSITY_META[draft.intensity].playbackRate;
+  const blockedReason = recordBlockedReasonFor(destination, recordBlockers);
+  const recordOn = recordRun && blockedReason === null;
 
   return (
     <Modal
@@ -47,7 +90,7 @@ export function RunSettingsSheet({
       <View style={styles.sheet}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.eyebrow}>Edit run</Text>
+            <Text style={styles.eyebrow}>Run settings</Text>
             <Text style={styles.title}>Set the session</Text>
           </View>
           <Pressable
@@ -61,7 +104,11 @@ export function RunSettingsSheet({
           </Pressable>
         </View>
 
-        <View style={styles.body}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.body}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.group}>
             <View style={styles.groupHead}>
               <Text style={styles.groupTitle}>Intensity</Text>
@@ -102,7 +149,7 @@ export function RunSettingsSheet({
           <View style={styles.group}>
             <View style={styles.groupHead}>
               <Text style={styles.groupTitle}>Duration</Text>
-              <Text style={styles.groupMeta}>Map loops until time is up</Text>
+              <Text style={styles.groupMeta}>Loops until time is up</Text>
             </View>
             <View style={styles.chips} accessibilityRole="radiogroup">
               {DURATION_OPTIONS.map((minutes) => {
@@ -129,7 +176,87 @@ export function RunSettingsSheet({
               })}
             </View>
           </View>
-        </View>
+
+          {Platform.OS === 'ios' ? (
+            <View style={styles.group}>
+              <View style={styles.groupHead}>
+                <Text style={styles.groupTitle}>Screen</Text>
+                <Text style={styles.groupMeta}>{destination === 'tv' ? 'TV / AirPlay' : 'Phone'}</Text>
+              </View>
+              <View style={styles.options}>
+                <OptionCard
+                  title="Phone"
+                  desc="Play on this device"
+                  icon="phone-portrait-outline"
+                  selected={destination === 'phone'}
+                  onPress={() => onDestinationChange('phone')}
+                />
+                <View
+                  style={styles.tvAirplayCardWrap}
+                  pointerEvents="box-none"
+                  accessibilityRole="radio"
+                  accessibilityLabel="TV or AirPlay"
+                  accessibilityHint="Opens the AirPlay picker to choose your display"
+                  accessibilityState={{ selected: destination === 'tv' }}
+                >
+                  {/* Visual-only card — touches pass through to the native picker overlay. */}
+                  <View pointerEvents="none">
+                    <OptionCard
+                      title="TV / AirPlay"
+                      desc="Stream to Apple TV or an AirPlay display"
+                      icon="tv-outline"
+                      selected={destination === 'tv'}
+                    />
+                  </View>
+                  {/* Invisible native route picker — transparent tint keeps the icon hidden while opacity stays 1 for hit-testing. */}
+                  <VideoAirPlayButton
+                    style={styles.tvAirplayOverlay}
+                    tint="#00000000"
+                    activeTint="#00000000"
+                    prioritizeVideoDevices
+                    onBeginPresentingRoutes={() => onDestinationChange('tv')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Choose an AirPlay display"
+                    accessibilityHint="Opens the system AirPlay route picker"
+                  />
+                </View>
+              </View>
+            </View>
+          ) : null}
+
+          {Platform.OS === 'ios' ? (
+            <View style={styles.group}>
+              <View
+                style={[styles.recordRow, blockedReason && styles.recordRowDisabled]}
+                accessible
+                accessibilityRole="switch"
+                accessibilityLabel="Record my runs"
+                accessibilityHint={blockedReason ?? RECORD_RUNS_BLURB}
+                accessibilityState={{ checked: recordOn, disabled: blockedReason !== null }}
+              >
+                <View style={[styles.recordIcon, recordOn && styles.recordIconOn]}>
+                  <Ionicons
+                    name={recordOn ? 'videocam' : 'videocam-outline'}
+                    size={18}
+                    color={recordOn ? '#FF3B30' : colors.lime}
+                  />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.recordTitle}>Record my runs</Text>
+                  <Text style={styles.blurb}>{blockedReason ?? RECORD_RUNS_BLURB}</Text>
+                </View>
+                <Switch
+                  value={recordOn}
+                  onValueChange={onRecordRunChange}
+                  disabled={blockedReason !== null}
+                  trackColor={{ true: colors.lime, false: colors.surface3 }}
+                  thumbColor={colors.white}
+                  ios_backgroundColor={colors.surface3}
+                />
+              </View>
+            </View>
+          ) : null}
+        </ScrollView>
 
         <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
           <Text style={styles.footnote}>Saved as your default for the next run.</Text>
@@ -170,7 +297,13 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   pressed: { opacity: 0.75 },
-  body: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.xxl },
+  scroll: { flex: 1 },
+  body: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.xl,
+    gap: spacing.xl,
+  },
   group: { gap: spacing.md },
   groupHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
   groupTitle: { ...type.h3, color: colors.text },
@@ -210,6 +343,33 @@ const styles = StyleSheet.create({
   chipValueSelected: { color: colors.black },
   chipUnit: { ...type.micro, color: colors.textDim },
   chipUnitSelected: { color: colors.black },
+  options: { gap: spacing.sm },
+  tvAirplayCardWrap: { position: 'relative' },
+  tvAirplayOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+  },
+  recordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  recordRowDisabled: { opacity: 0.7 },
+  recordIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(215,255,62,0.1)',
+  },
+  recordIconOn: { backgroundColor: 'rgba(255,59,48,0.12)' },
+  recordTitle: { ...type.h3, color: colors.text, marginBottom: 2 },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,

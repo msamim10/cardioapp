@@ -4,23 +4,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCameraPermissions } from 'expo-camera';
 import * as Device from 'expo-device';
-import { VideoAirPlayButton } from 'expo-video';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { RecordRunExplainerSheet } from '@/components/RecordRunExplainerSheet';
-import { RunSettingsSheet } from '@/components/RunSettingsSheet';
-import { OptionCard, SectionHeader } from '@/components/ui';
+import { recordBlockedReasonFor, RunSettingsSheet } from '@/components/RunSettingsSheet';
 import { logRunRecordingEnabled } from '@/lib/analytics';
+import { useAuth } from '@/lib/AuthContext';
 import { refreshBeatmap } from '@/lib/beatmapRegistry';
 import {
   checkCompositeAvailable,
@@ -29,7 +18,7 @@ import {
   type CompositeAvailability,
 } from '@/lib/compositeAssetCache';
 import { discoveryClassForMode } from '@/lib/dailyRecommendations';
-import { displayHandle, fetchChallenge, type ChallengeCard } from '@/lib/leaderboards';
+import { displayHandle, fetchChallenge, fetchMyEntry, fetchRank, type ChallengeCard } from '@/lib/leaderboards';
 import { getMode, modes } from '@/lib/gameData';
 import { getModeCover } from '@/lib/modeCovers';
 import { useOnboarding } from '@/lib/OnboardingContext';
@@ -38,35 +27,17 @@ import {
   loadPlaySetup,
   resolveRunSettings,
   savePlayScreen,
-  saveRecordExplainerSeen,
   saveRecordRun,
   saveRunSettings,
+  type PlayScreen,
   type RunSettings,
 } from '@/lib/playSetup';
 import { useProgress } from '@/lib/ProgressContext';
 import { isRunRecordingAvailable } from '@/lib/runRecording';
-import {
-  caloriesForRun,
-  CLASS_META,
-  lockReasonCopy,
-  parseOptionalClassKeyParam,
-} from '@/lib/progression';
+import { CLASS_META, lockReasonCopy, parseOptionalClassKeyParam } from '@/lib/progression';
 import { useSubscription } from '@/lib/SubscriptionContext';
 import { canStartRun, requestSubscriptionAccess } from '@/lib/subscriptionAccess';
 import { colors, font, metric, radius, spacing, type } from '@/theme';
-
-const PREP_ITEMS: {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  detail: string;
-}[] = [
-  { icon: 'resize-outline', title: 'Clear space', detail: 'Room to move on all sides.' },
-  { icon: 'volume-high-outline', title: 'Sound on', detail: 'Audio cues call the moves.' },
-  { icon: 'phone-portrait-outline', title: 'Screen placed', detail: 'Phone or TV in clear view.' },
-  { icon: 'body-outline', title: 'In frame', detail: 'Full body visible to the camera.' },
-];
-
-type PlaybackDestination = 'phone' | 'tv';
 
 export default function LevelDetailScreen() {
   const { id: idParam, classKey: classKeyParam, challenge: challengeParam } = useLocalSearchParams<{
@@ -79,31 +50,32 @@ export default function LevelDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const mode = getMode(id);
-  const { classData } = useProgress();
+  const { classData, runs } = useProgress();
   const { answers } = useOnboarding();
+  const { user } = useAuth();
   const { hydrated: subscriptionHydrated, isPremium, presentPaywall } = useSubscription();
-  const [playbackDestination, setPlaybackDestination] = useState<PlaybackDestination>('phone');
+  const [playbackDestination, setPlaybackDestination] = useState<PlayScreen>('phone');
   const [starting, setStarting] = useState(false);
   // Per-run settings: last-used from AsyncStorage, otherwise derived from the
   // onboarding baseline answer. Edited through the sheet, persisted on save.
   const [runSettings, setRunSettings] = useState<RunSettings>(() =>
     resolveRunSettings(null, answers),
   );
-  const [editOpen, setEditOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // Beat-my-score deep link: `?challenge={runId}` → public `challenges/{runId}`.
   const [challenge, setChallenge] = useState<ChallengeCard | null>(null);
-  // "Record my run": persisted opt-in, one-time explainer, and whether this
-  // map's composite game asset (needed to build the share video) is hosted
-  // and cached. See docs/RUN_RECORDING.md.
+  // Board rank for the user's best on this level; null while loading or unranked.
+  const [myRank, setMyRank] = useState<number | null>(null);
+  // "Record my runs": persisted opt-in (Settings / run settings sheet) and
+  // whether this map's composite game asset (needed to build the clip) is
+  // hosted and cached. See docs/RUN_RECORDING.md.
   const [cameraPermission] = useCameraPermissions();
   const [recordRun, setRecordRun] = useState(false);
-  const [recordExplainerSeen, setRecordExplainerSeen] = useState(false);
-  const [recordExplainerOpen, setRecordExplainerOpen] = useState(false);
   const [compositeState, setCompositeState] = useState<CompositeAvailability | 'checking'>('checking');
   const [compositeCached, setCompositeCached] = useState(false);
 
-  // Opening a level refreshes its chart from the server (TTL-gated) so the
-  // run that follows scores against the latest consensus without an update.
+  // Opening a level refreshes its scoring data from the server (TTL-gated) so
+  // the run that follows scores against the latest version without an update.
   useEffect(() => {
     if (id) void refreshBeatmap(id);
   }, [id]);
@@ -122,6 +94,13 @@ export default function LevelDetailScreen() {
     };
   }, [challengeId, id]);
 
+  const readPlaySetup = () => {
+    void loadPlaySetup().then((setup) => {
+      if (setup.screen) setPlaybackDestination(setup.screen);
+      setRecordRun(setup.recordRun);
+    });
+  };
+
   useEffect(() => {
     let mounted = true;
     loadPlaySetup().then((setup) => {
@@ -129,7 +108,6 @@ export default function LevelDetailScreen() {
       setRunSettings(resolveRunSettings(setup, answers));
       if (setup.screen) setPlaybackDestination(setup.screen);
       setRecordRun(setup.recordRun);
-      setRecordExplainerSeen(setup.recordExplainerSeen);
     });
     return () => {
       mounted = false;
@@ -138,20 +116,44 @@ export default function LevelDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Personal best on this level from local history; rank from the board.
+  const personalBest = useMemo(() => {
+    if (!id) return null;
+    let best: number | null = null;
+    for (const run of runs) {
+      if (run.levelId !== id || run.poseScore <= 0) continue;
+      best = best === null ? run.poseScore : Math.max(best, run.poseScore);
+    }
+    return best;
+  }, [id, runs]);
+
+  const uid = user?.id ?? null;
+  useEffect(() => {
+    if (!id || !uid) {
+      setMyRank(null);
+      return undefined;
+    }
+    let mounted = true;
+    fetchMyEntry(id, uid)
+      .then((entry) => (entry ? fetchRank(id, entry.score) : null))
+      .then((rank) => {
+        if (mounted) setMyRank(rank);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [id, uid]);
+
   // Recording needs the writer + composer (iOS native build, physical device),
   // the phone as the screen (v1 does not record AirPlay runs), camera access
   // and a hosted composite asset for this map.
   const recordingDeviceCapable = Platform.OS === 'ios' && Device.isDevice && isRunRecordingAvailable;
-  const recordBlockedReason: string | null =
-    playbackDestination === 'tv'
-      ? 'Not available for TV runs yet. Choose Phone to record.'
-      : !recordingDeviceCapable
-        ? 'Body tracking is unavailable in this build, so runs cannot be recorded.'
-        : cameraPermission?.granted === false
-          ? 'Camera access is off. Enable it in Settings to record.'
-          : compositeState === 'missing'
-            ? "Recording isn't available for this map yet."
-            : null;
+  const recordBlockers = {
+    deviceCapable: recordingDeviceCapable,
+    cameraDenied: cameraPermission?.granted === false,
+    compositeState,
+  };
+  const recordBlockedReason = recordBlockedReasonFor(playbackDestination, recordBlockers);
   const recordEffective = recordRun && recordBlockedReason === null;
 
   useEffect(() => {
@@ -167,7 +169,7 @@ export default function LevelDetailScreen() {
     };
   }, [id, recordingDeviceCapable]);
 
-  // Background prefetch as soon as the toggle is on and the asset is hosted;
+  // Background prefetch as soon as recording is on and the asset is hosted;
   // the summary falls back to a foreground download if this never lands.
   useEffect(() => {
     if (!id || !recordEffective || compositeState !== 'available' || compositeCached) return undefined;
@@ -182,46 +184,18 @@ export default function LevelDetailScreen() {
     };
   }, [compositeCached, compositeState, id, recordEffective]);
 
-  const enableRecording = () => {
-    setRecordRun(true);
-    void saveRecordRun(true);
-    logRunRecordingEnabled();
-    if (!recordExplainerSeen) {
-      setRecordExplainerSeen(true);
-      void saveRecordExplainerSeen();
-    }
+  const onDestinationChange = (next: PlayScreen) => {
+    setPlaybackDestination(next);
+    void savePlayScreen(next);
   };
 
-  const onToggleRecord = (next: boolean) => {
-    if (!next) {
-      setRecordRun(false);
-      void saveRecordRun(false);
-      return;
-    }
-    if (!recordExplainerSeen) {
-      setRecordExplainerOpen(true);
-      return;
-    }
-    enableRecording();
+  const onRecordRunChange = (next: boolean) => {
+    setRecordRun(next);
+    void saveRecordRun(next);
+    if (next) logRunRecordingEnabled();
   };
-
-  const recordStatusCopy = recordBlockedReason
-    ? recordBlockedReason
-    : !recordRun
-      ? 'Get a shareable video of your run: the map on top, you below, with your hits and score.'
-      : compositeState === 'checking'
-        ? 'Checking this map…'
-        : compositeCached
-          ? 'Ready to record. Stays on your phone until you share it.'
-          : compositeState === 'available'
-            ? 'Preparing your recording…'
-            : 'Could not prepare this map right now. It will retry when your run ends.';
 
   const intensityMeta = INTENSITY_META[runSettings.intensity];
-  const sessionLabel = useMemo(
-    () => `${intensityMeta.label} · ${runSettings.durationMin} min`,
-    [intensityMeta.label, runSettings.durationMin],
-  );
   const campaignClass = parseOptionalClassKeyParam(classKeyParam);
   const displayClass =
     campaignClass ?? (id ? discoveryClassForMode(id, modes) : 'beginner');
@@ -256,7 +230,14 @@ export default function LevelDetailScreen() {
   const level = mode.levels[0];
   const cover = getModeCover(mode.id);
   const classMeta = CLASS_META[displayClass];
-  const calories = caloriesForRun(runSettings.durationMin, displayClass, intensityMeta.effort);
+  const destinationLabel = playbackDestination === 'tv' ? 'TV' : 'Phone';
+  const sessionLine = `${runSettings.durationMin} min · ${intensityMeta.label} · ${destinationLabel}`;
+  const bestLine =
+    personalBest === null
+      ? 'No runs yet · your first score sets the bar'
+      : myRank !== null
+        ? `Best ${Math.round(personalBest).toLocaleString()} · #${myRank.toLocaleString()} global`
+        : `Best ${Math.round(personalBest).toLocaleString()}`;
 
   // Intensity is the playback rate: the user's explicit choice replaces the
   // class speed factor, so a Light run is genuinely slower on any class.
@@ -270,10 +251,17 @@ export default function LevelDetailScreen() {
     ...(recordEffective ? { record: '1' } : {}),
   };
 
-  const saveEdits = (next: RunSettings) => {
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    // Destination + recording were persisted as they changed; re-read so the
+    // brief reflects exactly what the next run will use.
+    readPlaySetup();
+  };
+
+  const saveSettings = (next: RunSettings) => {
     setRunSettings(next);
-    setEditOpen(false);
     void saveRunSettings(next);
+    closeSettings();
   };
 
   const goPreflight = () => {
@@ -320,8 +308,6 @@ export default function LevelDetailScreen() {
     router.replace('/(tabs)/levels');
   };
 
-  const continueLabel = 'CONTINUE';
-
   return (
     <View style={styles.root}>
       <ScrollView
@@ -329,7 +315,7 @@ export default function LevelDetailScreen() {
           styles.content,
           {
             paddingTop: insets.top + spacing.sm,
-            paddingBottom: insets.bottom + 108,
+            paddingBottom: insets.bottom + 96,
           },
         ]}
         showsVerticalScrollIndicator={false}
@@ -340,42 +326,52 @@ export default function LevelDetailScreen() {
             accessibilityRole="button"
             accessibilityLabel="Go back"
             hitSlop={10}
-            style={({ pressed }) => [styles.back, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
           >
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </Pressable>
-          <Text style={styles.headerTitle}>Level brief</Text>
-          <View style={styles.headerSpacer} />
+          <View style={{ flex: 1 }} />
+          <Pressable
+            onPress={() => setSettingsOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Run settings"
+            accessibilityHint={`Currently ${sessionLine}`}
+            hitSlop={10}
+            style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
+          >
+            <Ionicons name="options-outline" size={22} color={colors.text} />
+          </Pressable>
         </View>
 
         <View style={styles.hero}>
           {cover ? <Image source={cover} contentFit="cover" style={StyleSheet.absoluteFill} /> : null}
           <LinearGradient
-            colors={[
-              'rgba(6,6,10,0.04)',
-              'rgba(6,6,10,0.22)',
-              'rgba(6,6,10,0.78)',
-              'rgba(6,6,10,0.98)',
-            ]}
-            locations={[0.08, 0.42, 0.7, 1]}
+            colors={['rgba(6,6,10,0.02)', 'rgba(6,6,10,0.3)', 'rgba(6,6,10,0.92)']}
+            locations={[0.2, 0.6, 1]}
             style={StyleSheet.absoluteFill}
           />
-          <View style={styles.heroText}>
-            <Text style={styles.heroTitle}>{mode.name}</Text>
-            <Text style={styles.heroSubtitle}>{mode.tagline}</Text>
-            <View
-              style={styles.heroSummaryRow}
-              accessible
-              accessibilityLabel={`${classMeta.label}, ${runSettings.durationMin} minutes, approximately ${calories} calories, ${intensityMeta.playbackRate.toFixed(2)} times speed`}
-            >
-              <HeroSummaryItem icon={classMeta.icon} value={classMeta.label} />
-              <HeroSummaryItem icon="time-outline" value={`${runSettings.durationMin} min`} />
-              <HeroSummaryItem icon="flame-outline" value={`~${calories} kcal`} />
-              <HeroSummaryItem
-                icon="speedometer-outline"
-                value={`${intensityMeta.playbackRate.toFixed(2)}x`}
-              />
+          {recordEffective ? (
+            <View style={styles.recBadge} accessible accessibilityLabel="Recording on">
+              <View style={styles.recDot} />
+              <Text style={styles.recText}>REC</Text>
             </View>
+          ) : null}
+        </View>
+
+        <View style={styles.titleBlock}>
+          <Text style={styles.title}>{mode.name}</Text>
+          <Text style={styles.sessionLine} accessibilityLabel={sessionLine}>
+            {sessionLine}
+          </Text>
+          <View style={styles.bestRow}>
+            <Ionicons
+              name={personalBest === null ? 'flag-outline' : 'trending-up'}
+              size={14}
+              color={personalBest === null ? colors.textFaint : colors.lime}
+            />
+            <Text style={styles.bestLine} numberOfLines={1}>
+              {bestLine}
+            </Text>
           </View>
         </View>
 
@@ -389,7 +385,7 @@ export default function LevelDetailScreen() {
             <Ionicons name="trophy" size={18} color={colors.black} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.challengeTitle} numberOfLines={1}>
-                {displayHandle(challenge)} scored {challenge.score.toLocaleString()} · {Math.round(challenge.accuracy * 100)}%
+                {displayHandle(challenge)} · {challenge.score.toLocaleString()} · {Math.round(challenge.accuracy * 100)}%
               </Text>
               <Text style={styles.challengeDetail}>Beat it — finish this level to post your score.</Text>
             </View>
@@ -405,7 +401,6 @@ export default function LevelDetailScreen() {
         >
           <Ionicons name="podium-outline" size={18} color={colors.lime} />
           <Text style={styles.boardLinkText}>Leaderboard</Text>
-          <Text style={styles.boardLinkMeta}>Global · Friends</Text>
           <Ionicons name="chevron-forward" size={16} color={colors.textFaint} />
         </Pressable>
 
@@ -423,179 +418,6 @@ export default function LevelDetailScreen() {
             </View>
           </View>
         ) : null}
-
-        <View style={styles.section}>
-          <SectionHeader
-            title="Your session"
-            action={
-              <Pressable
-                onPress={() => setEditOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel={`Edit intensity and duration. Currently ${sessionLabel}`}
-                hitSlop={8}
-                style={({ pressed }) => [styles.editBtn, pressed && styles.pressed]}
-              >
-                <Ionicons name="options-outline" size={15} color={colors.lime} />
-                <Text style={styles.editBtnText}>Edit</Text>
-              </Pressable>
-            }
-          />
-          <View style={styles.sessionCard}>
-            <View style={styles.sessionCell}>
-              <View style={styles.sessionIcon}>
-                <Ionicons name={intensityMeta.icon} size={18} color={colors.lime} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.sessionLabel}>Intensity</Text>
-                <Text style={styles.sessionValue}>{intensityMeta.label}</Text>
-                <Text style={styles.sessionDetail}>{intensityMeta.blurb}</Text>
-              </View>
-            </View>
-            <View style={styles.sessionRule} />
-            <View style={styles.sessionCell}>
-              <View style={styles.sessionIcon}>
-                <Ionicons name="timer-outline" size={18} color={colors.lime} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.sessionLabel}>Duration</Text>
-                <Text style={styles.sessionValue}>{runSettings.durationMin} min</Text>
-                <Text style={styles.sessionDetail}>
-                  {runSettings.durationMin > level.durationMin
-                    ? 'The map loops until time is up.'
-                    : 'Ends into your results on the clock.'}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <SectionHeader title="Get ready" />
-          <View
-            style={styles.prepRow}
-            accessibilityRole="list"
-            accessibilityLabel="Get ready reminders"
-          >
-            {PREP_ITEMS.map((item) => (
-              <View
-                key={item.title}
-                style={styles.prepCard}
-                accessible
-                accessibilityRole="summary"
-                accessibilityLabel={`${item.title}. ${item.detail}`}
-              >
-                <Ionicons name={item.icon} size={21} color={colors.lime} />
-                <Text
-                  style={styles.prepTitle}
-                  numberOfLines={2}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.82}
-                  maxFontSizeMultiplier={1.2}
-                >
-                  {item.title}
-                </Text>
-                <Text
-                  style={styles.prepDetail}
-                  numberOfLines={3}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.8}
-                  maxFontSizeMultiplier={1.1}
-                >
-                  {item.detail}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {Platform.OS === 'ios' ? (
-          <View style={styles.playDestinationGroup}>
-            <SectionHeader title="Choose your screen" />
-            <View style={styles.playDestinationOptions}>
-              <OptionCard
-                title="Phone"
-                desc="Play on this device"
-                icon="phone-portrait-outline"
-                selected={playbackDestination === 'phone'}
-                onPress={() => {
-                  setPlaybackDestination('phone');
-                  void savePlayScreen('phone');
-                }}
-              />
-              <View
-                style={styles.tvAirplayCardWrap}
-                pointerEvents="box-none"
-                accessibilityRole="radio"
-                accessibilityLabel="TV or AirPlay"
-                accessibilityHint="Opens the AirPlay picker to choose your display"
-                accessibilityState={{ selected: playbackDestination === 'tv' }}
-              >
-                {/* Visual-only card — touches pass through to the native picker overlay. */}
-                <View pointerEvents="none">
-                  <OptionCard
-                    title="TV / AirPlay"
-                    desc="Stream to Apple TV or AirPlay display"
-                    icon="tv-outline"
-                    selected={playbackDestination === 'tv'}
-                  />
-                </View>
-                {/* Invisible native route picker — transparent tint keeps icon hidden while opacity stays 1 for hit-testing. */}
-                <VideoAirPlayButton
-                  style={styles.tvAirplayOverlay}
-                  tint="#00000000"
-                  activeTint="#00000000"
-                  prioritizeVideoDevices
-                  onBeginPresentingRoutes={() => {
-                    setPlaybackDestination('tv');
-                    void savePlayScreen('tv');
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Choose an AirPlay display"
-                  accessibilityHint="Opens the system AirPlay route picker"
-                />
-              </View>
-            </View>
-          </View>
-        ) : null}
-
-        {Platform.OS === 'ios' ? (
-          <View style={styles.section}>
-            <SectionHeader title="Share" />
-            <View
-              style={[styles.recordCard, recordBlockedReason && styles.recordCardDisabled]}
-              accessible
-              accessibilityRole="switch"
-              accessibilityLabel="Record my run"
-              accessibilityHint={recordStatusCopy}
-              accessibilityState={{ checked: recordEffective, disabled: recordBlockedReason !== null }}
-            >
-              <View style={[styles.sessionIcon, recordEffective && styles.recordIconOn]}>
-                <Ionicons
-                  name={recordEffective ? 'videocam' : 'videocam-outline'}
-                  size={18}
-                  color={recordEffective ? '#FF3B30' : colors.lime}
-                />
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <View style={styles.recordTitleRow}>
-                  <Text style={styles.sessionValue}>Record my run</Text>
-                  {recordEffective && compositeState === 'available' && !compositeCached ? (
-                    <ActivityIndicator size="small" color={colors.lime} />
-                  ) : null}
-                </View>
-                <Text style={styles.sessionDetail}>{recordStatusCopy}</Text>
-              </View>
-              <Switch
-                value={recordEffective}
-                onValueChange={onToggleRecord}
-                disabled={recordBlockedReason !== null}
-                trackColor={{ true: colors.lime, false: colors.surface3 }}
-                thumbColor={colors.white}
-                ios_backgroundColor={colors.surface3}
-              />
-            </View>
-          </View>
-        ) : null}
       </ScrollView>
 
       <View
@@ -604,22 +426,11 @@ export default function LevelDetailScreen() {
           { paddingBottom: Math.max(insets.bottom, spacing.md) + spacing.sm },
         ]}
       >
-        <View
-          accessible
-          accessibilityRole="text"
-          accessibilityLabel="Next: quick camera setup and calibration"
-          style={styles.setupHeadsUp}
-        >
-          <Ionicons name="camera-outline" size={15} color={colors.lime} />
-          <Text style={styles.setupHeadsUpText}>Next: quick camera setup and calibration</Text>
-        </View>
         <Pressable
           onPress={onStart}
           disabled={!subscriptionHydrated || starting || Boolean(campaignLock)}
           accessibilityRole="button"
-          accessibilityLabel={
-            campaignLock ? `Locked. ${lockCopy}` : `Continue to camera setup for ${mode.name}`
-          }
+          accessibilityLabel={campaignLock ? `Locked. ${lockCopy}` : `Start ${mode.name}`}
           accessibilityState={{
             disabled: !subscriptionHydrated || starting || Boolean(campaignLock),
             busy: starting,
@@ -636,41 +447,21 @@ export default function LevelDetailScreen() {
           ) : (
             <Ionicons name={campaignLock ? 'lock-closed' : 'play'} size={20} color={colors.black} />
           )}
-          <Text style={styles.beginButtonText}>{campaignLock ? 'LOCKED' : continueLabel}</Text>
+          <Text style={styles.beginButtonText}>{campaignLock ? 'LOCKED' : 'START'}</Text>
         </Pressable>
       </View>
 
       <RunSettingsSheet
-        visible={editOpen}
+        visible={settingsOpen}
         value={runSettings}
-        onClose={() => setEditOpen(false)}
-        onSave={saveEdits}
+        destination={playbackDestination}
+        recordRun={recordRun}
+        recordBlockers={recordBlockers}
+        onDestinationChange={onDestinationChange}
+        onRecordRunChange={onRecordRunChange}
+        onClose={closeSettings}
+        onSave={saveSettings}
       />
-      <RecordRunExplainerSheet
-        visible={recordExplainerOpen}
-        onConfirm={() => {
-          setRecordExplainerOpen(false);
-          enableRecording();
-        }}
-        onClose={() => setRecordExplainerOpen(false)}
-      />
-    </View>
-  );
-}
-
-function HeroSummaryItem({
-  icon,
-  value,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  value: string;
-}) {
-  return (
-    <View style={styles.heroSummaryItem}>
-      <Ionicons name={icon} size={15} color={colors.lime} />
-      <Text style={styles.heroSummaryValue} maxFontSizeMultiplier={1.2}>
-        {value}
-      </Text>
     </View>
   );
 }
@@ -686,9 +477,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   missingBackText: { color: colors.lime, fontSize: 14, fontWeight: font.bold },
-  content: { paddingHorizontal: spacing.lg, gap: spacing.lg },
+  content: { paddingHorizontal: spacing.lg, gap: spacing.md },
   header: { minHeight: 44, flexDirection: 'row', alignItems: 'center' },
-  back: {
+  iconBtn: {
     width: 42,
     height: 42,
     borderRadius: radius.md,
@@ -698,155 +489,44 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  headerTitle: {
-    ...type.label,
-    flex: 1,
-    color: colors.textDim,
-    textAlign: 'center',
-  },
-  headerSpacer: { width: 42 },
   hero: {
-    minHeight: 292,
+    height: 300,
     borderRadius: radius.xl,
     overflow: 'hidden',
-    justifyContent: 'flex-end',
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  heroText: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xxl + spacing.xl,
-    paddingBottom: spacing.md,
-  },
-  heroTitle: {
-    ...type.h1,
-    color: colors.white,
-    fontSize: 32,
-    lineHeight: 35,
-  },
-  heroSubtitle: {
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 14,
-    fontWeight: font.medium,
-    marginTop: 4,
-  },
-  heroSummaryRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  heroSummaryItem: {
-    minHeight: 34,
+  recBadge: {
+    position: 'absolute',
+    top: spacing.md,
+    right: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: radius.sm,
-    backgroundColor: 'rgba(6,6,10,0.72)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(6,6,10,0.7)',
   },
-  heroSummaryValue: {
-    ...metric,
+  recDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF3B30' },
+  recText: { color: colors.white, fontSize: 11, fontWeight: font.black, letterSpacing: 1.2 },
+  titleBlock: { gap: 6, paddingHorizontal: spacing.xs },
+  title: {
+    ...type.h1,
     color: colors.white,
-    fontSize: 12,
-    fontWeight: font.bold,
-    letterSpacing: 0.3,
+    fontSize: 32,
+    lineHeight: 36,
   },
-  section: { gap: spacing.sm },
-  editBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 7,
-    borderRadius: radius.sm,
-    backgroundColor: 'rgba(215,255,62,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(215,255,62,0.3)',
-  },
-  editBtnText: { color: colors.lime, fontSize: 12, fontWeight: font.heavy, letterSpacing: 0.6 },
-  sessionCard: {
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  sessionCell: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  sessionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(215,255,62,0.1)',
-  },
-  sessionLabel: { ...type.micro, color: colors.textFaint },
-  sessionValue: { ...type.h3, color: colors.text, marginTop: 2 },
-  sessionDetail: { ...type.bodySm, color: colors.textDim },
-  sessionRule: { height: StyleSheet.hairlineWidth, backgroundColor: colors.borderStrong },
-  prepRow: {
-    flexDirection: 'row',
-    flexWrap: 'nowrap',
-    alignItems: 'stretch',
-    gap: 6,
-  },
-  prepCard: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 124,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingHorizontal: 5,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: colors.bgElevated,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  prepTitle: {
+  sessionLine: {
+    ...metric,
     color: colors.text,
-    fontSize: 12,
-    lineHeight: 15,
+    fontSize: 15,
     fontWeight: font.bold,
-    letterSpacing: -0.1,
-    textAlign: 'center',
+    letterSpacing: 0.2,
   },
-  prepDetail: {
-    color: colors.textDim,
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: font.medium,
-    textAlign: 'center',
-  },
-  playDestinationGroup: { gap: spacing.sm },
-  recordCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  recordCardDisabled: { opacity: 0.7 },
-  recordIconOn: { backgroundColor: 'rgba(255,59,48,0.12)' },
-  recordTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 },
-  playDestinationOptions: { gap: spacing.sm },
-  tvAirplayCardWrap: {
-    position: 'relative',
-  },
-  tvAirplayOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1,
-  },
+  bestRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  bestLine: { ...metric, ...type.bodySm, color: colors.textDim, flexShrink: 1 },
   footer: {
     position: 'absolute',
     left: 0,
@@ -857,19 +537,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-  },
-  setupHeadsUp: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginBottom: spacing.sm,
-  },
-  setupHeadsUpText: {
-    color: colors.textDim,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: font.semibold,
   },
   beginButton: {
     minHeight: 56,
@@ -911,7 +578,7 @@ const styles = StyleSheet.create({
   challengeTitle: { ...type.h3, color: colors.black },
   challengeDetail: { ...type.bodySm, color: 'rgba(0,0,0,0.7)', marginTop: 2 },
   boardLink: {
-    minHeight: 50,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
@@ -922,5 +589,4 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   boardLinkText: { flex: 1, color: colors.text, fontSize: 14, fontWeight: font.bold },
-  boardLinkMeta: { ...type.bodySm, color: colors.textFaint, fontSize: 12 },
 });
