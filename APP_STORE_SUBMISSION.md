@@ -139,9 +139,13 @@ OTHER NOTES
 
 ---
 
-## Release 1.1.0 (build 25)
+## Release 1.1.0 (build 26)
 
-Build 25 supersedes build 24 (never submitted for review). Backend is
+Build 26 supersedes build 25 (which supersedes build 24; neither shipped to
+users). Build 26 carries the 3-second calibration hold, spoken coaching, the
+in-run warm-up, the condensed level brief, the clips library and the home /
+board polish. If 1.1.0 is already "Waiting for Review" with build 25, swap the
+build to 26 in ASC before it enters review. Backend is
 deployed (Functions `startRun` / `submitRun` / `reserveUsername` /
 `onUserDeleted` / `reconcileGhosts*` / `rebuildConsensusBeatmaps*` on Node 22,
 Firestore rules + indexes, TTL on `entries.expiresAt`) and the 13 composite
@@ -151,7 +155,7 @@ is enabled on every map.
 **Known state at submission:** boards are live on every map. Charts are
 derived from real players' moves (`docs/LEADERBOARDS.md` → "Consensus
 charts"): until a map has one, runs on it post as *early* scores
-(plausibility-checked by the backend, tagged EARLY on the board); once ≥ 3
+(plausibility-checked by the backend, shown like any other entry); once ≥ 3
 runs exist the chart is built automatically and new runs are fully verified.
 The client never mentions charts or beatmaps. Usernames, public profiles,
 Find friends / follow, the Beat-my-score share card and challenge links all
@@ -163,7 +167,7 @@ work today.
 Record my run, climb the ranks, and make every workout count.
 
 RECORD MY RUNS
-Turn on "Record my runs" in Settings and CardioSurf builds a shareable clip of every run you finish: the map on top, you below, with your score, combo and every PERFECT lighting up as you hit it. It's made entirely on your phone — nothing is uploaded unless you save it to Photos or share it yourself. Your latest clips live in Profile → Clips. Off by default.
+Flip on "Record my runs" — in Settings or in the pre-run edit sheet — and CardioSurf builds a shareable clip of every run you finish: the map on top, you below, with your score, combo and every PERFECT lighting up as you hit it. It's made entirely on your phone — nothing is uploaded unless you save it to Photos or share it yourself. Your clips are kept in Profile → Clips. Off by default.
 
 LEADERBOARDS, FRIENDS AND CHALLENGES
 - Pick a username and set up your public runner profile.
@@ -177,13 +181,14 @@ LEVEL UP
 - Campaign gates, streak freeze and a daily challenge bonus keep the path moving.
 
 BETTER TRACKING FROM THE FIRST SECOND
-- A quick calibration game before each run — jump, duck and lean once so the tracker locks onto you before the music starts.
+- Calibration is now a ~3-second hold: stand in frame, hold still, done — no more move trials. Spoken coaching guides you into position, and it's remembered, so you don't redo it on every map.
+- A short in-run warm-up on your first few runs eases you into the moves before the music picks up.
 - Faster, smoother pose tracking under the hood.
 
 Plus fixes and polish throughout. Move more, sit less, and show us your best run.
 ```
 
-(≈1,500 characters; limit is 4,000.)
+(≈1,750 characters; limit is 4,000.)
 
 ### Review Notes for 1.1.0 (replace the existing notes)
 
@@ -194,13 +199,13 @@ DEMO ACCOUNT
 Sign in with appreview@cardiosurf.app / CardioReview2026!. This account already has CardioSurf Pro, so every world, level and feature is unlocked — no purchase needed.
 
 HOW THE APP WORKS
-CardioSurf is a movement-based cardio game. Stand a few feet from the device in a clear space. The front camera runs on-device full-body motion tracking (Apple Vision) so jumps, ducks and side-steps control an endless-runner game. By default only skeletal keypoints are processed in real time and no video is stored or sent anywhere. A short calibration game runs before each workout so the tracker locks onto the player.
+CardioSurf is a movement-based cardio game. Stand a few feet from the device in a clear space. The front camera runs on-device full-body motion tracking (Apple Vision) so jumps, ducks and side-steps control an endless-runner game. By default only skeletal keypoints are processed in real time and no video is stored or sent anywhere. Before the first workout a ~3-second calibration hold runs (the player stands in frame and holds still; spoken prompts guide them into position — there are no movement trials). The result is remembered, so it does not repeat on every map, and the first few runs include a short in-run warm-up.
 
 NEW IN 1.1.0 — "RECORD MY RUNS" (optional, off by default)
-In Settings (Profile → Tracking) and in the run settings sheet there is a "Record my runs" toggle. When the user turns it on, the camera video of each finished run is recorded to the device and composed locally into a silent share clip (game on top, camera below, with the score HUD); the latest ten are listed under Profile → Clips. The clip never leaves the device — the app does not upload it — and is only exported if the user taps "Save to Photos" (add-only Photos permission, NSPhotoLibraryAddUsageDescription) or "Share" (system share sheet). No microphone access is requested. The camera permission string discloses this recording.
+The "Record my runs" toggle is off by default and lives in Settings (Profile) and in the pre-run edit sheet. When the user turns it on, the camera video of each finished run is recorded to the device and composed locally into a silent share clip (game on top, camera below, with the score HUD); the latest ten are listed under Profile → Clips. The clip never leaves the device — the app does not upload it — and is only exported if the user taps "Save to Photos" (add-only Photos permission, NSPhotoLibraryAddUsageDescription) or "Share" (system share sheet). No microphone access is requested. The camera permission string discloses this recording.
 
 NEW IN 1.1.0 — LEADERBOARDS, PROFILES AND CHALLENGES
-Users pick a username (Profile → Leaderboards → Username), can find and follow other runners, and can share a "Beat my score" card that deep-links into the level (https://cardiosurf.com/l/... and cardiosurf://). Per-level boards and score submission are verified by our backend (Cloud Functions); boards are live on every map. Entries tagged "EARLY" were posted before a map's timing chart existed and are accepted after server-side plausibility checks. Nothing about the camera or video is involved in leaderboards — only the score, accuracy, combo and the timing of detected moves (no images) are sent.
+Users pick a username (Profile → Leaderboards → Username), can find and follow other runners, and can share a "Beat my score" card that deep-links into the level (https://cardiosurf.com/l/... and cardiosurf://). Per-level boards and score submission are verified by our backend (Cloud Functions); boards are live on every map. Scores posted before a map's timing chart exists are accepted after server-side plausibility checks and are shown like any other entry. Nothing about the camera or video is involved in leaderboards — only the score, accuracy, combo and the timing of detected moves (no images) are sent.
 
 SUBSCRIPTIONS / PAYWALL
 CardioSurf Pro is an auto-renewable subscription (Monthly $14.99 / Yearly $39.99 with a 3-day free trial). The demo account is pre-granted Pro. To see the paywall: sign out and create a new account with any email (open registration). A free account is shown the paywall when starting a locked world; it can be dismissed with the Close (X) button or "Maybe later", so the reviewer is never blocked. Purchase completes through the standard StoreKit flow.
@@ -213,7 +218,7 @@ OTHER NOTES
 
 ### ASC checklist for 1.1.0 (owner)
 
-1. App Store Connect → CardioSurf → **+ Version** `1.1.0` → **Build**: select **25**.
+1. App Store Connect → CardioSurf → **+ Version** `1.1.0` → **Build**: select **26**.
 2. **What's New**: paste the block above.
 3. **App Review Information → Notes**: replace with the 1.1.0 notes above.
    Sign-in required stays **Yes** with `appreview@cardiosurf.app`.
