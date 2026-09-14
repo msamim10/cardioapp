@@ -14,8 +14,8 @@ Unchanged. A run's XP is `rewardForRunPerformance(...).total.xp`
 
 ```
 base            = 40 XP/min × class multiplier (1 / 1.25 / 1.5)
-accuracyFactor  = 0.3 + 0.7 × accuracy                        (level has a beatmap)
-                = 0.3 + 0.7 × clamp(movesPerMin / 30, 0, 1)   (no beatmap — today's state)
+accuracyFactor  = 0.3 + 0.7 × accuracy                        (level has a chart)
+                = 0.3 + 0.7 × clamp(movesPerMin / 30, 0, 1)   (no chart yet — provisional run)
 comboFactor     = 1 + min(0.25, maxCombo / 100)
 xpBonusFactor   = 1.25 when the run completes today's daily challenge, else 1
 xp              = round(base × accuracyFactor × comboFactor × xpBonusFactor)
@@ -102,8 +102,10 @@ order so the card shows the nearest blocker:
 
 1. **Sequence** — `k === 0` or node `k−1` is completed in this class.
 2. **Skill** — node `k−1`'s best campaign `accuracy ≥ 0.70` **if** that level
-   has a published beatmap. No beatmap → auto-pass (every level today, so this
-   rule is inert until beatmaps ship). Copy: "Score 70% accuracy on <prev> · best 52%".
+   has a **mature** chart (`hasMatureBeatmap`: authored, or a consensus chart
+   built from ≥ 10 runs — `CHART_MATURE_RUNS`). No mature chart → auto-pass, so
+   a rough early chart never locks anyone out. Copy: "Score 70% accuracy on
+   <prev> · best 52%".
 3. **Level** — effective player level ≥ `1 + floor(k × classStep)`,
    `classStep` = 1 beginner / 2 intermediate / 3 hard. Copy: "Reach level 6 · now 4".
 
@@ -148,13 +150,15 @@ two silent days), and the plan is rebuilt on launch / streak change.
 One video per local `YYYY-MM-DD`, identical for every user:
 
 ```
-pool  = levels with a published beatmap (canonical order); if empty → all levels, practice = true
+pool  = every level (canonical order) — charts are not a criterion
 index = fnv1a(`${dateKey}:daily-challenge`) mod pool.length
 ```
 
 The salt keeps it independent of the featured/recommended discovery rotation.
-While the registry ships empty the card is tagged **PRACTICE** (same bonus,
-free scoring). Completion is derived (`isDailyChallengeCompleted`): ≥1 run on
+Every level scores (provisionally until its consensus chart exists), so the
+pool is always the full roster; keying it on charts would move the pick
+mid-day when a chart lands (`EVERY_LEVEL_SCORABLE` on both client and server).
+Completion is derived (`isDailyChallengeCompleted`): ≥1 run on
 that level whose local day equals `dateKey`. `recordRun` passes
 `dailyChallenge: true` for the *first* such run of the day, which sets
 `xpBonusFactor = 1.25` (XP only; shown as "Daily challenge +25%" in the summary
@@ -162,6 +166,7 @@ breakdown). The run counts toward the streak like any other.
 
 ## Deferred
 
-- Daily 24-hour leaderboard → feature 2 (needs the backend).
-- Beatmaps are still unpublished, so the accuracy gate and non-practice
-  challenges activate automatically once `beatmapRegistry.ts` is populated.
+- ~~Daily 24-hour leaderboard~~ — shipped with the leaderboards backend.
+- ~~Beatmaps unpublished~~ — charts are now derived from player data
+  (`docs/LEADERBOARDS.md` → "Consensus charts"); the accuracy gate activates
+  per level once its chart matures.

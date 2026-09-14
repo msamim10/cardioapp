@@ -139,22 +139,23 @@ OTHER NOTES
 
 ---
 
-## Release 1.1.0 (build 24)
+## Release 1.1.0 (build 25)
 
-Build 24 is uploaded to App Store Connect. Backend is deployed (Functions
-`startRun` / `submitRun` / `reserveUsername` / `onUserDeleted`, Firestore
-rules + indexes, TTL on `entries.expiresAt`) and the 13 composite game clips
-are live under `composite/<slug>/game-576.mp4`, so "Record my run" is
-enabled on every map.
+Build 25 supersedes build 24 (never submitted for review). Backend is
+deployed (Functions `startRun` / `submitRun` / `reserveUsername` /
+`onUserDeleted` / `reconcileGhosts*` / `rebuildConsensusBeatmaps*` on Node 22,
+Firestore rules + indexes, TTL on `entries.expiresAt`) and the 13 composite
+game clips are live under `composite/<slug>/game-576.mp4`, so "Record my run"
+is enabled on every map.
 
-**Known state at submission:** no beatmap is published (the release registry
-in `src/lib/beatmapRegistry.ts` is empty by design — no fabricated charts).
-Until a level ships a chart, its Leaderboard entry point reads "Needs a
-beatmap", the daily board is the "practice" challenge, and no run posts a
-score. Usernames, public profiles, Find friends / follow, the Beat-my-score
-share card and challenge links all work today. The copy below is written for
-that state; when the first beatmap ships, swap in the bracketed alternative
-bullet.
+**Known state at submission:** boards are live on every map. Charts are
+derived from real players' moves (`docs/LEADERBOARDS.md` → "Consensus
+charts"): until a map has one, runs on it post as *early* scores
+(plausibility-checked by the backend, tagged EARLY on the board); once ≥ 3
+runs exist the chart is built automatically and new runs are fully verified.
+The client never mentions charts or beatmaps. Usernames, public profiles,
+Find friends / follow, the Beat-my-score share card and challenge links all
+work today.
 
 ### What's New in 1.1.0 (paste into App Store Connect)
 
@@ -168,8 +169,7 @@ LEADERBOARDS, FRIENDS AND CHALLENGES
 - Pick a username and set up your public runner profile.
 - Find friends by username and follow them to see how you stack up.
 - Beat my score: share a challenge card straight from your summary. Friends tap the link and land on the exact map to take their shot.
-- Every map now has Global, Friends and Today boards, ready for ranked scoring as charted maps roll out.
-[When a beatmap is published, replace the last bullet with: "Post your score to Global, Friends and Today boards on every charted map, and take on the daily challenge for a bonus."]
+- Post your score to Global, Friends and Today boards on every map, and take on the daily challenge for a bonus. Ranked scoring is live and gets sharper as more people play each map.
 
 LEVEL UP
 - 50 runner levels with rewards along the way, and a new HUD theme to unlock as you climb.
@@ -200,7 +200,7 @@ NEW IN 1.1.0 — "RECORD MY RUN" (optional, off by default)
 On the level screen there is a "Record my run" toggle. When the user turns it on, the camera video of that run is recorded to the device and composed locally into a silent share video (game on top, camera below, with the score HUD). The video never leaves the device — the app does not upload it — and is only exported if the user taps "Save to Photos" (add-only Photos permission, NSPhotoLibraryAddUsageDescription) or "Share" (system share sheet). No microphone access is requested. The camera permission string discloses this recording.
 
 NEW IN 1.1.0 — LEADERBOARDS, PROFILES AND CHALLENGES
-Users pick a username (Profile → Leaderboards → Username), can find and follow other runners, and can share a "Beat my score" card that deep-links into the level (https://cardiosurf.com/l/... and cardiosurf://). Per-level boards and score submission are verified by our backend (Cloud Functions); ranked scoring is enabled per map as charted maps roll out, so some boards may read "Needs a beatmap" during review. Nothing about the camera or video is involved in leaderboards — only the score, accuracy and combo of a run.
+Users pick a username (Profile → Leaderboards → Username), can find and follow other runners, and can share a "Beat my score" card that deep-links into the level (https://cardiosurf.com/l/... and cardiosurf://). Per-level boards and score submission are verified by our backend (Cloud Functions); boards are live on every map. Entries tagged "EARLY" were posted before a map's timing chart existed and are accepted after server-side plausibility checks. Nothing about the camera or video is involved in leaderboards — only the score, accuracy, combo and the timing of detected moves (no images) are sent.
 
 SUBSCRIPTIONS / PAYWALL
 CardioSurf Pro is an auto-renewable subscription (Monthly $14.99 / Yearly $39.99 with a 3-day free trial). The demo account is pre-granted Pro. To see the paywall: sign out and create a new account with any email (open registration). A free account is shown the paywall when starting a locked world; it can be dismissed with the Close (X) button or "Maybe later", so the reviewer is never blocked. Purchase completes through the standard StoreKit flow.
@@ -213,9 +213,8 @@ OTHER NOTES
 
 ### ASC checklist for 1.1.0 (owner)
 
-1. App Store Connect → CardioSurf → **+ Version** `1.1.0` → **Build**: select **24**.
-2. **What's New**: paste the block above (pick the bullet variant that matches
-   whether a beatmap is published).
+1. App Store Connect → CardioSurf → **+ Version** `1.1.0` → **Build**: select **25**.
+2. **What's New**: paste the block above.
 3. **App Review Information → Notes**: replace with the 1.1.0 notes above.
    Sign-in required stays **Yes** with `appreview@cardiosurf.app`.
 4. **App Privacy**: no change needed for run recording — keep *Photos or

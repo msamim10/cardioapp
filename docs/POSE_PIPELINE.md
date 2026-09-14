@@ -132,7 +132,12 @@ Replay: `npm run test:run-clock`.
 
 ## 4. Beatmaps (`beatmaps.ts`, `beatmapRegistry.ts`)
 
-One JSON file per level id under `src/data/beatmaps/`:
+Charts are **derived from real players' moves** on the server and mirrored to
+the client from Firestore (`beatmaps/{levelId}`, AsyncStorage cache, 6 h TTL,
+refreshed on launch / sign-in / level open and adopted from the `startRun`
+reply that pins a run's chart). See `docs/LEADERBOARDS.md` → "Consensus
+charts" for the algorithm; bundled JSON below is dev-only. The chart format is
+unchanged:
 
 ```json
 {
@@ -151,10 +156,16 @@ back to free scoring). `cuesForLoopedPlayback(beatmap, from, to, videoLength)`
 yields cues across loop wraps at `t + k × videoLength` for the source
 actually playing.
 
-Registration is static (Metro): add `require('../data/beatmaps/<levelId>.json')`
-to `BEATMAP_SOURCES` in `beatmapRegistry.ts`. The release registry ships
-empty; `example.dev.json` (level id `example-dev-level`, no real level) is
-registered under `__DEV__` only.
+Bundled registration is static (Metro) and `__DEV__`-only: add
+`require('../data/beatmaps/<levelId>.json')` to `BEATMAP_SOURCES` in
+`beatmapRegistry.ts`. A remote chart always wins over a bundled one.
+`example.dev.json` (level id `example-dev-level`, no real level) is the only
+entry.
+
+Move samples for the consensus chart are recorded in `workout.tsx` for every
+detected move during natural playback: `t = runClock.videoPositionSec(now) −
+DETECTION_LATENCY_COMPENSATION_MS / 1000` (wrapped into `[0, length)`), ≤ 600
+per run, sent with `submitRun`.
 
 Horizontal (AirPlay) source: if `player.duration` differs from
 `videoDurationSec` by more than 0.5 s a warning is logged once and the
@@ -175,11 +186,16 @@ Dev builds only: Profile → **Beatmap authoring (debug)** (`dev-beatmap.tsx`).
 4. **Preview** flashes the move as the playhead passes each cue.
 5. **Share** (top right) exports pretty JSON via the share sheet and
    `console.log`. Save it as `src/data/beatmaps/<levelId>.json` and add the
-   `require` line. `videoDurationSec` is taken from the player.
+   `require` line for dev, or publish it with `scripts/publish-beatmap.ts`
+   (locks the level against consensus rebuilds). `videoDurationSec` is taken
+   from the player.
+6. **Force rebuild charts** calls the admin `rebuildConsensusBeatmaps`
+   callable and shows the per-level summary.
 
 ## 5. Timing-window scoring (`cueScoring.ts`)
 
-Active only when the level has a registered beatmap. `CueJudge` receives
+Active only when the run has a chart (resolved before playback starts; see
+`workout.tsx` → `chart`). `CueJudge` receives
 classified moves with their video time and clock ticks; the analyzer's
 debounce/cooldown/rearm are untouched.
 
