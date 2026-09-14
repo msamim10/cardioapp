@@ -430,3 +430,5 @@ export const onUserDeleted = v1Region('us-central1')
     ]);
     logger.info('onUserDeleted scrubbed', { uid, ...counts });
   });
+
+export * from './seed';

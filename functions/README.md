@@ -10,6 +10,8 @@ Firebase, **2nd gen**, Node 20, TypeScript). Project: `cardiosurf-mvp`, region
 | `submitRun`       | callable                   | Replay + verify a finished run; write boards (≤ 12/day/uid)    |
 | `reserveUsername` | callable                   | Claim a unique handle in a transaction, release the old one    |
 | `onUserDeleted`   | Auth `onDelete` (1st gen)  | Scrub boards, challenges, username, public profile             |
+| `reconcileGhosts` | `onSchedule` hourly        | Seed / phase out ghost runners on every board (`seed.ts`)      |
+| `reconcileGhostsNow` | callable (admin)        | Same, on demand: `{dryRun?, targetTotal?, dailyTarget?}`       |
 
 All scoring / validation logic lives in the dependency-free
 [`shared/scoring`](../shared/scoring) package and is compiled into `lib/` at
