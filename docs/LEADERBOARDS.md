@@ -185,6 +185,129 @@ unfollow lives on the public profile screen (`runner/[uid]`), reached from
 any board row or from Find friends (prefix search over `usernames`). The
 Friends tab shows the following list (≤ 100) plus you.
 
+## Ghost runners (launch seeding)
+
+Boards and the Home "runners" counts must never look empty at launch, so the
+server seeds every board with plausible **ghost runners** and phases them out
+automatically as real players fill in. Nothing in the client knows about
+ghosts: they are ordinary entry documents (+ `profiles/{uid}` +
+`usernames/{handle}`) written by Functions and tagged `ghost: true`, so the
+existing UI renders them, tapping a row opens `runner/[uid]`, and the
+`count()`-based runner counts include them.
+
+| Piece | Path |
+| --- | --- |
+| Generator (pure, deterministic) | `shared/scoring/ghosts.ts` |
+| Reconcile (hourly schedule + admin callable) | `functions/src/seed.ts` → `reconcileGhosts`, `reconcileGhostsNow` |
+| Test | `npm run test:ghosts` (`scripts/replay-ghosts.ts`) |
+
+**What a ghost is.** `(levelId, n)` — or `(dateKey, n)` for daily boards —
+deterministically yields uid `ghost_<levelId>_<n>` / `ghost_d_<dateKey>_<n>`,
+a handle from a fixed shuffled pool of ~1,400 real-looking lowercase handles
+(`marco_cardio`, `rhea_k`, `hugo72`, `fast_rory`; all pass
+`checkUsernameClaim`, none reserved, no two ghosts anywhere share one), a
+profile (level 3–18, the real badge ids unlocked at that level, a real
+unlocked HUD theme id, no photo) and a run. Scores are not invented numbers:
+each run is a synthetic judgement log (hit/miss/spurious, perfect vs good,
+clustered misses) replayed through the shared `replayJudgements`, so `score`,
+`maxCombo` and `accuracy` are consistent exactly like a verified run.
+Accuracy lands in 0.55–0.9; runs are 5-minute (some 10-minute) timed runs at
+0.85×/1×/1.2×; `classKey` is a mix of the three classes and null;
+`recorded: true`; `at` is spread over the past 1–14 days (daily: 08:00–16:00
+UTC of that date so it reads as that calendar date from UTC−8 to UTC+8) and
+refreshed once older than 21 days. Chart-dependent fields mirror what
+`submitRun` would write for that level: `provisional: false` +
+`beatmapVersion`/`beatmapHash` when a chart is published, else
+`provisional: true`, `beatmapVersion: 0`, `beatmapHash: 'none'`. Daily entries
+also carry `levelId`, `dateKey` and the same `expiresAt` as real ones, so TTL
+sweeps them.
+
+**Beatable by design.** For each level the generator simulates 256 five-minute
+runs of a "decent" player (85 % of cues hit, 70 % of hits perfect, a few
+spurious moves ≈ 72 % accuracy) and takes the 67th percentile as the **cap**.
+Ghost #0 is re-rolled until it lands in `[0.985 × cap, cap]`; every other ghost
+is below the cap. The test asserts a decent player beats the top ghost in
+25–50 % of attempts on every level, i.e. reaches #1 within a few tries. Cue
+density comes from the published chart when there is one (`cues / duration`),
+otherwise a per-level default of 20–30 cues/min; a new chart (density or hash)
+rewrites that level's ghosts.
+
+**Thresholds / phase-out.** `GHOST_TARGET_TOTAL = 24` per level board,
+`GHOST_DAILY_TARGET = 10` per daily board (`shared/scoring/ghosts.ts`). Every
+hour, per board:
+
+```
+realCount = count(entries) − count(entries where ghost == true)
+target    = clamp(TARGET − realCount, 0, TARGET)
+keep      = the `target` highest-scoring ghosts of the fixed set
+```
+
+Existing ghosts not in `keep` are deleted (entry + profile + every
+`usernames/*` doc they own), so ghosts leave **from the bottom** as real
+players arrive and the board is exactly `TARGET` rows until real players
+exceed it. Missing ones are written; ones whose `ghostGen` fingerprint or `at`
+is stale are rewritten. Daily boards are reconciled for UTC yesterday (while
+UTC−12 is still on it), today and tomorrow (pre-seeded), and ghosts of boards
+2–3 days old are swept (profiles + handles too; TTL is only the backstop). Only
+documents whose id starts with `ghost_` **and** carry `ghost: true` are ever
+written or deleted — real players' documents are never touched. Idempotent;
+≤ 400 writes per batch commit; one `reconcileGhosts summary` log line per run
+with per-board `total / real / ghosts→target / +added ~refreshed −removed`.
+
+**Handle registry.** Ghost handles are reserved in `usernames/{handle}` as
+`{uid: 'ghost_…', reservedAt, ghost: true}`, so a real player who wants that
+handle gets "taken" and retries with a suffix, exactly as with another real
+user. If a real player already owns a ghost's primary handle the ghost falls
+back to `<handle>_<3 digits>`. Reservations are released when the ghost is
+removed. Ghosts therefore also appear in Find friends prefix search and can be
+followed (the follow is just a doc under the follower's `users/` tree).
+
+**Deploy + first run.**
+
+```sh
+gcloud services enable cloudscheduler.googleapis.com --project=cardiosurf-mvp   # once, for onSchedule
+firebase deploy --only functions:reconcileGhosts,functions:reconcileGhostsNow
+```
+
+The callable is admin-only: an `admin` custom claim, an `admins/{uid}`
+document, or the `ADMIN_UIDS` param (comma-separated Auth uids in
+`functions/.env`, gitignored, e.g. `ADMIN_UIDS=abc123,def456`; defaults to
+empty). Run the first reconcile immediately rather than waiting for the hour:
+
+```ts
+// from any signed-in admin session (dev client / Node with a user token):
+const run = httpsCallable(getFunctions(), 'reconcileGhostsNow');
+await run({ dryRun: true });                       // report only
+await run({});                                     // seed everything
+await run({ targetTotal: 0, dailyTarget: 0 });     // purge every ghost now
+```
+
+or with a raw ID token:
+
+```sh
+curl -X POST https://us-central1-cardiosurf-mvp.cloudfunctions.net/reconcileGhostsNow \
+  -H "Authorization: Bearer $ID_TOKEN" -H "Content-Type: application/json" \
+  -d '{"data":{"dryRun":true}}'
+```
+
+`firebase functions:log --only reconcileGhosts` shows the hourly summaries.
+
+**Turning it off.** Set `GHOST_TARGET_TOTAL = 0` and `GHOST_DAILY_TARGET = 0`
+in `shared/scoring/ghosts.ts`, redeploy the two functions, and run
+`reconcileGhostsNow({})` once (or wait an hour): every ghost entry, profile and
+handle is deleted. `reconcileGhostsNow({targetTotal: 0, dailyTarget: 0})`
+purges immediately without a redeploy, but the hourly job re-seeds unless the
+constants are changed too.
+
+**Ethics.** Ghosts exist only to make an empty product feel alive on day one.
+They never take anything from a real player: there are no prizes, and the
+score cap means a real player takes #1 within a few tries and every real
+player pushes one ghost off the board. They are not labelled as bots in the
+UI, so the owner must **remove them (set both targets to 0) before any
+prize-backed or advertised competition**, and must not cite ghost-inflated
+counts as real user numbers. `ghost: true` on every document keeps them
+auditable and removable at any time.
+
 ## Beat-my-score
 
 `ShareScoreSheet` renders the card (cover from `modeCovers.ts`, rank, score,
