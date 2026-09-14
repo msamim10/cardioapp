@@ -138,11 +138,11 @@ export default function HomeScreen() {
       {/* Animated mascot hero: fox ties its shoes then double-jumps over the trail. */}
       <MascotHero height={HERO_HEIGHT}>
         {/*
-          Username left, stats cluster right. The cluster never shrinks; the
-          name truncates at 55% of the row. When the name still needs more
-          room than is left beside the cluster, the cluster wraps onto its own
-          row (flexWrap + marginLeft:auto), so a 20-character handle and the
-          coins never fight for the same pixels.
+          One row, always. The username chip is the only flexible item
+          (flexShrink 1 + minWidth 0, so a 24-character handle ellipsizes);
+          the stats cluster never shrinks (flexShrink 0) and stays on the
+          right. The streak freeze is a small snowflake dot on the flame — no
+          text in the header.
         */}
         <View style={[styles.heroOverlay, { paddingTop: insets.top + spacing.sm }]}>
           <View style={styles.usernameChip}>
@@ -162,28 +162,15 @@ export default function HomeScreen() {
               accessible
               accessibilityLabel={`${streak} day streak. Streak freeze ${streakInfo.freezeAvailable ? 'available' : 'used'} this week.`}
             >
-              <Ionicons name="flame" size={16} color={colors.heat} />
-              <Text style={styles.streakChipText}>{streak}</Text>
-              <View
-                style={[
-                  styles.freezePill,
-                  !streakInfo.freezeAvailable && styles.freezePillUsed,
-                ]}
-              >
-                <Ionicons
-                  name="snow"
-                  size={10}
-                  color={streakInfo.freezeAvailable ? colors.pace : colors.textFaint}
-                />
-                <Text
-                  style={[
-                    styles.freezePillText,
-                    !streakInfo.freezeAvailable && styles.freezePillTextUsed,
-                  ]}
-                >
-                  {streakInfo.freezeAvailable ? 'Freeze available' : 'Freeze used'}
-                </Text>
+              <View style={styles.flameWrap}>
+                <Ionicons name="flame" size={16} color={colors.heat} />
+                {streakInfo.freezeAvailable ? (
+                  <View style={styles.freezeDot}>
+                    <Ionicons name="snow" size={7} color={colors.black} />
+                  </View>
+                ) : null}
               </View>
+              <Text style={styles.streakChipText}>{streak}</Text>
             </View>
             <StatChip icon="diamond" label={`${coins}`} accent="lime" />
           </View>
@@ -191,41 +178,75 @@ export default function HomeScreen() {
       </MascotHero>
 
       <View style={styles.body}>
-        {/* Player level: XP toward the next level on the 1–50 curve. */}
-        <Card
-          style={styles.levelCard}
-          accessible
-          accessibilityLabel={
-            levelProgress.isMax
-              ? `Level ${MAX_LEVEL}, max level`
-              : `Level ${levelProgress.level}. ${levelProgress.toNext} XP to level ${levelProgress.level + 1}`
-          }
-        >
-          <View style={styles.levelBadge}>
-            <Text style={styles.levelBadgeNumber}>{levelProgress.level}</Text>
-            <Text style={styles.levelBadgeLabel}>LVL</Text>
-          </View>
-          <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
-            <View style={styles.levelHead}>
-              <Text style={styles.levelTitle}>Level {levelProgress.level}</Text>
-              <Text style={styles.levelMeta}>
-                {levelProgress.isMax
-                  ? 'Max level'
-                  : `${levelProgress.toNext.toLocaleString()} XP to level ${levelProgress.level + 1}`}
-              </Text>
-            </View>
-            <View style={styles.levelTrack}>
-              <View
-                style={[styles.levelFill, { width: `${Math.round(levelProgress.fraction * 100)}%` }]}
+        {/* Recommended for you: five maps, rotating daily. */}
+        <View style={styles.challengesSection}>
+          <Text style={styles.sectionTitle}>Recommended for you</Text>
+          <ScrollView
+            horizontal
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.challengeRow}
+            style={styles.challengeScroller}
+          >
+            {recommended.map((mode) => (
+              <ModeCard
+                key={mode.id}
+                mode={mode}
+                completed={isLevelCompleted(mode.id)}
+                participantCount={runnerCounts[mode.id]}
+                showMeta={false}
+                showAction={false}
+                style={styles.challengeCard}
+                onPress={() =>
+                  router.push({
+                    pathname: '/level/[id]',
+                    params: { id: mode.id },
+                  })
+                }
               />
-            </View>
-            <Text style={styles.levelHint}>
-              {(() => {
-                const next = nextRewardLevel(levelProgress.level);
-                return next ? `Next reward at level ${next}` : 'Every reward unlocked';
-              })()}
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* This week's training load, then the weekly goal it feeds. */}
+        <Card style={styles.weekCard}>
+          <View style={styles.weekTop}>
+            <Text style={styles.weekEyebrow}>This week</Text>
+            <Text style={styles.weekCount}>
+              {runsThisWeek}/{weeklyGoal} sessions
             </Text>
           </View>
+          <View style={styles.weekMetrics}>
+            <WeekMetric
+              icon="time"
+              tint={colors.pace}
+              value={`${week.minutes}`}
+              unit="min"
+              label="Moving"
+            />
+            <View style={styles.weekMetricRule} />
+            <WeekMetric
+              icon="flame"
+              tint={colors.heat}
+              value={week.calories.toLocaleString()}
+              unit="kcal"
+              label="Burned"
+            />
+            <View style={styles.weekMetricRule} />
+            <WeekMetric
+              icon="flash"
+              tint={colors.lime}
+              value={`${streak}`}
+              unit={streak === 1 ? 'day' : 'days'}
+              label="Streak"
+            />
+          </View>
+          <WeekTracker count={runsThisWeek} goal={weeklyGoal} accent="lime" />
+          <Text style={styles.weekHint}>
+            {runsThisWeek >= weeklyGoal
+              ? 'Weekly target hit. Keep the streak going.'
+              : `${Math.max(0, weeklyGoal - runsThisWeek)} more to hit your weekly target.`}
+          </Text>
         </Card>
 
         {/* Today's challenge: one video per local date, same for everyone. */}
@@ -293,75 +314,42 @@ export default function HomeScreen() {
           />
         ) : null}
 
-        {/* This week's training load, then the weekly goal it feeds. */}
-        <Card style={styles.weekCard}>
-          <View style={styles.weekTop}>
-            <Text style={styles.weekEyebrow}>This week</Text>
-            <Text style={styles.weekCount}>
-              {runsThisWeek}/{weeklyGoal} sessions
+        {/* Player level: XP toward the next level on the 1–50 curve. */}
+        <Card
+          style={styles.levelCard}
+          accessible
+          accessibilityLabel={
+            levelProgress.isMax
+              ? `Level ${MAX_LEVEL}, max level`
+              : `Level ${levelProgress.level}. ${levelProgress.toNext} XP to level ${levelProgress.level + 1}`
+          }
+        >
+          <View style={styles.levelBadge}>
+            <Text style={styles.levelBadgeNumber}>{levelProgress.level}</Text>
+            <Text style={styles.levelBadgeLabel}>LVL</Text>
+          </View>
+          <View style={{ flex: 1, minWidth: 0, gap: 6 }}>
+            <View style={styles.levelHead}>
+              <Text style={styles.levelTitle}>Level {levelProgress.level}</Text>
+              <Text style={styles.levelMeta}>
+                {levelProgress.isMax
+                  ? 'Max level'
+                  : `${levelProgress.toNext.toLocaleString()} XP to level ${levelProgress.level + 1}`}
+              </Text>
+            </View>
+            <View style={styles.levelTrack}>
+              <View
+                style={[styles.levelFill, { width: `${Math.round(levelProgress.fraction * 100)}%` }]}
+              />
+            </View>
+            <Text style={styles.levelHint}>
+              {(() => {
+                const next = nextRewardLevel(levelProgress.level);
+                return next ? `Next reward at level ${next}` : 'Every reward unlocked';
+              })()}
             </Text>
           </View>
-          <View style={styles.weekMetrics}>
-            <WeekMetric
-              icon="time"
-              tint={colors.pace}
-              value={`${week.minutes}`}
-              unit="min"
-              label="Moving"
-            />
-            <View style={styles.weekMetricRule} />
-            <WeekMetric
-              icon="flame"
-              tint={colors.heat}
-              value={week.calories.toLocaleString()}
-              unit="kcal"
-              label="Burned"
-            />
-            <View style={styles.weekMetricRule} />
-            <WeekMetric
-              icon="flash"
-              tint={colors.lime}
-              value={`${streak}`}
-              unit={streak === 1 ? 'day' : 'days'}
-              label="Streak"
-            />
-          </View>
-          <WeekTracker count={runsThisWeek} goal={weeklyGoal} accent="lime" />
-          <Text style={styles.weekHint}>
-            {runsThisWeek >= weeklyGoal
-              ? 'Weekly target hit. Keep the streak going.'
-              : `${Math.max(0, weeklyGoal - runsThisWeek)} more to hit your weekly target.`}
-          </Text>
         </Card>
-
-        <View style={styles.challengesSection}>
-          <Text style={styles.sectionTitle}>Recommended for you</Text>
-          <ScrollView
-            horizontal
-            nestedScrollEnabled
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.challengeRow}
-            style={styles.challengeScroller}
-          >
-            {recommended.map((mode) => (
-              <ModeCard
-                key={mode.id}
-                mode={mode}
-                completed={isLevelCompleted(mode.id)}
-                participantCount={runnerCounts[mode.id]}
-                showMeta={false}
-                showAction={false}
-                style={styles.challengeCard}
-                onPress={() =>
-                  router.push({
-                    pathname: '/level/[id]',
-                    params: { id: mode.id },
-                  })
-                }
-              />
-            ))}
-          </ScrollView>
-        </View>
       </View>
     </ScrollView>
   );
@@ -369,17 +357,15 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  content: { paddingBottom: 0 },
+  content: { paddingBottom: spacing.lg },
   body: { paddingHorizontal: spacing.lg, gap: spacing.lg, paddingTop: spacing.sm },
   heroOverlay: {
     flex: 1,
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    alignContent: 'flex-start',
-    rowGap: spacing.sm,
-    columnGap: spacing.sm,
+    gap: spacing.sm,
     paddingHorizontal: spacing.lg,
   },
   // MascotHero has no top scrim, so this fill is the only thing keeping the
@@ -390,7 +376,6 @@ const styles = StyleSheet.create({
     gap: 6,
     flexShrink: 1,
     minWidth: 0,
-    maxWidth: '55%',
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: radius.pill,
@@ -399,15 +384,13 @@ const styles = StyleSheet.create({
     borderColor: colors.borderStrong,
   },
   usernameText: { color: colors.text, fontSize: 14, fontWeight: font.bold, flexShrink: 1, minWidth: 0 },
-  // Never shrinks or clips; `marginLeft: auto` keeps it on the right edge on
-  // its own row too.
-  heroChips: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 0, marginLeft: 'auto' },
+  // Never shrinks or clips.
+  heroChips: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 0 },
   streakChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingLeft: spacing.md,
-    paddingRight: 6,
+    paddingHorizontal: spacing.md,
     paddingVertical: 5,
     borderRadius: radius.pill,
     backgroundColor: colors.surface2,
@@ -415,18 +398,21 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   streakChipText: { ...metric, color: colors.text, fontSize: 14, fontWeight: font.bold },
-  freezePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+  flameWrap: { width: 16, height: 16, alignItems: 'center', justifyContent: 'center' },
+  // Freeze available this week: a small snowflake dot on the flame's corner.
+  freezeDot: {
+    position: 'absolute',
+    right: -5,
+    bottom: -3,
+    width: 11,
+    height: 11,
     borderRadius: radius.pill,
-    backgroundColor: 'rgba(61,197,240,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.pace,
+    borderWidth: 1,
+    borderColor: colors.surface2,
   },
-  freezePillUsed: { backgroundColor: 'rgba(255,255,255,0.06)' },
-  freezePillText: { color: colors.pace, fontSize: 9, fontWeight: font.black, letterSpacing: 0.3 },
-  freezePillTextUsed: { color: colors.textFaint },
 
   levelCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md },
   levelBadge: {
