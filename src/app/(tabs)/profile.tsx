@@ -12,6 +12,7 @@ import {
 } from '@/lib/calibrationProfile';
 import type { IconName } from '@/lib/gameData';
 import { DEFAULT_HUD_THEME_ID, hudThemeOptions, resolveHudTheme } from '@/lib/hudThemes';
+import { describeChartRebuild, fetchIsAdmin, rebuildChartsNow } from '@/lib/leaderboards';
 import { levelBadges, nextRewardLevel } from '@/lib/levels';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import { useProgress } from '@/lib/ProgressContext';
@@ -29,6 +30,27 @@ export default function ProfileScreen() {
   const { isPremium, presentCustomerCenter, presentPaywall, restore } = useSubscription();
   const [restoring, setRestoring] = useState(false);
   const [calibration, setCalibration] = useState<CalibrationProfile | null>(null);
+  // Chart admin (owner): `admins/{uid}` exists. The callable re-checks server-side.
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
+  const uid = user?.id ?? null;
+  useEffect(() => {
+    let active = true;
+    fetchIsAdmin(uid).then((admin) => {
+      if (active) setIsAdmin(admin);
+    });
+    return () => {
+      active = false;
+    };
+  }, [uid]);
+  const forceRebuildCharts = useCallback(() => {
+    if (rebuilding) return;
+    setRebuilding(true);
+    rebuildChartsNow()
+      .then((levels) => Alert.alert('Charts rebuilt', describeChartRebuild(levels)))
+      .catch((error: unknown) => Alert.alert('Rebuild failed', (error as Error).message))
+      .finally(() => setRebuilding(false));
+  }, [rebuilding]);
 
   useEffect(() => {
     let active = true;
@@ -359,6 +381,17 @@ export default function ProfileScreen() {
           <Text style={styles.settingText}>Help & support</Text>
           <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
         </Pressable>
+        {isAdmin ? (
+          <Pressable
+            onPress={forceRebuildCharts}
+            disabled={rebuilding}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.settingRow, (pressed || rebuilding) && { opacity: 0.85 }]}
+          >
+            <Text style={styles.settingText}>{rebuilding ? 'Rebuilding charts…' : 'Rebuild charts now (admin)'}</Text>
+            <Ionicons name="cloud-upload-outline" size={18} color={colors.lime} />
+          </Pressable>
+        ) : null}
         {__DEV__ ? (
           <>
             <Pressable

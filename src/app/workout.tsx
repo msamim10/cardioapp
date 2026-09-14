@@ -20,11 +20,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import { Card, GradientButton, Pill, ProgressTrack, SpeedPill, StatReadout } from '@/components/ui';
 import { logPoseLatency, logRunRecordingFailed } from '@/lib/analytics';
-import { getBeatmap, getBeatmapHash } from '@/lib/beatmapRegistry';
+import { getBeatmap } from '@/lib/beatmapRegistry';
 import { requestRunNonce } from '@/lib/leaderboards';
-import { peekRunNonce, stageRunNonce, stageRunSubmission } from '@/lib/runSubmission';
-import { beatmapDurationMismatch, type BeatmapMove } from '@/lib/beatmaps';
-import { CueJudge, INITIAL_CUE_SCORE, type CueScore } from '@/lib/cueScoring';
+import { peekRunNonce, stageRunNonce, stageRunSubmission, type RunNonce } from '@/lib/runSubmission';
+import { beatmapDurationMismatch, type Beatmap, type BeatmapMove } from '@/lib/beatmaps';
+import {
+  CueJudge,
+  DETECTION_LATENCY_COMPENSATION_MS,
+  INITIAL_CUE_SCORE,
+  toBeatmapMove,
+  type CueScore,
+} from '@/lib/cueScoring';
+import { MAX_MOVE_SAMPLES, type MoveSample } from '@shared/scoring/consensus';
 import { getLevel, getMode } from '@/lib/gameData';
 import { resolveHudTheme } from '@/lib/hudThemes';
 import { LatencyReservoir, latencyDeltas } from '@/lib/poseLatency';
@@ -53,6 +60,13 @@ import {
 } from '@/lib/trackingSession';
 import { getVideoSource } from '@/lib/videoSources';
 import { colors, font, metric, radius, spacing, type } from '@/theme';
+
+/**
+ * How long a timed run waits for `startRun` (nonce + chart) before starting
+ * with the cached chart and no nonce. The map itself takes about this long to
+ * become ready, so the wait is rarely visible.
+ */
+const CHART_RESOLVE_TIMEOUT_MS = 4000;
 
 /** mm:ss from a seconds value (clamped, non-negative). */
 function formatClock(seconds: number): string {
@@ -173,33 +187,55 @@ export default function WorkoutScreen() {
   const [poseScore, setPoseScore] = useState(INITIAL_POSE_SCORE);
   const poseScoreRef = useRef(poseScore);
   poseScoreRef.current = poseScore;
-  // Timing-window scoring when this level ships a beatmap; otherwise null and
-  // the free-scoring `applyRecognizedMove` path above is used unchanged.
-  const beatmap = useMemo(() => getBeatmap(level), [level]);
-  const cueJudgeRef = useRef<CueJudge | null>(null);
-  if (beatmap && !cueJudgeRef.current) cueJudgeRef.current = new CueJudge(beatmap);
-  const cueJudge = cueJudgeRef.current;
-  const [cueScore, setCueScore] = useState<CueScore | null>(beatmap ? INITIAL_CUE_SCORE : null);
-  const cueScoreRef = useRef(cueScore);
-  cueScoreRef.current = cueScore;
-  const [upcomingCue, setUpcomingCue] = useState<{ move: BeatmapMove; inMs: number } | null>(null);
-  const durationWarnedRef = useRef(false);
-
-  // Leaderboard nonce: requested once at run start for cued, timed runs. A
-  // failure is non-fatal — the run still records locally, it just cannot be
-  // submitted to the board.
+  // Chart resolution. Timed runs ask the server (`startRun`) for a single-use
+  // nonce plus the chart the run must be scored against — the chart is fixed
+  // for the whole run, so playback waits (briefly) until this settles. No
+  // chart ⇒ the run scores with the free-move path and is submitted as
+  // provisional. If the server is unreachable we fall back to the cached
+  // chart mirror without a nonce (run records locally, cannot be submitted).
+  const runId = typeof trackingRunId === 'string' ? trackingRunId : null;
+  const [chart, setChart] = useState<{ beatmap: Beatmap | null; nonce: RunNonce | null } | null>(() => {
+    const staged = runId ? peekRunNonce(runId) : null;
+    if (staged) return { beatmap: staged.beatmap, nonce: staged };
+    if (!timedRun || !runId) return { beatmap: getBeatmap(level), nonce: null };
+    return null;
+  });
   useEffect(() => {
-    const runId = typeof trackingRunId === 'string' ? trackingRunId : null;
-    const hash = getBeatmapHash(level);
-    if (!beatmap || !runId || !hash || !timedRun || peekRunNonce(runId)) return;
+    if (chart !== null || !runId) return;
     let cancelled = false;
-    requestRunNonce(level, hash).then((nonce) => {
-      if (!cancelled && nonce) stageRunNonce(runId, nonce);
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), CHART_RESOLVE_TIMEOUT_MS));
+    Promise.race([requestRunNonce(level), timeout]).then((nonce) => {
+      if (cancelled) return;
+      if (nonce) {
+        stageRunNonce(runId, nonce);
+        setChart({ beatmap: nonce.beatmap, nonce });
+      } else {
+        setChart({ beatmap: getBeatmap(level), nonce: null });
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [beatmap, level, timedRun, trackingRunId]);
+  }, [chart, level, runId]);
+  const beatmap = chart?.beatmap ?? null;
+  // Timing-window scoring when this level has a chart; otherwise null and the
+  // free-scoring `applyRecognizedMove` path above is used unchanged.
+  const cueJudgeRef = useRef<CueJudge | null>(null);
+  if (beatmap && !cueJudgeRef.current) cueJudgeRef.current = new CueJudge(beatmap);
+  const cueJudge = cueJudgeRef.current;
+  const [cueScore, setCueScore] = useState<CueScore | null>(null);
+  useEffect(() => {
+    if (beatmap) setCueScore((current) => current ?? INITIAL_CUE_SCORE);
+  }, [beatmap]);
+  const cueScoreRef = useRef(cueScore);
+  cueScoreRef.current = cueScore;
+  const [upcomingCue, setUpcomingCue] = useState<{ move: BeatmapMove; inMs: number } | null>(null);
+  const durationWarnedRef = useRef(false);
+  // Move samples for the consensus chart (see docs/LEADERBOARDS.md): every
+  // detected move during natural playback, stamped with the video position at
+  // the moment the player reacted (pipeline latency subtracted). Bounded.
+  const samplesRef = useRef<MoveSample[]>([]);
+  const moveCountRef = useRef(0);
   const poseAnalyzer = useRef(new PoseAnalyzer());
   const hydratedAnalyzerRef = useRef(false);
   if (initialCalibration && !hydratedAnalyzerRef.current) {
@@ -253,7 +289,7 @@ export default function WorkoutScreen() {
   const canRecord =
     recordRequested && trackingMode === 'real' && !onExternalScreen && typeof trackingRunId === 'string';
   useEffect(() => {
-    if (!canRecord || status !== 'ready' || recordingRef.current || finishedRef.current) return;
+    if (!canRecord || status !== 'ready' || chart === null || recordingRef.current || finishedRef.current) return;
     const session = new RunRecordingSession({
       runId: trackingRunId as string,
       levelId: level,
@@ -279,7 +315,7 @@ export default function WorkoutScreen() {
         setRecordingState('ended');
       },
     );
-  }, [canRecord, hudTheme.id, intensityParam, level, levelInfo, playbackRate, runClock, status, targetSeconds, trackingRunId, worldInfo]);
+  }, [canRecord, chart, hudTheme.id, intensityParam, level, levelInfo, playbackRate, runClock, status, targetSeconds, trackingRunId, worldInfo]);
 
   // Moving the run to a TV mid-recording remounts the camera and the writer is
   // released with it (docs/RUN_RECORDING.md, "v1 does not record AirPlay
@@ -346,6 +382,15 @@ export default function WorkoutScreen() {
       if (result.move && runClock.isScoringActive(classifiedTs)) {
         // Combos chain on the VIDEO clock, not wall time or frame timestamps.
         const videoSec = runClock.videoTimeSec(classifiedTs);
+        // Consensus sample: position within the video (loop index dropped) at
+        // the moment the player reacted, i.e. minus the pipeline's latency.
+        moveCountRef.current += 1;
+        if (samplesRef.current.length < MAX_MOVE_SAMPLES) {
+          const length = runClock.videoLengthSec;
+          let at = runClock.videoPositionSec(classifiedTs) - DETECTION_LATENCY_COMPENSATION_MS / 1000;
+          if (at < 0) at = length > 0 ? at + length : 0;
+          samplesRef.current.push({ m: toBeatmapMove(result.move), t: Math.round(at * 1000) / 1000 });
+        }
         if (cueJudge) {
           // Beatmap level: grade against the nearest cue; tally the move only.
           const judgement = cueJudge.onMove(result.move, videoSec);
@@ -417,26 +462,34 @@ export default function WorkoutScreen() {
     } else {
       recording?.cancel();
     }
-    // Stage the verbatim judgement log + nonce for the summary to submit. The
-    // server replays this log, so it is the cue score (not the composed
-    // workout score) that goes on the board.
+    // Stage the submission material for the summary. Charted run: the verbatim
+    // judgement log, which the server replays (the cue score, not the composed
+    // workout score, goes on the board). Uncharted run: the free-move score,
+    // accepted as provisional after plausibility checks. Both carry the move
+    // samples that feed the consensus chart.
     const judge = cueJudgeRef.current;
     const nonce = peekRunNonce(typeof trackingRunId === 'string' ? trackingRunId : undefined);
-    if (judge && cue && nonce && typeof trackingRunId === 'string' && timedRun) {
+    if (nonce && typeof trackingRunId === 'string' && timedRun) {
+      const charted = judge !== null && cue !== null && nonce.beatmap !== null;
       stageRunSubmission({
         runId: trackingRunId,
         levelId: level,
         beatmapHash: nonce.beatmapHash,
+        beatmapVersion: charted ? nonce.beatmapVersion : 0,
         nonce: nonce.nonce,
+        intensity: typeof intensityParam === 'string' ? intensityParam : null,
         playbackRate,
         targetSeconds,
         elapsedSeconds: elapsedRef.current,
         videoLengthSec: runClock.videoLengthSec,
-        events: judge.events,
-        spurious: cue.spurious,
-        score: cue.score,
-        maxCombo: cue.maxCombo,
-        accuracy: judge.accuracy,
+        events: charted ? judge.events : [],
+        spurious: charted ? cue.spurious : 0,
+        score: charted ? cue.score : poseScoreRef.current.score,
+        maxCombo: charted ? cue.maxCombo : poseScoreRef.current.maxCombo,
+        accuracy: charted ? judge.accuracy : 0,
+        moveCount: moveCountRef.current,
+        samples: samplesRef.current,
+        naturalPlaySec: runClock.videoPlayedSec,
       });
     }
     void navigateAfter.then(() => router.replace({
@@ -459,7 +512,7 @@ export default function WorkoutScreen() {
         ...(fromOnboarding === '1' ? { fromOnboarding: '1' } : {}),
       },
     }));
-  }, [fromOnboarding, level, playbackRate, router, runClock, targetSeconds, timedRun, trackingRunId]);
+  }, [fromOnboarding, intensityParam, level, playbackRate, router, runClock, targetSeconds, timedRun, trackingRunId]);
 
   const exitEarly = useCallback(() => {
     clearTrackingHandoff();
@@ -488,8 +541,16 @@ export default function WorkoutScreen() {
     p.playbackRate = playbackRate;
     // Additive (AirPlay): route video (not just audio) to the selected TV.
     p.allowsExternalPlayback = true;
-    if (source) p.play();
+    // Playback starts from the effect below, once the map is ready AND the
+    // chart for this run has been resolved (see `chart`).
   });
+
+  const playStartedRef = useRef(false);
+  useEffect(() => {
+    if (!source || playStartedRef.current || status !== 'ready' || chart === null) return;
+    playStartedRef.current = true;
+    safe(() => player.play());
+  }, [chart, player, source, status]);
 
   const externalPlaybackRef = useRef<boolean | null>(null);
   const sourceOrientationRef = useRef<'vertical' | 'horizontal'>('vertical');
@@ -591,6 +652,9 @@ export default function WorkoutScreen() {
       recordingRef.current?.log.onGate(runClock.isAdvancing(), position);
     });
     safe(() => {
+      // The player may already be ready before the listener attaches; the
+      // play gate above keys off `status`, so mirror it here.
+      if (player.status === 'readyToPlay') setStatus('ready');
       runClock.setReady(player.status === 'readyToPlay');
       runClock.setPlaying(player.playing, player.currentTime || 0);
     });
@@ -874,7 +938,7 @@ export default function WorkoutScreen() {
       ) : null}
 
       {/* Loading */}
-      {status === 'loading' ? (
+      {status === 'loading' || (status === 'ready' && chart === null) ? (
         <View style={styles.centerOverlay} pointerEvents="none">
           <ActivityIndicator size="large" color={colors.lime} />
           <Text style={styles.loadingText}>Loading level…</Text>

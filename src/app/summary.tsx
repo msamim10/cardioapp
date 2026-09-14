@@ -11,6 +11,7 @@ import { ShareScoreSheet, type ShareScoreInput } from '@/components/ShareScoreCa
 import { GhostButton, GradientButton, Mascot } from '@/components/ui';
 import { useAuth } from '@/lib/AuthContext';
 import { submitRunIfEligible, type SubmitOutcome } from '@/lib/leaderboards';
+import { hasStagedSubmission } from '@/lib/runSubmission';
 import {
   achievementsForRun,
   personalBestForRun,
@@ -296,7 +297,9 @@ export default function SummaryScreen() {
     });
     if (recorded) {
       setRecordedRun(recorded);
-      if (params.hasBeatmap === '1') {
+      // Every timed run the workout staged goes to the board: charted runs are
+      // replayed server-side, uncharted ones are accepted as early scores.
+      if (hasStagedSubmission(recorded.runId)) {
         setSubmission({ status: 'pending' });
         submitRunIfEligible({
           runId: recorded.runId,
@@ -658,7 +661,7 @@ export default function SummaryScreen() {
             />
           ) : null}
 
-          {/* Leaderboard: server-verified rank for cued runs, or why it didn't post. */}
+          {/* Leaderboard: server-verified rank, or why the run didn't post. */}
           {submission && run ? (
             <View style={styles.card}>
               <View style={styles.cardHead}>
@@ -683,6 +686,7 @@ export default function SummaryScreen() {
                         {submission.result.improved
                           ? `New best: ${submission.result.best.toLocaleString()} points`
                           : `Your best stays ${submission.result.best.toLocaleString()} points`}
+                        {submission.result.provisional ? ' · Early score' : ''}
                       </Text>
                     </View>
                   </View>

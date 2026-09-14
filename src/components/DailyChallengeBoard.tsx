@@ -22,13 +22,10 @@ const PREVIEW_ROWS = 3;
 export function DailyChallengeBoard({
   dateKey,
   uid,
-  hasBeatmap,
   onOpen,
 }: {
   dateKey: string;
   uid: string | null;
-  /** Levels without a beatmap cannot score, so there is nothing to rank. */
-  hasBeatmap: boolean;
   onOpen: () => void;
 }) {
   const [rows, setRows] = useState<LeaderboardEntry[] | null>(null);
@@ -36,7 +33,6 @@ export function DailyChallengeBoard({
 
   useFocusEffect(
     useCallback(() => {
-      if (!hasBeatmap) return undefined;
       let cancelled = false;
       (async () => {
         const [top, mine] = await Promise.all([
@@ -55,7 +51,7 @@ export function DailyChallengeBoard({
       return () => {
         cancelled = true;
       };
-    }, [dateKey, hasBeatmap, uid])
+    }, [dateKey, uid])
   );
 
   const ranked = rankRows(rows ?? []);
@@ -82,13 +78,7 @@ export function DailyChallengeBoard({
         </View>
       </Pressable>
 
-      {!hasBeatmap ? (
-        <LeaderboardEmpty
-          icon="musical-notes-outline"
-          title="Needs a beatmap"
-          detail="Today's pick has no cue map yet, so runs can't be scored on a board."
-        />
-      ) : rows === null ? (
+      {rows === null ? (
         <ActivityIndicator color={colors.lime} style={styles.loading} />
       ) : ranked.length === 0 ? (
         <LeaderboardEmpty title="No scores yet — be the first" detail="Finish today's challenge to open the board." />

@@ -30,10 +30,15 @@ export function LeaderboardRow({
   compact?: boolean;
 }) {
   const handle = displayHandle(entry);
+  // Provisional entries (scored before this map had a chart) have no accuracy
+  // figure; they carry an "Early" tag instead.
+  const accuracy = entry.provisional ? null : formatAccuracy(entry.accuracy);
   const meta = compact
-    ? `${formatAccuracy(entry.accuracy)} · ${entry.maxCombo}x`
-    : `${formatAccuracy(entry.accuracy)} acc · ${entry.maxCombo}x combo · ${formatBoardDate(entry.at)}`;
-  const label = `Rank ${rank}, ${isMe ? 'you, ' : ''}${handle}, ${entry.score.toLocaleString()} points, ${meta}${entry.recorded ? ', recorded' : ''}`;
+    ? [accuracy, `${entry.maxCombo}x`].filter(Boolean).join(' · ')
+    : [accuracy ? `${accuracy} acc` : null, `${entry.maxCombo}x combo`, formatBoardDate(entry.at)].filter(Boolean).join(' · ');
+  const label = `Rank ${rank}, ${isMe ? 'you, ' : ''}${handle}, ${entry.score.toLocaleString()} points, ${meta}${
+    entry.provisional ? ', early score' : ''
+  }${entry.recorded ? ', recorded' : ''}`;
 
   return (
     <Pressable
@@ -59,6 +64,11 @@ export function LeaderboardRow({
           </Text>
           {entry.recorded ? (
             <Ionicons name="videocam" size={12} color={colors.pace} accessibilityLabel="Recorded run" />
+          ) : null}
+          {entry.provisional ? (
+            <View style={styles.earlyPill}>
+              <Text style={styles.earlyPillText}>EARLY</Text>
+            </View>
           ) : null}
         </View>
         <Text style={styles.meta} numberOfLines={1}>
@@ -122,6 +132,15 @@ const styles = StyleSheet.create({
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   name: { color: colors.text, fontSize: 13, fontWeight: font.semibold, flexShrink: 1 },
   meta: { ...type.bodySm, color: colors.textFaint, fontSize: 11, lineHeight: 14 },
+  earlyPill: {
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: radius.xs,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  earlyPillText: { color: colors.textDim, fontSize: 8, fontWeight: font.black, letterSpacing: 0.6 },
   score: { ...metric, color: colors.text, fontSize: 15, fontWeight: font.heavy, textAlign: 'right' },
   textMe: { color: colors.lime },
   empty: { alignItems: 'center', gap: 6, paddingVertical: spacing.xl, paddingHorizontal: spacing.lg },

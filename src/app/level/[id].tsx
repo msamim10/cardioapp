@@ -21,7 +21,7 @@ import { RecordRunExplainerSheet } from '@/components/RecordRunExplainerSheet';
 import { RunSettingsSheet } from '@/components/RunSettingsSheet';
 import { OptionCard, SectionHeader } from '@/components/ui';
 import { logRunRecordingEnabled } from '@/lib/analytics';
-import { hasBeatmap } from '@/lib/beatmapRegistry';
+import { refreshBeatmap } from '@/lib/beatmapRegistry';
 import {
   checkCompositeAvailable,
   hasCachedCompositeAsset,
@@ -101,6 +101,12 @@ export default function LevelDetailScreen() {
   const [recordExplainerOpen, setRecordExplainerOpen] = useState(false);
   const [compositeState, setCompositeState] = useState<CompositeAvailability | 'checking'>('checking');
   const [compositeCached, setCompositeCached] = useState(false);
+
+  // Opening a level refreshes its chart from the server (TTL-gated) so the
+  // run that follows scores against the latest consensus without an update.
+  useEffect(() => {
+    if (id) void refreshBeatmap(id);
+  }, [id]);
 
   useEffect(() => {
     if (!challengeId) {
@@ -394,12 +400,12 @@ export default function LevelDetailScreen() {
         <Pressable
           onPress={() => router.push(`/leaderboard/${mode.id}` as Href)}
           accessibilityRole="button"
-          accessibilityLabel={hasBeatmap(mode.id) ? 'Open leaderboard' : 'Leaderboard. This level needs a beatmap before scores can be ranked.'}
+          accessibilityLabel="Open leaderboard"
           style={({ pressed }) => [styles.boardLink, pressed && styles.pressed]}
         >
           <Ionicons name="podium-outline" size={18} color={colors.lime} />
           <Text style={styles.boardLinkText}>Leaderboard</Text>
-          <Text style={styles.boardLinkMeta}>{hasBeatmap(mode.id) ? 'Global · Friends' : 'Needs a beatmap'}</Text>
+          <Text style={styles.boardLinkMeta}>Global · Friends</Text>
           <Ionicons name="chevron-forward" size={16} color={colors.textFaint} />
         </Pressable>
 

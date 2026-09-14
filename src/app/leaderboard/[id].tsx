@@ -7,7 +7,6 @@ import { localDateKey } from '@shared/scoring/daily';
 import { LeaderboardEmpty, LeaderboardRow } from '@/components/LeaderboardRow';
 import { ShareScoreSheet, type ShareScoreInput } from '@/components/ShareScoreCard';
 import { useAuth } from '@/lib/AuthContext';
-import { hasBeatmap } from '@/lib/beatmapRegistry';
 import { getDailyChallenge } from '@/lib/dailyRecommendations';
 import { getMode, modes } from '@/lib/gameData';
 import {
@@ -44,12 +43,11 @@ export default function LeaderboardScreen() {
   const { username } = useProgress();
   const mode = getMode(id);
   const uid = user?.id ?? null;
-  const scored = hasBeatmap(id);
 
   // The daily tab exists only when this level is today's challenge (or the
   // caller opened a specific date's board from Home).
   const todayKey = localDateKey(new Date());
-  const today = useMemo(() => getDailyChallenge(modes, new Date(), hasBeatmap), []);
+  const today = useMemo(() => getDailyChallenge(modes, new Date()), []);
   const dateKey = first(params.date) ?? (today?.mode.id === id ? todayKey : null);
   const hasDaily = Boolean(dateKey);
   const [tab, setTab] = useState<Tab>(first(params.board) === 'daily' && hasDaily ? 'daily' : 'global');
@@ -59,7 +57,7 @@ export default function LeaderboardScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      if (!scored || !id) return undefined;
+      if (!id) return undefined;
       let cancelled = false;
       const load = async (): Promise<BoardState> => {
         if (tab === 'daily' && dateKey) {
@@ -84,7 +82,7 @@ export default function LeaderboardScreen() {
       return () => {
         cancelled = true;
       };
-    }, [dateKey, id, scored, tab, uid])
+    }, [dateKey, id, tab, uid])
   );
 
   const board = state[tab];
@@ -157,12 +155,6 @@ export default function LeaderboardScreen() {
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xl }]}>
         {!mode ? (
           <LeaderboardEmpty icon="alert-circle-outline" title="Level not found" />
-        ) : !scored ? (
-          <LeaderboardEmpty
-            icon="musical-notes-outline"
-            title="Needs a beatmap"
-            detail="This level has no cue map yet. Scores can only be ranked on levels with a published beatmap."
-          />
         ) : board === null ? (
           <ActivityIndicator color={colors.lime} style={styles.loading} />
         ) : ranked.length === 0 ? (
@@ -195,6 +187,10 @@ export default function LeaderboardScreen() {
             <Text style={styles.meLabel}>Your best</Text>
             <LeaderboardRow entry={board.me.entry} rank={board.me.rank} isMe />
           </View>
+        ) : null}
+
+        {mode && board !== null ? (
+          <Text style={styles.note}>Scoring gets sharper as more people play this map.</Text>
         ) : null}
       </ScrollView>
 
@@ -250,6 +246,7 @@ const styles = StyleSheet.create({
   list: { borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: spacing.xs },
   meBlock: { gap: spacing.xs },
   meLabel: { ...type.label, color: colors.textDim, paddingHorizontal: spacing.xs },
+  note: { ...type.bodySm, color: colors.textFaint, textAlign: 'center', paddingTop: spacing.xs },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,

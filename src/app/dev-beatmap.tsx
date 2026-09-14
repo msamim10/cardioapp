@@ -22,6 +22,7 @@ import {
   type BeatmapMove,
 } from '@/lib/beatmaps';
 import { modes } from '@/lib/gameData';
+import { describeChartRebuild, rebuildChartsNow } from '@/lib/leaderboards';
 import { getVideoSource, hasVideo } from '@/lib/videoSources';
 import { colors, font, radius, spacing } from '@/theme';
 
@@ -197,6 +198,18 @@ export default function DevBeatmapScreen() {
     }
   };
 
+  // Admin: rebuild every level's consensus chart from stored move samples now
+  // (the scheduled job does the same every 30 min). Server-guarded.
+  const [rebuilding, setRebuilding] = useState(false);
+  const forceRebuild = () => {
+    if (rebuilding) return;
+    setRebuilding(true);
+    rebuildChartsNow()
+      .then((levels) => Alert.alert('Charts rebuilt', describeChartRebuild(levels)))
+      .catch((error: unknown) => Alert.alert('Rebuild failed', (error as Error).message))
+      .finally(() => setRebuilding(false));
+  };
+
   const clearAll = () => {
     Alert.alert('Clear all cues?', 'Undo can restore them.', [
       { text: 'Cancel', style: 'cancel' },
@@ -286,6 +299,13 @@ export default function DevBeatmapScreen() {
         </Pressable>
         <Pressable onPress={clearAll} disabled={cues.length === 0} style={[styles.smallButton, cues.length === 0 && styles.disabled]}>
           <Ionicons name="trash-outline" size={16} color={colors.pink} />
+        </Pressable>
+      </View>
+
+      <View style={styles.toolsRow}>
+        <Pressable onPress={forceRebuild} disabled={rebuilding} style={[styles.smallButton, rebuilding && styles.disabled]}>
+          <Ionicons name="cloud-upload-outline" size={16} color={colors.lime} />
+          <Text style={styles.smallButtonText}>{rebuilding ? 'Rebuilding…' : 'Force rebuild charts'}</Text>
         </Pressable>
       </View>
 

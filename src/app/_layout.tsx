@@ -14,6 +14,8 @@ import { ProgressProvider, useProgress } from '@/lib/ProgressContext';
 import { SubscriptionProvider } from '@/lib/SubscriptionContext';
 import { initAnalytics } from '@/lib/analytics';
 import { decideAuthGate } from '@/lib/authGate';
+import { hydrateBeatmapCache, refreshAllBeatmaps } from '@/lib/beatmapRegistry';
+import { modes } from '@/lib/gameData';
 import { challengeHref, parseChallengeLink } from '@/lib/challengeLinks';
 import { stashPendingDeepLink, takePendingDeepLink } from '@/lib/pendingDeepLink';
 import {
@@ -30,6 +32,7 @@ export default function RootLayout() {
   // onboarding, in AccountAuthScreen), so this is safe to call before ATT.
   useEffect(() => {
     initAnalytics();
+    void hydrateBeatmapCache();
   }, []);
 
   return (
@@ -88,6 +91,14 @@ function RootNavigator() {
     (destination === 'create-account' && onCreateAccount) ||
     (destination === 'welcome' && inOnboardingFlow) ||
     (destination === 'resume' && inOnboardingFlow);
+
+  // Charts (consensus beatmaps) are mirrored locally; refresh the mirror once
+  // per sign-in when any level's copy is past its TTL. Reads need a user.
+  const uid = user?.id ?? null;
+  useEffect(() => {
+    if (!uid) return;
+    void refreshAllBeatmaps(modes.map((mode) => mode.id));
+  }, [uid]);
 
   // Latest URL the app was opened with (cold start or while running). When a
   // gate redirect below fires, a challenge/level link in flight is stashed and

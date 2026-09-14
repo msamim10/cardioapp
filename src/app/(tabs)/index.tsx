@@ -11,7 +11,6 @@ import { MascotHero } from '@/components/MascotHero';
 import { ModeCard } from '@/components/ModeCard';
 import { Card, StatChip, WeekTracker } from '@/components/ui';
 import { useAuth } from '@/lib/AuthContext';
-import { hasBeatmap } from '@/lib/beatmapRegistry';
 import { useRunnerCounts } from '@/lib/communityActivity';
 import { getDailyChallenge, isDailyChallengeCompleted } from '@/lib/dailyRecommendations';
 import { getMode, modes } from '@/lib/gameData';
@@ -97,7 +96,7 @@ export default function HomeScreen() {
     }, [])
   );
   const challenge = useMemo(
-    () => getDailyChallenge(modes, challengeDate, hasBeatmap),
+    () => getDailyChallenge(modes, challengeDate),
     [challengeDate]
   );
   const challengeDone = useMemo(
@@ -217,7 +216,7 @@ export default function HomeScreen() {
               challengeDone
                 ? 'Completed, bonus earned.'
                 : `Complete for ${Math.round(DAILY_CHALLENGE_XP_BONUS * 100)} percent bonus XP.`
-            }${challenge.practice ? ' Practice pick.' : ''}`}
+            }`}
             style={({ pressed }) => [styles.challengeCardWrap, pressed && { opacity: 0.85 }]}
           >
             <View style={styles.challengeCover}>
@@ -242,11 +241,6 @@ export default function HomeScreen() {
               <View style={styles.challengeEyebrowRow}>
                 <Ionicons name="calendar" size={12} color={colors.lime} />
                 <Text style={styles.challengeEyebrow}>Today&apos;s challenge</Text>
-                {challenge.practice ? (
-                  <View style={styles.practicePill}>
-                    <Text style={styles.practicePillText}>PRACTICE</Text>
-                  </View>
-                ) : null}
               </View>
               <Text style={styles.challengeName} numberOfLines={1}>
                 {challenge.mode.name}
@@ -270,7 +264,6 @@ export default function HomeScreen() {
           <DailyChallengeBoard
             dateKey={challengeDateKey}
             uid={user?.id ?? null}
-            hasBeatmap={hasBeatmap(challenge.mode.id)}
             onOpen={() =>
               router.push(`/leaderboard/${challenge.mode.id}?board=daily&date=${challengeDateKey}` as Href)
             }
@@ -454,15 +447,6 @@ const styles = StyleSheet.create({
   challengeBody: { flex: 1, minWidth: 0, gap: 3 },
   challengeEyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   challengeEyebrow: { ...type.micro, color: colors.lime },
-  practicePill: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.xs,
-    backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-  },
-  practicePillText: { color: colors.textDim, fontSize: 8, fontWeight: font.black, letterSpacing: 0.6 },
   challengeName: { ...type.h3, color: colors.text, fontSize: 15 },
   challengeMeta: { ...type.bodySm, color: colors.textDim, fontSize: 12 },
   weekCard: { gap: spacing.md },
