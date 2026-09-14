@@ -137,10 +137,24 @@ export default function HomeScreen() {
     >
       {/* Animated mascot hero: fox ties its shoes then double-jumps over the trail. */}
       <MascotHero height={HERO_HEIGHT}>
+        {/*
+          Username left, stats cluster right. The cluster never shrinks; the
+          name truncates at 55% of the row. When the name still needs more
+          room than is left beside the cluster, the cluster wraps onto its own
+          row (flexWrap + marginLeft:auto), so a 20-character handle and the
+          coins never fight for the same pixels.
+        */}
         <View style={[styles.heroOverlay, { paddingTop: insets.top + spacing.sm }]}>
           <View style={styles.usernameChip}>
             <Ionicons name="person-circle" size={18} color={colors.lime} />
-            <Text style={styles.usernameText}>@{username || 'runner'}</Text>
+            <Text
+              style={styles.usernameText}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              maxFontSizeMultiplier={1.3}
+            >
+              @{username || 'runner'}
+            </Text>
           </View>
           <View style={styles.heroChips}>
             <View
@@ -360,8 +374,12 @@ const styles = StyleSheet.create({
   heroOverlay: {
     flex: 1,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    alignContent: 'flex-start',
+    rowGap: spacing.sm,
+    columnGap: spacing.sm,
     paddingHorizontal: spacing.lg,
   },
   // MascotHero has no top scrim, so this fill is the only thing keeping the
@@ -370,6 +388,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    flexShrink: 1,
+    minWidth: 0,
+    maxWidth: '55%',
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: radius.pill,
@@ -377,8 +398,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderStrong,
   },
-  usernameText: { color: colors.text, fontSize: 14, fontWeight: font.bold },
-  heroChips: { flexDirection: 'row', gap: spacing.sm },
+  usernameText: { color: colors.text, fontSize: 14, fontWeight: font.bold, flexShrink: 1, minWidth: 0 },
+  // Never shrinks or clips; `marginLeft: auto` keeps it on the right edge on
+  // its own row too.
+  heroChips: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 0, marginLeft: 'auto' },
   streakChip: {
     flexDirection: 'row',
     alignItems: 'center',

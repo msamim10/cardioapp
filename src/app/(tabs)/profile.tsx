@@ -262,8 +262,12 @@ export default function ProfileScreen() {
         <View style={styles.avatar}>
           <Mascot variant="avatar" size={84} />
         </View>
-        <Text style={styles.name}>{firstName}</Text>
-        <Text style={styles.handle}>{handle}</Text>
+        <Text style={styles.name} numberOfLines={1} ellipsizeMode="tail">
+          {firstName}
+        </Text>
+        <Text style={styles.handle} numberOfLines={1} ellipsizeMode="tail">
+          {handle}
+        </Text>
         <Text style={styles.sync}>
           {syncStatus === 'synced'
             ? 'Progress synced'
@@ -441,7 +445,9 @@ export default function ProfileScreen() {
         >
           <View style={styles.settingLead}>
             <Text style={styles.settingText}>Username</Text>
-            <Text style={styles.settingHint}>{handle}</Text>
+            <Text style={styles.settingHint} numberOfLines={1} ellipsizeMode="tail">
+              {handle}
+            </Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
         </Pressable>
@@ -709,8 +715,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     overflow: 'hidden',
   },
-  name: { color: colors.text, fontSize: 24, fontWeight: font.black, letterSpacing: -0.4 },
-  handle: { color: colors.textDim, fontSize: 14, fontWeight: font.medium },
+  name: { color: colors.text, fontSize: 24, fontWeight: font.black, letterSpacing: -0.4, maxWidth: '100%', textAlign: 'center' },
+  handle: { color: colors.textDim, fontSize: 14, fontWeight: font.medium, maxWidth: '100%', textAlign: 'center' },
   sync: { color: colors.textFaint, fontSize: 12, fontWeight: font.medium, marginTop: 2 },
   section: { gap: spacing.sm },
   link: { color: colors.lime, fontSize: 14, fontWeight: font.bold },
