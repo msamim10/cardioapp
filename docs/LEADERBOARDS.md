@@ -237,9 +237,16 @@ a native attestation module once a native build is in play.
    published nothing can be submitted and boards stay empty.
 5. **Team ID**: `WUW8GPQ5PT` is set in `web/aasa/apple-app-site-association`
    (App Store Connect → Membership).
-6. **Hosting**: `firebase deploy --only hosting` (serves the AASA and the
-   `/l/*` fallback page). Add `web/og/beat-my-score.png` if you want a real OG
-   image (the HTML references it).
+6. **Hosting**: `cardiosurf.com` is served by **GitHub Pages** (repo
+   `cardiosurf/cardiosurf.github.io`, `CNAME` = cardiosurf.com), **not**
+   Firebase Hosting (`cardiosurf-mvp.web.app` has no custom domain). The AASA
+   and `/l/index.html` are committed there (`.well-known/apple-app-site-association`,
+   `l/index.html`; `404.html` forwards `/l/{id}?c=…` to `/l/?lv={id}&c=…` because
+   Pages has no rewrites). `web/` in this repo is the source of truth — when
+   it changes, copy the files into the Pages repo and push. The `hosting`
+   block in `firebase.json` is only useful if the domain is ever moved to
+   Firebase. Add `og/beat-my-score.png` to the Pages repo if you want a real
+   OG image (the HTML references it).
 7. **Native build** (EAS): `ios.associatedDomains` and `react-native-view-shot`
    both need a new binary. Until then the share card falls back to text and
    universal links open the web fallback page (the custom scheme works).
@@ -247,8 +254,9 @@ a native attestation module once a native build is in play.
 
 ## Owner TODOs / deferred
 
-- Team ID placeholder in the AASA (not readable from this checkout).
 - No OG image asset; `web/l/index.html` references `/og/beat-my-score.png`.
+- On GitHub Pages `/l/{id}` returns HTTP 404 (then client-side forwards), so
+  link previews (iMessage/Slack) won't render OG tags for challenge links.
 - The share card from the summary uses this run's accuracy/combo with the
   user's *best* score; when the run did not improve the best, prefer sharing
   from the leaderboard screen (uses the best entry throughout).

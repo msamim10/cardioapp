@@ -123,6 +123,13 @@ intentionally not committed.)
 
 ## Hosting (AASA + link fallback)
 
+**`cardiosurf.com` is served by GitHub Pages** (repo
+`cardiosurf/cardiosurf.github.io`), not Firebase Hosting. The files below are
+deployed by copying `web/aasa/apple-app-site-association` →
+`.well-known/apple-app-site-association` and `web/l/index.html` → `l/index.html`
+in that repo and pushing. The Firebase Hosting config is kept only in case the
+domain moves.
+
 `firebase.json` also configures Hosting from `web/`:
 
 - `/.well-known/apple-app-site-association` → `web/aasa/apple-app-site-association`
@@ -132,7 +139,7 @@ intentionally not committed.)
   link, and a JS hop to `cardiosurf://level/{id}?challenge={runId}`.
 
 ```sh
-firebase deploy --only hosting
+firebase deploy --only hosting   # only if cardiosurf.com is ever pointed at Firebase
 ```
 
 Universal links additionally need `ios.associatedDomains` (already in
