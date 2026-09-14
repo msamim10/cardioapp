@@ -18,7 +18,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FramingCoach } from '@/components/FramingCoach';
-import { WarmupOverlay, WARMUP_MOVE_ORDER, WARMUP_LANDED_MS, type WarmupLanded } from '@/components/WarmupOverlay';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import { Card, GradientButton, Pill, ProgressTrack, SpeedPill, StatReadout } from '@/components/ui';
 import { logPoseLatency, logRunRecordingFailed } from '@/lib/analytics';
@@ -53,10 +52,8 @@ import {
 import {
   INTENSITY_META,
   isIntensityKey,
-  recordWarmupRun,
   saveCalibrationBaseline,
   targetSecondsForRun,
-  WARMUP_SECONDS,
 } from '@/lib/playSetup';
 import { useProgress } from '@/lib/ProgressContext';
 import { CLASS_META, caloriesForRun } from '@/lib/progression';
@@ -87,8 +84,6 @@ const FRAMING_GATE_COACH_DELAY_MS = 1500;
 const FRAMING_GATE_SKIP_AFTER_MS = 8000;
 /** Framing words during the in-run coach debounce like the preflight. */
 const FRAMING_GATE_DEBOUNCE_MS = 400;
-/** In warm-up, a charted cue is prompted this far ahead of its time. */
-const WARMUP_PROMPT_LEAD_MS = 2200;
 
 /** mm:ss from a seconds value (clamped, non-negative). */
 function formatClock(seconds: number): string {
@@ -123,7 +118,6 @@ export default function WorkoutScreen() {
     trackingRunId,
     fromOnboarding,
     record,
-    warmup,
     framingCheck,
   } = useLocalSearchParams<{
     level: string;
@@ -138,8 +132,6 @@ export default function WorkoutScreen() {
     fromOnboarding?: string;
     /** "Record my runs": record the camera + a run log for the share video. */
     record?: string;
-    /** First two runs: oversized move prompts for the first WARMUP_SECONDS. */
-    warmup?: string;
     /**
      * The preflight screen was skipped (fresh once-per-session calibration):
      * confirm the body is in frame before the map starts.
@@ -257,26 +249,11 @@ export default function WorkoutScreen() {
     };
   }, [chart, level, runId]);
   const beatmap = chart?.beatmap ?? null;
-  // Warm-up (first two tracked runs): the first WARMUP_SECONDS show oversized
-  // move prompts and the judge forgives misses on screen (the log it submits
-  // is untouched — see CueJudge.forgiveMissesUntilSec). The judge clock is
-  // accumulated VIDEO seconds, so the wall window is scaled by the rate.
-  const warmupRequested = warmup === '1' && tracking !== 'off';
-  const [warmupEnded, setWarmupEnded] = useState(!warmupRequested);
-  const warmupEndedRef = useRef(warmupEnded);
-  warmupEndedRef.current = warmupEnded;
-  const [warmupLanded, setWarmupLanded] = useState<WarmupLanded | null>(null);
-  // Free-move warm-up (no chart): the four moves once each, in order.
-  const [warmupFreeIndex, setWarmupFreeIndex] = useState(0);
-  const warmupFreeIndexRef = useRef(0);
-  const landedCounterRef = useRef(0);
   // Timing-window scoring when this level has a chart; otherwise null and the
   // free-scoring `applyRecognizedMove` path above is used unchanged.
   const cueJudgeRef = useRef<CueJudge | null>(null);
   if (beatmap && !cueJudgeRef.current) {
-    cueJudgeRef.current = new CueJudge(beatmap, {
-      forgiveMissesUntilSec: warmupRequested ? WARMUP_SECONDS * playbackRate : 0,
-    });
+    cueJudgeRef.current = new CueJudge(beatmap);
   }
   const cueJudge = cueJudgeRef.current;
   const [cueScore, setCueScore] = useState<CueScore | null>(null);
@@ -511,21 +488,6 @@ export default function WorkoutScreen() {
       }
       const recording = recordingRef.current;
       if (recording?.recording) recording.log.onPose({ keypoints: result.keypoints });
-      // Warm-up: a landed move flashes "JUMP ✓"; the free-move variant walks
-      // the four moves once each and ends as soon as the last one lands.
-      if (result.move && !cueJudge && !warmupEndedRef.current && runClock.isScoringActive(classifiedTs)) {
-        const landedMove = toBeatmapMove(result.move);
-        if (landedMove === WARMUP_MOVE_ORDER[warmupFreeIndexRef.current]) {
-          landedCounterRef.current += 1;
-          setWarmupLanded({ move: landedMove, id: landedCounterRef.current });
-          warmupFreeIndexRef.current += 1;
-          setWarmupFreeIndex(warmupFreeIndexRef.current);
-          if (warmupFreeIndexRef.current >= WARMUP_MOVE_ORDER.length) {
-            warmupEndedRef.current = true;
-            setWarmupEnded(true);
-          }
-        }
-      }
       if (result.move && runClock.isScoringActive(classifiedTs)) {
         // Combos chain on the VIDEO clock, not wall time or frame timestamps.
         const videoSec = runClock.videoTimeSec(classifiedTs);
@@ -544,10 +506,6 @@ export default function WorkoutScreen() {
           setCueScore(cueJudge.score);
           if (recording?.recording) recording.log.onJudgement(judgement, videoSec, cueJudge.score, classifiedTs);
           setPoseScore((current) => countRecognizedMove(current, result.move!));
-          if (!warmupEndedRef.current && judgement.grade !== 'miss') {
-            landedCounterRef.current += 1;
-            setWarmupLanded({ move: toBeatmapMove(result.move), id: landedCounterRef.current });
-          }
         } else {
           setPoseScore((current) =>
             applyRecognizedMove(current, result.move!, Math.round(videoSec * 1000)),
@@ -574,25 +532,6 @@ export default function WorkoutScreen() {
       framingHint: 'Tracking lost — step back into view',
     }));
   }, [applyCoachVerdict]);
-
-  // Warm-up window ends on the wall clock (charted and free-move alike); the
-  // free-move variant may end earlier once all four moves have landed. Either
-  // way this run counted toward WARMUP_RUN_COUNT.
-  useEffect(() => {
-    if (!warmupRequested || warmupEnded) return;
-    if (elapsed >= WARMUP_SECONDS) {
-      warmupEndedRef.current = true;
-      setWarmupEnded(true);
-    }
-  }, [elapsed, warmupEnded, warmupRequested]);
-  useEffect(() => {
-    if (warmupRequested && warmupEnded) void recordWarmupRun();
-  }, [warmupEnded, warmupRequested]);
-  useEffect(() => {
-    if (!warmupLanded) return;
-    const timer = setTimeout(() => setWarmupLanded(null), WARMUP_LANDED_MS + 120);
-    return () => clearTimeout(timer);
-  }, [warmupLanded]);
 
   const finish = useCallback(() => {
     // Reaching the target (timed run) or playToEnd (untimed) are the only paths
@@ -644,8 +583,7 @@ export default function WorkoutScreen() {
     const nonce = peekRunNonce(typeof trackingRunId === 'string' ? trackingRunId : undefined);
     if (nonce && typeof trackingRunId === 'string' && timedRun) {
       const charted = judge !== null && cue !== null && nonce.beatmap !== null;
-      // Submit what the server will replay from the log: with a warm-up the
-      // displayed `cue` forgives early misses, the log never does.
+      // Submit what the server will replay from the log.
       const verified = charted ? judge.verifiedTotals() : null;
       stageRunSubmission({
         runId: trackingRunId,
@@ -1032,22 +970,6 @@ export default function WorkoutScreen() {
             </Pressable>
           ) : null}
         </View>
-      ) : null}
-
-      {/* Warm-up: oversized move prompts for the first WARMUP_SECONDS. */}
-      {warmupRequested && !warmupEnded && !coachActive && status === 'ready' && chart !== null && !onExternalScreen ? (
-        <WarmupOverlay
-          prompt={
-            cueJudge
-              ? upcomingCue && upcomingCue.inMs <= WARMUP_PROMPT_LEAD_MS
-                ? upcomingCue.move
-                : null
-              : WARMUP_MOVE_ORDER[warmupFreeIndex] ?? null
-          }
-          landed={warmupLanded}
-          accent={hudTheme.accent}
-          intro={cueJudge ? 'Get ready' : undefined}
-        />
       ) : null}
 
       {/* Additive (AirPlay): live form preview + compact companion dashboard on

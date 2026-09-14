@@ -62,7 +62,6 @@ const score = (s: number, c: number): CueScore => ({
   good: 0,
   miss: 0,
   spurious: 0,
-  forgiven: 0,
   lastGrade: null,
   judgements: 0,
   lastDeltaMs: null,

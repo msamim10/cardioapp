@@ -29,8 +29,8 @@
  *   complete    Route out. `outcome` says how the run should start.
  *   unavailable No detector / camera error; explicit "continue without" only.
  *
- * Happy path ≈ 2 s walking in + 3 s hold + 10–12 s of moves. The first two
- * runs still open with the in-run warm-up (workout.tsx); that is untouched.
+ * Happy path ≈ 2 s walking in + 3 s hold + 10–12 s of moves. The run itself
+ * has no further prompts (workout.tsx).
  */
 
 import type { Move, TrackingStatus } from '@/lib/poseTracking';

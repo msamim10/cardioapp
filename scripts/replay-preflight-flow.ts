@@ -38,8 +38,6 @@ import {
 import {
   CALIBRATION_SESSION_MS,
   hasFreshCalibration,
-  shouldShowWarmup,
-  WARMUP_RUN_COUNT,
   // @ts-expect-error -- required by Node's type-stripping ESM resolver
 } from '../src/lib/calibrationSession.ts';
 import {
@@ -725,13 +723,6 @@ function toMoves(firstRun = false): Flow {
   );
   assert.equal(hasFreshCalibration({ ...baseline, capturedAt: now + 5_000 }, now), false, 'clock skew → not fresh');
   assert.equal(CALIBRATION_SESSION_MS, 12 * 3_600_000);
-
-  // Warm-up: the first WARMUP_RUN_COUNT runs only.
-  assert.equal(WARMUP_RUN_COUNT, 2);
-  assert.equal(shouldShowWarmup(null), true);
-  assert.equal(shouldShowWarmup({ warmupRunsCompleted: 0 }), true);
-  assert.equal(shouldShowWarmup({ warmupRunsCompleted: 1 }), true);
-  assert.equal(shouldShowWarmup({ warmupRunsCompleted: 2 }), false);
 }
 
 // ---------------------------------------------------------------------------
@@ -759,5 +750,5 @@ function toMoves(firstRun = false): Flow {
 }
 
 console.log(
-  'Preflight flow replay passed: upper-body framing (legs optional, torso band 0.16–0.34, head margin, centre band), 400 ms debounce, framing → 3 s hold → move check (JUMP·DUCK·LEFT·RIGHT, 2.5 s windows, detected/motion/auto pass, ✓ tail, never fails, ≈10–12 s) → complete, move/drift/loss restart the ring, lock grace → defaults, skip, denied/unavailable → off, ~15–17 s happy path, 12 h session skip, warm-up count, spoken prompt gate',
+  'Preflight flow replay passed: upper-body framing (legs optional, torso band 0.16–0.34, head margin, centre band), 400 ms debounce, framing → 3 s hold → move check (JUMP·DUCK·LEFT·RIGHT, 2.5 s windows, detected/motion/auto pass, ✓ tail, never fails, ≈10–12 s) → complete, move/drift/loss restart the ring, lock grace → defaults, skip, denied/unavailable → off, ~15–17 s happy path, 12 h session skip, spoken prompt gate',
 );

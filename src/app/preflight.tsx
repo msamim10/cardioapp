@@ -44,7 +44,6 @@ import {
   saveCalibrationBaseline,
   saveFirstRunTrackingOff,
   saveVoicePrompts,
-  shouldShowWarmup,
   type PlayScreen,
 } from '@/lib/playSetup';
 import {
@@ -266,7 +265,6 @@ export default function PreflightScreen() {
         trackingRunId: runIdRef.current,
         framingCheck: '1',
         ...(params.record === '1' ? { record: '1' } : {}),
-        ...(shouldShowWarmup(peekPlaySetup()) ? { warmup: '1' } : {}),
       },
     });
   }, [campaignClass, detectorAvailable, intensity, params, permission, router, sessionSkip, startRun]);
@@ -375,7 +373,6 @@ export default function PreflightScreen() {
           tracking,
           trackingRunId: runIdRef.current,
           ...(params.record === '1' && tracking !== 'off' ? { record: '1' } : {}),
-          ...(tracking !== 'off' && shouldShowWarmup(peekPlaySetup()) ? { warmup: '1' } : {}),
         },
       });
     },

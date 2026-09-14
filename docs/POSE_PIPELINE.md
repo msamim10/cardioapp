@@ -2,7 +2,7 @@
 
 Reference for the body-tracking → scoring → reward path. Code paths in
 parentheses. The preflight calibration screen that precedes a run (upper-body
-framing, the 3 s hold, once-per-session skip, in-run warm-up, fallbacks) is
+framing, the 3 s hold, the guided moves, once-per-session skip, fallbacks) is
 documented separately in `docs/CALIBRATION_FLOW.md`.
 
 ## 1. Frame path and latency stamps
@@ -228,12 +228,10 @@ combo 15). Combo increments on Perfect/Good only.
 cues judged. `miss` counts beatmap cues missed (timing, wrong move, expiry);
 spurious moves are tracked separately and do not enter accuracy.
 
-Warm-up (first two tracked runs): `CueJudge` takes
-`forgiveMissesUntilSec`; misses/spurious moves before that video time are
-counted in `CueScore.forgiven` and left out of the displayed score, accuracy
-and combo. The event log is not filtered — `verifiedTotals()` replays it
-without forgiveness and the run submission uses those totals, so the server
-replay in `shared/scoring/submission.ts` still reproduces them.
+`verifiedTotals()` replays the judge's own event log with the shared
+grading rules and the run submission uses those totals, so the server replay
+in `shared/scoring/submission.ts` reproduces exactly what the HUD showed. No
+misses are forgiven at any point of a run.
 
 HUD (`PoseOverlay.tsx`): PERFECT/GOOD/MISS flash on each judgement, upcoming
 cue arrow + countdown, combo from the judge. Summary score =

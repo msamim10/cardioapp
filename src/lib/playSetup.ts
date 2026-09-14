@@ -12,11 +12,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  parseCalibrationBaseline,
-  WARMUP_RUN_COUNT,
-  type CalibrationBaseline,
-} from '@/lib/calibrationSession';
+import { parseCalibrationBaseline, type CalibrationBaseline } from '@/lib/calibrationSession';
 import type { MoverKey, OnboardingAnswers } from '@/lib/onboarding';
 
 const STORAGE_KEY = 'cardiosurf.playSetup.v1';
@@ -70,13 +66,10 @@ export type RunSettings = {
   durationMin: RunDurationMin;
 };
 
-// Once-per-session calibration + warm-up decisions live in the pure module.
+// Once-per-session calibration decisions live in the pure module.
 export {
   CALIBRATION_SESSION_MS,
   hasFreshCalibration,
-  shouldShowWarmup,
-  WARMUP_RUN_COUNT,
-  WARMUP_SECONDS,
   type CalibrationBaseline,
 } from '@/lib/calibrationSession';
 
@@ -96,8 +89,6 @@ export type PlaySetup = {
   recordInviteSeen: boolean;
   /** Last completed framing hold; null until the user calibrates once. */
   calibrationBaseline: CalibrationBaseline | null;
-  /** Runs that have shown the in-run warm-up (capped at WARMUP_RUN_COUNT). */
-  warmupRunsCompleted: number;
   /** Spoken calibration prompts (expo-speech). Default on. */
   voicePrompts: boolean;
 };
@@ -114,7 +105,6 @@ function emptySetup(): PlaySetup {
     recordExplainerSeen: false,
     recordInviteSeen: false,
     calibrationBaseline: null,
-    warmupRunsCompleted: 0,
     voicePrompts: true,
   };
 }
@@ -150,10 +140,6 @@ function parse(raw: string | null): PlaySetup {
       recordExplainerSeen: parsed.recordExplainerSeen === true,
       recordInviteSeen: parsed.recordInviteSeen === true,
       calibrationBaseline: parseCalibrationBaseline(parsed.calibrationBaseline),
-      warmupRunsCompleted:
-        typeof parsed.warmupRunsCompleted === 'number' && Number.isFinite(parsed.warmupRunsCompleted)
-          ? Math.max(0, Math.floor(parsed.warmupRunsCompleted))
-          : 0,
       voicePrompts: parsed.voicePrompts !== false,
     };
   } catch {
@@ -244,13 +230,6 @@ export function saveRecordInviteSeen(): Promise<PlaySetup> {
 export function saveCalibrationBaseline(baseline: CalibrationBaseline | null): Promise<PlaySetup> {
   return mutate((setup) => {
     setup.calibrationBaseline = baseline ? { ...baseline } : null;
-  });
-}
-
-/** Counts one more run that showed the warm-up; saturates at WARMUP_RUN_COUNT. */
-export function recordWarmupRun(): Promise<PlaySetup> {
-  return mutate((setup) => {
-    setup.warmupRunsCompleted = Math.min(WARMUP_RUN_COUNT, setup.warmupRunsCompleted + 1);
   });
 }
 

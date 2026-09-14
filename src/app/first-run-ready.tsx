@@ -114,8 +114,6 @@ export default function FirstRunReadyScreen() {
         tracking: trackingOff ? 'off' : 'calibrated',
         trackingRunId: runId,
         fromOnboarding: '1',
-        // First run ever: the in-run warm-up teaches the four moves.
-        ...(trackingOff ? {} : { warmup: '1' }),
       },
     });
   };

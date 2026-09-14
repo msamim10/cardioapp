@@ -8,8 +8,8 @@ baseline, cooldown/rearm, move classifiers, snapshot handoff via
 is the pure reducer in `src/lib/preflightFlow.ts` (replay: `npm run
 test:preflight-flow`); framing coaching comes from the read-only helper
 `src/lib/skeletonFraming.ts`; the "clearly moving" signal of the move check
-from the read-only `src/lib/bodyMotion.ts`; the once-per-session and warm-up
-decisions are the pure helpers in `src/lib/calibrationSession.ts`;
+from the read-only `src/lib/bodyMotion.ts`; the once-per-session decision is
+the pure helper in `src/lib/calibrationSession.ts`;
 spoken-prompt rate limiting is the pure `src/lib/speechGate.ts`.
 
 No silhouette or body outline is drawn over the camera at any point: the one
@@ -37,8 +37,9 @@ touched.
 
 Happy path ≈ 2 s walking in + 3 s hold + 10–12 s of moves (four 2.5 s
 windows; a ✓ tail of `MOVE_LANDED_MS` only when a pass lands late). The move
-check is a guided warm-up of the controls, not a test: it does not gate
-anything, and the in-run warm-up (below) is unchanged. A small **Skip** sits
+check is a guided walkthrough of the controls, not a test: it does not gate
+anything. Once the run starts there are no further prompts: the HUD's
+upcoming-cue arrow is the only in-run guidance. A small **Skip** sits
 at the bottom of every camera phase for accessibility: `outcome:
 'calibrated'` if the analyzer already has its baseline, else `'defaults'`.
 
@@ -126,25 +127,6 @@ A successful hold stores `PlaySetup.calibrationBaseline`
   analyzer and shows the coach until the analyzer locks again, then resumes.
 - Tracking off (`tracking: 'off'`) and the TV destination keep their existing
   handling.
-
-## Warm-up (moved out of preflight)
-
-The four move trials are now the first `WARMUP_SECONDS` (15 s) of the run for
-the user's first `WARMUP_RUN_COUNT` (2) tracked runs
-(`PlaySetup.warmupRunsCompleted`, bumped by `recordWarmupRun` when the run
-finishes). `WarmupOverlay` shows the move in ≥ 96 pt with an arrow and flashes
-"JUMP ✓" on a landed move.
-
-- Charted run: `CueJudge` is constructed with
-  `forgiveMissesUntilSec = WARMUP_SECONDS × playbackRate` (judge time is video
-  time). Misses and spurious moves before that point are counted in
-  `CueScore.forgiven` and excluded from the displayed score / accuracy /
-  combo break, **but the event log is untouched**: `verifiedTotals()` replays
-  the log without forgiveness and that is what `stageRunSubmission` sends, so
-  the server-side replay (`shared/scoring/submission.ts`) still matches.
-- Free-scoring run (no chart yet): the overlay cycles JUMP → DUCK → LEFT →
-  RIGHT once each, advancing on the matching recognized move; scoring is the
-  normal `applyRecognizedMove` path.
 
 ## Fallbacks (always explicit, never silent)
 

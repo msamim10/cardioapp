@@ -1,5 +1,5 @@
 /**
- * Once-per-session calibration + in-run warm-up: the pure decisions.
+ * Once-per-session calibration: the pure decisions.
  *
  * Kept free of native imports so `scripts/replay-preflight-flow.ts` can pin
  * them; `playSetup.ts` persists the values and re-exports these helpers.
@@ -24,12 +24,6 @@ export type CalibrationBaseline = {
 /** A stored baseline older than this re-runs the full preflight. */
 export const CALIBRATION_SESSION_MS = 12 * 60 * 60 * 1000;
 
-/** The in-run warm-up (oversized move prompts, misses forgiven) shows for this many runs. */
-export const WARMUP_RUN_COUNT = 2;
-
-/** Length of the in-run warm-up window (wall clock). */
-export const WARMUP_SECONDS = 15;
-
 /**
  * Whether a run may skip the preflight screen: a framing hold completed on
  * this device within the session window.
@@ -42,12 +36,6 @@ export function hasFreshCalibration(
   const age = now - baseline.capturedAt;
   return age >= 0 && age <= CALIBRATION_SESSION_MS;
 }
-
-/** Whether the next run should open with the warm-up window. */
-export function shouldShowWarmup(setup: { warmupRunsCompleted: number } | null): boolean {
-  return (setup?.warmupRunsCompleted ?? 0) < WARMUP_RUN_COUNT;
-}
-
 export function parseCalibrationBaseline(value: unknown): CalibrationBaseline | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<CalibrationBaseline>;

@@ -77,11 +77,6 @@ export type CueScore = {
   miss: number;
   /** Moves with no cue in the window (combo-breaking, not in accuracy). */
   spurious: number;
-  /**
-   * Misses inside the warm-up window (`forgiveMissesUntilSec`): logged for
-   * the server replay, not shown, not in `miss`/`spurious`/accuracy.
-   */
-  forgiven: number;
   lastGrade: CueGrade | null;
   /** Monotonic counter so the HUD can re-trigger a flash for repeated grades. */
   judgements: number;
@@ -97,7 +92,6 @@ export const INITIAL_CUE_SCORE: CueScore = {
   good: 0,
   miss: 0,
   spurious: 0,
-  forgiven: 0,
   lastGrade: null,
   judgements: 0,
   lastDeltaMs: null,
@@ -109,8 +103,6 @@ export type CueJudgement = {
   cue: ScheduledCue | null;
   deltaMs: number | null;
   points: number;
-  /** A warm-up miss: logged, not shown (see `forgiveMissesUntilSec`). */
-  forgiven?: boolean;
 };
 
 const MOVE_TO_CUE: Record<Move, BeatmapMove> = {
@@ -132,16 +124,6 @@ export type CueJudgeOptions = {
   videoLengthSec?: number;
   latencyCompensationMs?: number;
   lookaheadSec?: number;
-  /**
-   * Warm-up window (accumulated video seconds). Misses judged before this —
-   * expired cues, wrong/late moves, spurious moves — are FORGIVEN: they are
-   * still written to the judgement log exactly as the server will replay
-   * them (so the submission stays verifiable and `verifiedTotals` matches
-   * the board), but the displayed `CueScore` does not count them as misses,
-   * does not flash MISS, and leaves accuracy untouched. The combo still
-   * resets, so the displayed points always equal the replayed points.
-   */
-  forgiveMissesUntilSec?: number;
 };
 
 export class CueJudge {
@@ -149,7 +131,6 @@ export class CueJudge {
   private videoLength: number;
   private readonly compensationS: number;
   private readonly lookaheadS: number;
-  private readonly forgiveUntilS: number;
   /** Scheduled, not yet consumed/expired cues, sorted by `at`. */
   private active: ScheduledCue[] = [];
   /** Accumulated video time up to which cues have been scheduled. */
@@ -169,18 +150,14 @@ export class CueJudge {
         : beatmap.videoDurationSec;
     this.compensationS = (options.latencyCompensationMs ?? DETECTION_LATENCY_COMPENSATION_MS) / 1000;
     this.lookaheadS = options.lookaheadSec ?? CUE_LOOKAHEAD_S;
-    this.forgiveUntilS =
-      options.forgiveMissesUntilSec && options.forgiveMissesUntilSec > 0
-        ? options.forgiveMissesUntilSec
-        : 0;
   }
 
-  /** Displayed score (warm-up misses forgiven). */
+  /** Displayed score. */
   get score(): CueScore {
     return this.state;
   }
 
-  /** Displayed accuracy (warm-up misses forgiven). */
+  /** Displayed accuracy. */
   get accuracy(): number {
     return cueAccuracy(this.state);
   }
@@ -191,16 +168,11 @@ export class CueJudge {
   }
 
   /**
-   * What the server will derive from `events`: the numbers to SUBMIT. Equal
-   * to `score` when nothing was forgiven; otherwise identical points and
-   * combo with the warm-up misses counted.
+   * What the server will derive from `events`: the numbers to SUBMIT. Always
+   * consistent with `score`; the replay is the single source of truth.
    */
   verifiedTotals(): ReplayTotals {
     return replayJudgements(this.log);
-  }
-
-  private forgiven(videoTimeSec: number): boolean {
-    return videoTimeSec < this.forgiveUntilS;
   }
 
   private record(event: JudgeEvent): void {
@@ -238,16 +210,14 @@ export class CueJudge {
     }
     if (expired) {
       this.active = remaining;
-      this.state = this.forgiven(videoTimeSec)
-        ? { ...this.state, combo: 0, forgiven: this.state.forgiven + expired }
-        : {
-            ...this.state,
-            miss: this.state.miss + expired,
-            combo: 0,
-            lastGrade: 'miss',
-            lastDeltaMs: null,
-            judgements: this.state.judgements + expired,
-          };
+      this.state = {
+        ...this.state,
+        miss: this.state.miss + expired,
+        combo: 0,
+        lastGrade: 'miss',
+        lastDeltaMs: null,
+        judgements: this.state.judgements + expired,
+      };
     }
     return expired;
   }
@@ -273,21 +243,18 @@ export class CueJudge {
     }
 
     const match = best ?? bestAny;
-    const forgiven = this.forgiven(videoTimeSec);
     if (!match) {
       // Spurious move: nothing to consume, combo breaks.
-      this.state = forgiven
-        ? { ...this.state, combo: 0, forgiven: this.state.forgiven + 1 }
-        : {
-            ...this.state,
-            spurious: this.state.spurious + 1,
-            combo: 0,
-            lastGrade: 'miss',
-            lastDeltaMs: null,
-            judgements: this.state.judgements + 1,
-          };
+      this.state = {
+        ...this.state,
+        spurious: this.state.spurious + 1,
+        combo: 0,
+        lastGrade: 'miss',
+        lastDeltaMs: null,
+        judgements: this.state.judgements + 1,
+      };
       this.record({ i: -1, l: -1, g: 'x', d: null, t: videoTimeSec });
-      return { grade: 'miss', cue: null, deltaMs: null, points: 0, forgiven };
+      return { grade: 'miss', cue: null, deltaMs: null, points: 0 };
     }
 
     this.active.splice(match.index, 1);
@@ -301,17 +268,15 @@ export class CueJudge {
       t: videoTimeSec,
     });
     if (grade === 'miss') {
-      this.state = forgiven
-        ? { ...this.state, combo: 0, forgiven: this.state.forgiven + 1 }
-        : {
-            ...this.state,
-            miss: this.state.miss + 1,
-            combo: 0,
-            lastGrade: 'miss',
-            lastDeltaMs: deltaMs,
-            judgements: this.state.judgements + 1,
-          };
-      return { grade, cue: match.cue, deltaMs, points: 0, forgiven };
+      this.state = {
+        ...this.state,
+        miss: this.state.miss + 1,
+        combo: 0,
+        lastGrade: 'miss',
+        lastDeltaMs: deltaMs,
+        judgements: this.state.judgements + 1,
+      };
+      return { grade, cue: match.cue, deltaMs, points: 0 };
     }
 
     const combo = this.state.combo + 1;
