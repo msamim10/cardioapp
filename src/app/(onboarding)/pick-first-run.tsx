@@ -142,9 +142,12 @@ const styles = StyleSheet.create({
   eyebrow: { ...type.label, color: colors.lime, marginBottom: 8 },
   title: { ...type.h1, color: colors.text },
   sub: { ...type.body, color: colors.textDim, marginTop: spacing.sm },
-  stack: { gap: spacing.md, marginTop: spacing.xl },
+  stack: { gap: spacing.md, marginTop: spacing.xl, paddingTop: spacing.xs },
+  // `minHeight`, not `height`: the card grows with its content, so the badge
+  // row and a two-line name are never clipped by `overflow: 'hidden'` (which
+  // only exists to round the cover image).
   card: {
-    height: 164,
+    minHeight: 196,
     borderRadius: radius.xl,
     overflow: 'hidden',
     backgroundColor: colors.surface,
@@ -152,9 +155,10 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     justifyContent: 'space-between',
     padding: spacing.md,
+    paddingTop: spacing.md + 2,
   },
   cardSelected: { borderColor: colors.lime },
-  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 26 },
   pill: {
     paddingHorizontal: 9,
     paddingVertical: 4,

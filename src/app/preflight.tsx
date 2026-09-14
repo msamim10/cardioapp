@@ -675,7 +675,6 @@ export default function PreflightScreen() {
           topInset={insets.top}
           bottomInset={insets.bottom}
           hudTheme={hudTheme}
-          recording={params.record === '1'}
           onEnable={enableCamera}
           onOpenSettings={openSettings}
           onContinueWithout={() =>
@@ -751,7 +750,6 @@ function IntroScreen({
   topInset,
   bottomInset,
   hudTheme,
-  recording,
   onEnable,
   onOpenSettings,
   onContinueWithout,
@@ -762,7 +760,6 @@ function IntroScreen({
   topInset: number;
   bottomInset: number;
   hudTheme: HudTheme;
-  recording: boolean;
   onEnable: () => void;
   onOpenSettings: () => void;
   onContinueWithout: () => void;
@@ -825,11 +822,6 @@ function IntroScreen({
                 </>
               )}
             </Pressable>
-            <Text style={styles.privacy}>
-              {recording
-                ? 'Processed on your phone. Your run video stays on this device unless you share it.'
-                : 'Processed on your phone. Nothing is recorded unless you turn on "Record my runs".'}
-            </Text>
           </>
         )}
       </View>
@@ -969,7 +961,6 @@ const styles = StyleSheet.create({
   },
   tipText: { ...type.bodySm, color: colors.textDim, flex: 1 },
   introActions: { gap: spacing.xs },
-  privacy: { ...type.bodySm, color: colors.textFaint, textAlign: 'center', marginTop: spacing.sm },
   pressed: { opacity: 0.82 },
   card: {
     position: 'absolute',
