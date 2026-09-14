@@ -4,8 +4,14 @@
       "collectionGroup": "entries",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "classKey", "order": "ASCENDING" },
-        { "fieldPath": "score", "order": "DESCENDING" }
+        {
+          "fieldPath": "classKey",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "score",
+          "order": "DESCENDING"
+        }
       ]
     }
   ],
@@ -14,10 +20,41 @@
       "collectionGroup": "entries",
       "fieldPath": "uid",
       "indexes": [
-        { "queryScope": "COLLECTION", "order": "ASCENDING" },
-        { "queryScope": "COLLECTION", "order": "DESCENDING" },
-        { "queryScope": "COLLECTION", "arrayConfig": "CONTAINS" },
-        { "queryScope": "COLLECTION_GROUP", "order": "ASCENDING" }
+        {
+          "queryScope": "COLLECTION",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "DESCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "queryScope": "COLLECTION_GROUP",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "entries",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": [
+        {
+          "queryScope": "COLLECTION",
+          "order": "ASCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "order": "DESCENDING"
+        },
+        {
+          "queryScope": "COLLECTION",
+          "arrayConfig": "CONTAINS"
+        }
       ]
     }
   ]
