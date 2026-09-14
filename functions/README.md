@@ -1,13 +1,15 @@
 # CardioSurf Cloud Functions
 
 Backend for per-video leaderboards and beat-my-score (Cloud Functions for
-Firebase, **2nd gen**, Node 20, TypeScript). Project: `cardiosurf-mvp`, region
+Firebase, **2nd gen**, Node 22, TypeScript). Project: `cardiosurf-mvp`, region
 `us-central1`. Full design in [`docs/LEADERBOARDS.md`](../docs/LEADERBOARDS.md).
 
 | Export            | Kind                       | Purpose                                                        |
 | ----------------- | -------------------------- | -------------------------------------------------------------- |
-| `startRun`        | callable                   | Issue a single-use nonce for a cued run (≤ 30/day/uid)         |
-| `submitRun`       | callable                   | Replay + verify a finished run; write boards (≤ 12/day/uid)    |
+| `startRun`        | callable                   | Issue a single-use nonce pinned to the level's current chart (or none → provisional) and return the chart (≤ 30/day/uid) |
+| `submitRun`       | callable                   | Replay + verify a charted run, or plausibility-check a provisional one; write boards; store move samples (≤ 12/day/uid) |
+| `rebuildConsensusBeatmapsJob` | `onSchedule` every 30 min | Rebuild every level's consensus chart from stored move samples |
+| `rebuildConsensusBeatmaps` | callable (admin)  | Same, on demand (Profile → "Rebuild charts now", dev screen)   |
 | `reserveUsername` | callable                   | Claim a unique handle in a transaction, release the old one    |
 | `onUserDeleted`   | Auth `onDelete` (1st gen)  | Scrub boards, challenges, username, public profile             |
 | `reconcileGhosts` | `onSchedule` hourly        | Seed / phase out ghost runners on every board (`seed.ts`)      |
@@ -88,11 +90,46 @@ which also contains `leaderboards/*/entries` — those documents have **no**
 `expiresAt` field, so they are never deleted. TTL deletion is best-effort
 (typically within 24 h of expiry).
 
-## Publish beatmaps
+## Consensus charts (default path)
 
-`submitRun` only accepts runs on levels with a published beatmap in
-`beatmaps/{levelId}` whose `hash` matches the app's copy. Publish with the
-admin script (Application Default Credentials; never commit a key):
+Charts are derived from players' move samples — algorithm, thresholds and
+tuning in `docs/LEADERBOARDS.md` → "Consensus charts". Nothing to publish by
+hand: once a level has ≥ 3 stored runs the scheduled job (every 30 min)
+writes `beatmaps/{levelId}` and archives each revision under `versions/{v}`.
+Until then runs on that level are accepted as **provisional** (client score,
+plausibility-checked) so boards are live from day one.
+
+**Admin access** for the on-demand callable: an `admin` custom claim or an
+`admins/{uid}` document. Create the owner's doc once (find the uid under
+Authentication → Users, or `firebase auth:export /tmp/u.json --project cardiosurf-mvp`):
+
+```sh
+# Console: Firestore → Start collection `admins` → document id = <uid> → field `createdAt` (any value)
+# or REST with the owner's gcloud credentials:
+curl -X PATCH "https://firestore.googleapis.com/v1/projects/cardiosurf-mvp/databases/(default)/documents/admins/<uid>" \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" \
+  -d '{"fields":{"createdAt":{"integerValue":"'$(date +%s000)'"}}}'
+```
+
+Force a rebuild from the app (Profile → "Rebuild charts now (admin)" appears
+once the doc exists) or with a raw ID token:
+
+```sh
+curl -X POST https://us-central1-cardiosurf-mvp.cloudfunctions.net/rebuildConsensusBeatmaps \
+  -H "Authorization: Bearer $ID_TOKEN" -H "Content-Type: application/json" -d '{"data":{}}'
+```
+
+The reply lists every level as `not-enough-runs | no-consensus | unchanged |
+published | locked | error` with runs / cues / chartVersion.
+`firebase functions:log --only rebuildConsensusBeatmapsJob` shows the
+half-hourly summaries.
+
+## Publish a hand-tuned beatmap (optional)
+
+A chart authored on the dev screen can replace the consensus one. The script
+bumps `chartVersion`, archives the previous revision and sets `locked: true`
+so the consensus job leaves the level alone (Application Default Credentials;
+never commit a key):
 
 ```sh
 gcloud auth application-default login
@@ -103,8 +140,9 @@ node --import ./scripts/register-src-alias.mjs --experimental-strip-types \
   scripts/publish-beatmap.ts <levelId> --unpublish  # take a level off the boards
 ```
 
-Publish and ship the same JSON in the same release: a changed file changes the
-hash and older builds are rejected with `hash-mismatch` until they update.
+Clients pick the new chart up from Firestore (6 h cache, refreshed on level
+open) — no app release needed. Runs already in progress keep verifying against
+the version their nonce was issued for.
 
 ## Local emulator
 
@@ -155,4 +193,6 @@ firebase functions:log --only submitRun
 ```
 
 Rejections log `submitRun rejected {uid, runId, reason}`; the reason codes are
-listed in `docs/LEADERBOARDS.md`.
+listed in `docs/LEADERBOARDS.md`. Accepted runs log `{provisional,
+samplesStored}` so you can watch the sample pool grow before the first chart
+lands.

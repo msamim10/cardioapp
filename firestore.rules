@@ -77,8 +77,26 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if false;
     }
+    // Charts are Function-written (consensus rebuild). Archived revisions and
+    // the raw move samples that feed them are server-only.
     match /beatmaps/{levelId} {
       allow read: if signedIn();
+      allow write: if false;
+      match /versions/{chartVersion} {
+        allow read, write: if false;
+      }
+    }
+    match /moveSamples/{levelId} {
+      allow read, write: if false;
+      match /runs/{runId} {
+        allow read, write: if false;
+      }
+    }
+    // Presence of admins/{uid} grants the rebuild callable. The owner may read
+    // their own doc so the app can show the admin controls; writes are manual
+    // (Console / REST with owner credentials), never from the client.
+    match /admins/{uid} {
+      allow read: if isOwner(uid);
       allow write: if false;
     }
     match /usernames/{handle} {

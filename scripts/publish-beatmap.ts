@@ -62,7 +62,14 @@ if (unpublish) {
   await db.doc(`beatmaps/${levelId}`).set({ published: false, unpublishedAt: FieldValue.serverTimestamp() }, { merge: true });
   console.log(`Unpublished beatmaps/${levelId}`);
 } else {
-  await db.doc(`beatmaps/${levelId}`).set({
+  // A hand-authored chart supersedes the consensus one and is `locked` so the
+  // scheduled rebuild leaves it alone (delete the doc or clear `locked` to
+  // hand the level back to consensus). Every revision is archived under
+  // versions/{chartVersion} so runs started on the previous chart still verify.
+  const ref = db.doc(`beatmaps/${levelId}`);
+  const current = await ref.get();
+  const chartVersion = Number(current.data()?.chartVersion ?? 0) + 1;
+  const docData = {
     version: beatmap.version,
     levelId: beatmap.levelId,
     videoDurationSec: beatmap.videoDurationSec,
@@ -70,7 +77,15 @@ if (unpublish) {
     cues: beatmap.cues,
     hash,
     published: true,
+    source: 'manual',
+    locked: true,
+    chartVersion,
+    runCount: 0,
     publishedAt: FieldValue.serverTimestamp(),
-  });
-  console.log(`Published beatmaps/${levelId} (${beatmap.cues.length} cues, ${beatmap.videoDurationSec}s, hash ${hash}) to ${projectId}`);
+  };
+  const batch = db.batch();
+  batch.set(ref, docData);
+  batch.set(db.doc(`beatmaps/${levelId}/versions/${chartVersion}`), docData);
+  await batch.commit();
+  console.log(`Published beatmaps/${levelId} v${chartVersion} (${beatmap.cues.length} cues, ${beatmap.videoDurationSec}s, hash ${hash}) to ${projectId}`);
 }

@@ -4,7 +4,7 @@
   "description": "CardioSurf leaderboards: run verification, usernames, account cleanup (Cloud Functions 2nd gen)",
   "main": "lib/functions/src/index.js",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -18,7 +18,7 @@
     "firebase-functions": "^6.0.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.0.0",
     "typescript": "~5.9.2"
   }
 }
