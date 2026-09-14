@@ -126,7 +126,7 @@ intentionally not committed.)
 `firebase.json` also configures Hosting from `web/`:
 
 - `/.well-known/apple-app-site-association` → `web/aasa/apple-app-site-association`
-  (served as `application/json`). **Replace `TEAMID_TODO`** with the Apple
+  (served as `application/json`). The Apple Team ID is `WUW8GPQ5PT`; it is already set as the
   Team ID (App Store Connect → Membership, or `eas credentials`).
 - `/l/**` → `web/l/index.html` — OG tags + "Open in CardioSurf" + App Store
   link, and a JS hop to `cardiosurf://level/{id}?challenge={runId}`.

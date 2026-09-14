@@ -235,7 +235,7 @@ a native attestation module once a native build is in play.
    `node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/publish-beatmap.ts <levelId>`
    (needs `npm --prefix functions install` and ADC). Until at least one is
    published nothing can be submitted and boards stay empty.
-5. **Team ID**: replace `TEAMID_TODO` in `web/aasa/apple-app-site-association`
+5. **Team ID**: `WUW8GPQ5PT` is set in `web/aasa/apple-app-site-association`
    (App Store Connect → Membership).
 6. **Hosting**: `firebase deploy --only hosting` (serves the AASA and the
    `/l/*` fallback page). Add `web/og/beat-my-score.png` if you want a real OG
