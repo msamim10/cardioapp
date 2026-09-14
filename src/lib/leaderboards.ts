@@ -22,7 +22,8 @@ import {
 } from 'firebase/firestore';
 import { localDateKey } from '@shared/scoring/daily';
 import type { JudgeEvent } from '@shared/scoring/grading';
-import type { SubmitRunPayload } from '@shared/scoring/submission';
+import { PROVISIONAL_BEATMAP_HASH, type SubmitRunPayload } from '@shared/scoring/submission';
+import { adoptChart, refreshBeatmap } from './beatmapRegistry';
 import { isFirebaseConfigured } from './config';
 import { getFirebaseDb } from './firebase';
 import { CallableError, callFunction } from './functionsClient';
@@ -46,6 +47,10 @@ export type LeaderboardEntry = {
   classKey: string | null;
   level: number;
   playbackRate: number;
+  /** Scored with the free-move rules because the level had no chart at run start. */
+  provisional: boolean;
+  /** Chart revision the run was verified against; 0 for provisional entries. */
+  beatmapVersion: number;
 };
 
 export type ChallengeCard = {
@@ -78,6 +83,8 @@ function toEntry(id: string, data: Record<string, unknown>): LeaderboardEntry {
     classKey: str(data.classKey),
     level: Math.max(1, Math.round(num(data.level, 1))),
     playbackRate: num(data.playbackRate, 1),
+    provisional: data.provisional === true || num(data.beatmapVersion, 1) === 0,
+    beatmapVersion: Math.max(0, Math.round(num(data.beatmapVersion, data.provisional === true ? 0 : 1))),
   };
 }
 
@@ -89,18 +96,38 @@ function entries(board: 'leaderboards' | 'dailyLeaderboards', key: string) {
 // Submission
 // ---------------------------------------------------------------------------
 
+type StartRunReply = {
+  nonce: string;
+  issuedAt: number;
+  beatmapHash: string;
+  beatmapVersion: number;
+  beatmap: Record<string, unknown> | null;
+};
+
 /**
- * Ask the server for a single-use nonce before a cued run starts. Failure is
- * non-fatal: the run still records locally, it just cannot be submitted.
+ * Ask the server for a single-use nonce before a timed run starts. The reply
+ * also carries the chart the run must be scored against (or none → the run
+ * scores provisionally); it is adopted into the local chart mirror. Failure
+ * is non-fatal: the run still records locally, it just cannot be submitted.
  */
-export async function requestRunNonce(levelId: string, beatmapHash: string): Promise<RunNonce | null> {
+export async function requestRunNonce(levelId: string): Promise<RunNonce | null> {
   try {
-    const result = await callFunction<{ levelId: string; beatmapHash: string }, { nonce: string; issuedAt: number }>(
-      'startRun',
-      { levelId, beatmapHash },
-    );
+    const result = await callFunction<{ levelId: string }, StartRunReply>('startRun', { levelId });
     if (!result || typeof result.nonce !== 'string') return null;
-    return { nonce: result.nonce, issuedAt: num(result.issuedAt, Date.now()), beatmapHash };
+    const chart = adoptChart(levelId, result.beatmap && typeof result.beatmap === 'object' ? result.beatmap : null);
+    const beatmapHash =
+      typeof result.beatmapHash === 'string' && result.beatmapHash ? result.beatmapHash : PROVISIONAL_BEATMAP_HASH;
+    // The chart is only usable when the hash the nonce was issued for matches
+    // what we could parse; otherwise score provisionally and let the server
+    // decide (it will reject a mismatch rather than accept a wrong chart).
+    const usable = chart !== null && chart.hash === beatmapHash;
+    return {
+      nonce: result.nonce,
+      issuedAt: num(result.issuedAt, Date.now()),
+      beatmapHash,
+      beatmapVersion: usable ? Math.max(1, Math.round(num(result.beatmapVersion, chart.chartVersion))) : 0,
+      beatmap: usable ? chart.beatmap : null,
+    };
   } catch (error) {
     if (__DEV__) console.info('[leaderboards] startRun unavailable:', (error as Error).message);
     return null;
@@ -108,7 +135,15 @@ export async function requestRunNonce(levelId: string, beatmapHash: string): Pro
 }
 
 export type SubmitRunResult =
-  | { accepted: true; rank: number; dailyRank: number | null; improved: boolean; best: number }
+  | {
+      accepted: true;
+      rank: number;
+      dailyRank: number | null;
+      improved: boolean;
+      best: number;
+      provisional?: boolean;
+      beatmapVersion?: number;
+    }
   | { accepted: false; reason: string; detail?: string };
 
 export type SubmitOutcome =
@@ -141,7 +176,9 @@ export async function submitRunIfEligible(input: {
     runId: material.runId,
     levelId: material.levelId,
     beatmapHash: material.beatmapHash,
+    beatmapVersion: material.beatmapVersion,
     classKey: input.classKey,
+    intensity: material.intensity,
     playbackRate: material.playbackRate,
     targetSeconds: material.targetSeconds,
     elapsedSeconds: material.elapsedSeconds,
@@ -155,6 +192,9 @@ export async function submitRunIfEligible(input: {
     recorded: input.recorded,
     appVersion: input.appVersion,
     dateKey: localDateKey(new Date(input.completedAt)),
+    moveCount: material.moveCount,
+    samples: material.samples,
+    naturalPlaySec: material.naturalPlaySec,
   };
   try {
     const result = await callFunction<SubmitRunPayload, SubmitRunResult>('submitRun', payload);
@@ -295,4 +335,52 @@ export function rankRows(rows: readonly LeaderboardEntry[]): (LeaderboardEntry &
 
 export function displayHandle(entry: { username: string | null; uid: string }): string {
   return entry.username ? `@${entry.username}` : `runner-${entry.uid.slice(0, 4)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Admin: consensus chart rebuild
+// ---------------------------------------------------------------------------
+
+/** Whether this uid may force a chart rebuild (`admins/{uid}` exists; owner-readable). */
+export async function fetchIsAdmin(uid: string | null): Promise<boolean> {
+  if (!uid) return false;
+  return safely(false, async () => {
+    const snapshot = await getDoc(doc(getFirebaseDb(), 'admins', uid));
+    return snapshot.exists();
+  });
+}
+
+export type ChartRebuildSummary = {
+  levelId: string;
+  status: 'not-enough-runs' | 'no-consensus' | 'unchanged' | 'published' | 'locked' | 'error';
+  runs: number;
+  cues: number;
+  chartVersion: number | null;
+  detail?: string;
+};
+
+/** Admin-only callable: rebuild every level's consensus chart now. Throws `CallableError`. */
+export async function rebuildChartsNow(): Promise<ChartRebuildSummary[]> {
+  const result = await callFunction<Record<string, never>, { levels: ChartRebuildSummary[] }>(
+    'rebuildConsensusBeatmaps',
+    {},
+  );
+  const levels = Array.isArray(result?.levels) ? result.levels : [];
+  // Published charts should take effect on this device immediately.
+  await Promise.all(
+    levels.filter((entry) => entry.status === 'published').map((entry) => refreshBeatmap(entry.levelId, { force: true })),
+  );
+  return levels;
+}
+
+/** One line per level for the admin alert after a rebuild. */
+export function describeChartRebuild(levels: ChartRebuildSummary[]): string {
+  if (levels.length === 0) return 'No levels processed.';
+  return levels
+    .map((entry) => {
+      const version = entry.chartVersion ? ` v${entry.chartVersion}` : '';
+      const detail = entry.detail ? ` (${entry.detail})` : '';
+      return `${entry.levelId}: ${entry.status}${version} · ${entry.runs} runs · ${entry.cues} cues${detail}`;
+    })
+    .join('\n');
 }

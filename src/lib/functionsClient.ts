@@ -17,6 +17,7 @@ export type CallableErrorCode =
   | 'unauthenticated'
   | 'invalid-argument'
   | 'failed-precondition'
+  | 'permission-denied'
   | 'resource-exhausted'
   | 'unavailable'
   | 'internal'
@@ -38,6 +39,7 @@ function toCallableError(error: unknown): CallableError {
     'unauthenticated',
     'invalid-argument',
     'failed-precondition',
+    'permission-denied',
     'resource-exhausted',
     'unavailable',
     'internal',

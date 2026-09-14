@@ -232,6 +232,23 @@ export class RunClock {
   }
 
   /**
+   * Best estimate of the POSITION inside the video right now (seconds into
+   * the current pass), i.e. the last tick's position plus the same capped
+   * extrapolation `videoTimeSec` applies, wrapped when a looping source runs
+   * past its end between ticks. This is what move samples for consensus
+   * charts are stamped with — the loop index is irrelevant to a chart.
+   */
+  videoPositionSec(now = Date.now()): number {
+    let position = this.lastPosition;
+    if (this.isAdvancing() && this.lastTickAt) {
+      const sinceTick = Math.max(0, (now - this.lastTickAt) / 1000) * this.rate;
+      position += Math.min(MAX_EXTRAPOLATION_S, sinceTick);
+    }
+    if (this.loop && this.length > 0 && position >= this.length) position -= this.length;
+    return Math.max(0, position);
+  }
+
+  /**
    * Wall-clock seconds the run has lasted (rate divided out); same math as
    * `wallClockElapsed` in playSetup.ts, kept dependency-free for the replay.
    */

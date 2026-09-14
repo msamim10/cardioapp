@@ -11,7 +11,7 @@ import {
 } from 'react';
 import { logRunComplete } from '@/lib/analytics';
 import { useAuth } from '@/lib/AuthContext';
-import { hasBeatmap } from '@/lib/beatmapRegistry';
+import { hasMatureBeatmap, useBeatmapCacheVersion } from '@/lib/beatmapRegistry';
 import { getDailyChallenge, isDailyChallengeCompleted } from '@/lib/dailyRecommendations';
 import { readCloudProgress, syncCloudProgress } from '@/lib/firestoreSync';
 import { modes } from '@/lib/gameData';
@@ -641,7 +641,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       // designated level (casual or campaign). Later same-day runs on it, and
       // every other level, pay the plain performance-scaled reward.
       const completedAt = Date.now();
-      const challenge = getDailyChallenge(modes, new Date(completedAt), hasBeatmap);
+      const challenge = getDailyChallenge(modes, new Date(completedAt));
       const isDailyChallengeRun =
         challenge !== null &&
         challenge.mode.id === pending.levelId &&
@@ -762,6 +762,10 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Recompute campaign gates when a chart arrives or matures: the gate's
+  // `hasBeatmap` predicate reads the chart mirror, whose state lives outside
+  // React, so the mirror's version is threaded through as the memo input.
+  const chartVersion = useBeatmapCacheVersion();
   const derived = useMemo(() => {
     const lifetime = aggregateLifetime(runs);
     const totalRuns = lifetime.runs;
@@ -779,9 +783,13 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
     const safeRosters: ClassRosters = rosters ?? { beginner: [], intermediate: [], hard: [] };
 
-    // Campaign gates read the EFFECTIVE level (floor applied) and the live
-    // beatmap registry — levels without a beatmap auto-pass the skill gate.
-    const gate = { playerLevel: levelProgress.level, hasBeatmap };
+    // Campaign gates read the EFFECTIVE level (floor applied) and the chart
+    // mirror — levels without a MATURE chart (authored, or consensus from
+    // enough runs) auto-pass the skill gate; early charts are rough by design.
+    const gate = {
+      playerLevel: levelProgress.level,
+      hasBeatmap: (levelId: string) => chartVersion >= 0 && hasMatureBeatmap(levelId),
+    };
     const classDataMap = {} as Record<ClassKey, ClassData>;
     for (const key of CLASS_ORDER) {
       classDataMap[key] = buildClassData(key, safeRosters[key], runs, gate);
@@ -802,7 +810,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       completedLevelIds,
       classDataMap,
     };
-  }, [runs, rosters, legacyLevelFloor]);
+  }, [runs, rosters, legacyLevelFloor, chartVersion]);
 
   const weeklyGoal = answers.daysPerWeek ?? DEFAULT_WEEKLY_GOAL;
 
