@@ -1,5 +1,6 @@
 /**
- * Calibration state machine (preflight screen): a 3-second hold.
+ * Calibration state machine (preflight screen): a 3-second hold, then the
+ * four moves once each.
  *
  * Pure reducer so `scripts/replay-preflight-flow.ts` can drive it with
  * synthetic frames. It sits ON TOP of `PoseAnalyzer`: the analyzer keeps its
@@ -14,19 +15,28 @@
  *               Legs are optional.
  *   hold        Framing is ok: a HOLD_MS ring fills while the user stands
  *               still. Moving, drifting out of frame or losing the body
- *               restarts the ring. When the ring is full AND the analyzer has
- *               its baseline the flow completes on its own — no tap.
+ *               restarts the ring. When the ring is full (and the analyzer
+ *               has its baseline, or the lock grace ran out) → `moves`.
+ *   moves       JUMP · DUCK · LEFT · RIGHT, one at a time, MOVE_WINDOW_MS
+ *               each. A move passes on detection of that move, on ANY
+ *               detected move or significant body motion (`bodyMotion.ts`;
+ *               the user is clearly moving), or when the window ends — it
+ *               cannot fail and is never retried. Every pass
+ *               shows a ✓ for at least MOVE_LANDED_MS; the next prompt never
+ *               starts sooner than MOVE_WINDOW_MS after the previous one so
+ *               each spoken prompt clears the speech gate. Framing and
+ *               tracking loss are ignored here.
  *   complete    Route out. `outcome` says how the run should start.
  *   unavailable No detector / camera error; explicit "continue without" only.
  *
- * Happy path ≈ 2 s walking in + 3 s hold. There is no move test drive any
- * more: the first two runs open with an in-run warm-up instead (workout.tsx).
+ * Happy path ≈ 2 s walking in + 3 s hold + 10–12 s of moves. The first two
+ * runs still open with the in-run warm-up (workout.tsx); that is untouched.
  */
 
 import type { Move, TrackingStatus } from '@/lib/poseTracking';
 import type { FramingVerdict } from '@/lib/skeletonFraming';
 
-export type PreflightFlowPhase = 'permission' | 'framing' | 'hold' | 'complete' | 'unavailable';
+export type PreflightFlowPhase = 'permission' | 'framing' | 'hold' | 'moves' | 'complete' | 'unavailable';
 
 /**
  * How the run starts once the flow completes.
@@ -49,6 +59,38 @@ export const FRAMING_DEBOUNCE_MS = 400;
 /** First-run end card duration before routing on. */
 export const END_CARD_MS = 1_200;
 
+/** The four moves, once each, in this order. */
+export const MOVE_ORDER: readonly Move[] = ['Jump', 'Duck', 'Left', 'Right'];
+/**
+ * How long each move prompt is up before it passes on its own. Equal to the
+ * speech gate's minimum gap (`SPEECH_MIN_GAP_MS`), so consecutive prompts are
+ * always spoken.
+ */
+export const MOVE_WINDOW_MS = 2_500;
+/** Minimum time the ✓ stays up after a pass before the next prompt. */
+export const MOVE_LANDED_MS = 600;
+/** Everything the move phase can add: four windows, each with a ✓ tail. */
+export const MOVES_MAX_MS = MOVE_ORDER.length * (MOVE_WINDOW_MS + MOVE_LANDED_MS);
+
+/** Oversized prompt word per move. */
+export const MOVE_WORD: Record<Move, string> = {
+  Jump: 'JUMP',
+  Duck: 'DUCK',
+  Left: 'LEFT',
+  Right: 'RIGHT',
+};
+
+/** Spoken line per move. */
+export const MOVE_SPOKEN: Record<Move, string> = {
+  Jump: 'Jump!',
+  Duck: 'Duck!',
+  Left: 'Left!',
+  Right: 'Right!',
+};
+
+/** Why the current move passed. `auto` = the window ended (never a failure). */
+export type MovePass = 'detected' | 'motion' | 'auto';
+
 export type PreflightFlowState = {
   phase: PreflightFlowPhase;
   firstRun: boolean;
@@ -67,6 +109,15 @@ export type PreflightFlowState = {
   holdStartedAt: number | null;
   /** How many times the ring restarted in this cycle (feedback / analytics). */
   holdRestarts: number;
+  /** Index into MOVE_ORDER while in `moves`; MOVE_ORDER.length once all passed. */
+  moveIndex: number;
+  /** When the current move's window opened; null outside `moves`. */
+  moveWindowStartedAt: number | null;
+  /** When the current move passed (✓ showing); null while the prompt is up. */
+  movePassedAt: number | null;
+  movePassedBy: MovePass | null;
+  /** How each move passed, in MOVE_ORDER (analytics / dev timer). */
+  movePasses: MovePass[];
   outcome: PreflightOutcome | null;
 };
 
@@ -78,6 +129,11 @@ export type PreflightFlowEvent =
       framing: FramingVerdict;
       status: TrackingStatus;
       move: Move | null;
+      /**
+       * The body clearly moved since the last frames (`bodyMotion.ts`), even
+       * if no classifier fired. Only read during `moves`.
+       */
+      motion?: boolean;
     }
   /** Native detector reports no body (no frames arrive while this holds). */
   | { type: 'TRACKING_LOST'; now: number }
@@ -109,11 +165,16 @@ export function createPreflightFlowState(options: {
     trackingLost: false,
     holdStartedAt: null,
     holdRestarts: 0,
+    moveIndex: 0,
+    moveWindowStartedAt: null,
+    movePassedAt: null,
+    movePassedBy: null,
+    movePasses: [],
     outcome: null,
   };
 }
 
-export const ACTIVE_PHASES: readonly PreflightFlowPhase[] = ['framing', 'hold'];
+export const ACTIVE_PHASES: readonly PreflightFlowPhase[] = ['framing', 'hold', 'moves'];
 
 /** The camera should be live and frames should reach the analyzer. */
 export function isCameraPhase(phase: PreflightFlowPhase): boolean {
@@ -124,6 +185,24 @@ export function isCameraPhase(phase: PreflightFlowPhase): boolean {
 export function holdProgress(state: PreflightFlowState, now: number): number {
   if (state.phase !== 'hold' || state.holdStartedAt === null) return 0;
   return Math.max(0, Math.min(1, (now - state.holdStartedAt) / HOLD_MS));
+}
+
+/** The move being prompted (or just passed), or null outside `moves`. */
+export function currentMove(state: PreflightFlowState): Move | null {
+  if (state.phase !== 'moves') return null;
+  return MOVE_ORDER[state.moveIndex] ?? null;
+}
+
+/** The current move has passed and its ✓ is showing. */
+export function moveLanded(state: PreflightFlowState): boolean {
+  return state.phase === 'moves' && state.movePassedAt !== null;
+}
+
+/** Fraction of the current move's window elapsed, 0..1 (1 once passed). */
+export function moveWindowProgress(state: PreflightFlowState, now: number): number {
+  if (state.phase !== 'moves' || state.moveWindowStartedAt === null) return 0;
+  if (state.movePassedAt !== null) return 1;
+  return Math.max(0, Math.min(1, (now - state.moveWindowStartedAt) / MOVE_WINDOW_MS));
 }
 
 function enterFraming(state: PreflightFlowState, now: number): PreflightFlowState {
@@ -138,6 +217,11 @@ function enterFraming(state: PreflightFlowState, now: number): PreflightFlowStat
     trackingLost: false,
     holdStartedAt: null,
     holdRestarts: 0,
+    moveIndex: 0,
+    moveWindowStartedAt: null,
+    movePassedAt: null,
+    movePassedBy: null,
+    movePasses: [],
   };
 }
 
@@ -145,12 +229,65 @@ function enterHold(state: PreflightFlowState, now: number): PreflightFlowState {
   return { ...state, phase: 'hold', phaseStartedAt: now, holdStartedAt: now, trackingLost: false };
 }
 
+function enterMoves(state: PreflightFlowState, now: number): PreflightFlowState {
+  return {
+    ...state,
+    phase: 'moves',
+    phaseStartedAt: now,
+    holdStartedAt: null,
+    moveIndex: 0,
+    moveWindowStartedAt: now,
+    movePassedAt: null,
+    movePassedBy: null,
+    movePasses: [],
+  };
+}
+
 function complete(
   state: PreflightFlowState,
   now: number,
   outcome: PreflightOutcome,
 ): PreflightFlowState {
-  return { ...state, phase: 'complete', phaseStartedAt: now, outcome, holdStartedAt: null };
+  return {
+    ...state,
+    phase: 'complete',
+    phaseStartedAt: now,
+    outcome,
+    holdStartedAt: null,
+    moveWindowStartedAt: null,
+    movePassedAt: null,
+  };
+}
+
+/** How the run starts given what the analyzer managed: a baseline or not. */
+function cameraOutcome(state: PreflightFlowState): PreflightOutcome {
+  return state.calibrated ? 'calibrated' : 'defaults';
+}
+
+/** Mark the current move passed (idempotent while its ✓ is up). */
+function passMove(state: PreflightFlowState, now: number, by: MovePass): PreflightFlowState {
+  if (state.phase !== 'moves' || state.movePassedAt !== null) return state;
+  return { ...state, movePassedAt: now, movePassedBy: by, movePasses: [...state.movePasses, by] };
+}
+
+/**
+ * Clock for the move phase: auto-pass when the window ends; once the ✓ has
+ * been up for MOVE_LANDED_MS AND the window has run its course, open the next
+ * prompt — or complete after the last one.
+ */
+function settleMoves(state: PreflightFlowState, now: number): PreflightFlowState {
+  if (state.phase !== 'moves' || state.moveWindowStartedAt === null) return state;
+  let next = state;
+  const windowEnd = next.moveWindowStartedAt! + MOVE_WINDOW_MS;
+  if (next.movePassedAt === null) {
+    if (now < windowEnd) return next;
+    next = passMove(next, now, 'auto');
+  }
+  const slotEnd = Math.max(windowEnd, next.movePassedAt! + MOVE_LANDED_MS);
+  if (now < slotEnd) return next;
+  const moveIndex = next.moveIndex + 1;
+  if (moveIndex >= MOVE_ORDER.length) return complete({ ...next, moveIndex }, now, cameraOutcome(next));
+  return { ...next, moveIndex, moveWindowStartedAt: now, movePassedAt: null, movePassedBy: null };
 }
 
 /** Debounce: a new verdict must persist FRAMING_DEBOUNCE_MS before it shows. */
@@ -171,13 +308,15 @@ function applyFraming(
   return state;
 }
 
-/** Ring full: lock → calibrated; no lock after the grace → defaults. */
+/**
+ * Ring full: lock → on to the moves; no lock after the grace → on to the
+ * moves anyway (the run will calibrate live; the prompts auto-pass).
+ */
 function settleHold(state: PreflightFlowState, now: number): PreflightFlowState {
   if (state.phase !== 'hold' || state.holdStartedAt === null) return state;
   const held = now - state.holdStartedAt;
   if (held < HOLD_MS) return state;
-  if (state.calibrated) return complete(state, now, 'calibrated');
-  if (held >= HOLD_MS + HOLD_LOCK_GRACE_MS) return complete(state, now, 'defaults');
+  if (state.calibrated || held >= HOLD_MS + HOLD_LOCK_GRACE_MS) return enterMoves(state, now);
   return state;
 }
 
@@ -221,10 +360,12 @@ export function reducePreflightFlow(
       return complete(state, event.now, 'off');
 
     case 'TICK':
-      return settleHold(state, event.now);
+      return state.phase === 'moves' ? settleMoves(state, event.now) : settleHold(state, event.now);
 
     case 'TRACKING_LOST': {
       if (!isCameraPhase(state.phase)) return state;
+      // The move check never fails: losing the body just lets the window run out.
+      if (state.phase === 'moves') return settleMoves({ ...state, trackingLost: true }, event.now);
       const next = applyFraming({ ...state, trackingLost: true }, 'searching', event.now);
       if (next.phase === 'hold' && next.framing !== 'ok') return dropHold(next, event.now);
       return next;
@@ -235,7 +376,7 @@ export function reducePreflightFlow(
 
     case 'SKIP':
       if (!isCameraPhase(state.phase)) return state;
-      return complete(state, event.now, state.calibrated ? 'calibrated' : 'defaults');
+      return complete(state, event.now, cameraOutcome(state));
   }
 }
 
@@ -244,10 +385,21 @@ function reduceFrame(
   event: Extract<PreflightFlowEvent, { type: 'FRAME' }>,
 ): PreflightFlowState {
   if (!isCameraPhase(state.phase)) return state;
-  const { now, status, move } = event;
+  const { now, status, move, motion } = event;
   const trackingLost = status === 'searching' || status === 'reconnecting';
   const calibrated =
     status === 'tracking' ? true : status === 'calibrating' ? false : state.calibrated;
+
+  if (state.phase === 'moves') {
+    // Framing is not judged here. The prompted move passes the current
+    // prompt ("detected"); any other classified move, or significant body
+    // motion the classifiers did not name, passes it too ("motion").
+    let next: PreflightFlowState = { ...state, trackingLost, calibrated };
+    if (move) next = passMove(next, now, move === currentMove(next) ? 'detected' : 'motion');
+    else if (motion) next = passMove(next, now, 'motion');
+    return settleMoves(next, now);
+  }
+
   let next: PreflightFlowState = applyFraming({ ...state, trackingLost, calibrated }, event.framing, now);
 
   switch (state.phase) {
@@ -292,6 +444,10 @@ export function spokenPrompt(state: PreflightFlowState): string | null {
       }
     case 'hold':
       return 'Perfect, hold still';
+    case 'moves': {
+      const move = currentMove(state);
+      return move ? MOVE_SPOKEN[move] : null;
+    }
     case 'complete':
       return state.outcome === 'off' ? null : "You're set";
     default:

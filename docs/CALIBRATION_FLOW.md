@@ -1,15 +1,20 @@
 # Calibration flow (preflight)
 
-Calibration is a **three-second hold, upper body only, once per session**.
-`src/app/preflight.tsx` runs a far-mode coach on top of the unchanged
-`PoseAnalyzer` (`poseTracking.ts`: 20-stable-frame baseline, cooldown/rearm,
-move classifiers, snapshot handoff via `trackingSession.ts`). The screen owns
-no calibration math. Its state machine is the pure reducer in
-`src/lib/preflightFlow.ts` (replay: `npm run test:preflight-flow`); framing
-coaching comes from the read-only helper `src/lib/skeletonFraming.ts`; the
-once-per-session and warm-up decisions are the pure helpers in
-`src/lib/calibrationSession.ts`; spoken-prompt rate limiting is the pure
-`src/lib/speechGate.ts`.
+Calibration is a **three-second hold, then the four moves once each, upper
+body only, once per session**. `src/app/preflight.tsx` runs a far-mode coach
+on top of the unchanged `PoseAnalyzer` (`poseTracking.ts`: 20-stable-frame
+baseline, cooldown/rearm, move classifiers, snapshot handoff via
+`trackingSession.ts`). The screen owns no calibration math. Its state machine
+is the pure reducer in `src/lib/preflightFlow.ts` (replay: `npm run
+test:preflight-flow`); framing coaching comes from the read-only helper
+`src/lib/skeletonFraming.ts`; the "clearly moving" signal of the move check
+from the read-only `src/lib/bodyMotion.ts`; the once-per-session and warm-up
+decisions are the pure helpers in `src/lib/calibrationSession.ts`;
+spoken-prompt rate limiting is the pure `src/lib/speechGate.ts`.
+
+No silhouette or body outline is drawn over the camera at any point: the one
+big word + arrow (and, during the move check, the move word + arrow) are the
+whole instruction.
 
 Legs are optional throughout. The analyzer's baseline needs shoulders + hips
 (`PoseAnalyzer` never required ankles: `ankleY` is nullable and body height
@@ -24,29 +29,35 @@ touched.
 | Phase (`preflightFlow`) | What the user sees | Leaves when |
 | --- | --- | --- |
 | `permission` (Screen 1) | "Your body is the controller." + animated skeleton (`CalibrationIntroFigure`), tip "Head to hips in frame is all it needs. Legs are optional.", **Turn on camera**. | Permission granted (CTA, or auto on repeat runs that already have it). |
-| `framing` | Live camera, upper-body `BodyOutline` (anchored top, legs may run off the bottom), and `FramingCoach`: ONE word ≥ 72 pt — **Step in / Closer / Step back / Center up** — with a big arrow (↑ closer, ↓ back, ↔ center). | Debounced framing verdict is `ok` (head + shoulders + hips inside the frame). |
-| `hold` | Word becomes **Hold still**; a 3 s `HoldRing` fills around a countdown digit. | Ring full (`HOLD_MS`) **and** analyzer `tracking` → `complete` with `outcome: 'calibrated'`. Auto-advance, no tap. |
+| `framing` | Live camera and `FramingCoach`: ONE word ≥ 72 pt — **Step in / Closer / Step back / Center up** — with a big arrow (↑ closer, ↓ back, ↔ center). No outline. | Debounced framing verdict is `ok` (head + shoulders + hips inside the frame). |
+| `hold` | Word becomes **Hold still**; a 3 s `HoldRing` fills around a countdown digit. | Ring full (`HOLD_MS`) **and** analyzer `tracking` → `moves`. No lock after `HOLD_LOCK_GRACE_MS` → `moves` anyway. Auto-advance, no tap. |
+| `moves` | `MovePromptCoach`: **JUMP → DUCK → LEFT → RIGHT**, one at a time, the word at ≥ 96 pt with an oversized arrow (↑ ↓ ← →), four progress dots, each spoken through the voice gate. A prompt passes on the classified move (`detected`), on any other classified move or significant body motion (`motion`), or on its own when its `MOVE_WINDOW_MS` window ends (`auto`). Every pass flashes **JUMP ✓** in the accent with the success haptic/sound. It can never fail and is never retried. | Fourth move passed and its ✓ shown → `complete` with `'calibrated'` if the analyzer has a baseline, else `'defaults'`. |
 | `complete` | First run: end card "You're set." with a burst for `END_CARD_MS`, then `first-run-ready`. Repeat: straight into `/workout`. | — |
 | `unavailable` | "Camera tracking is off" card: Try again / Open Settings, **Continue without camera**. | Retry or continue. |
 
-Happy path ≈ 2 s walking in + 3 s hold. There is no move test drive on this
-screen any more (see Warm-up below). A small **Skip** sits at the bottom of
-the camera phases for accessibility: `outcome: 'calibrated'` if the analyzer
-already has its baseline, else `'defaults'`.
+Happy path ≈ 2 s walking in + 3 s hold + 10–12 s of moves (four 2.5 s
+windows; a ✓ tail of `MOVE_LANDED_MS` only when a pass lands late). The move
+check is a guided warm-up of the controls, not a test: it does not gate
+anything, and the in-run warm-up (below) is unchanged. A small **Skip** sits
+at the bottom of every camera phase for accessibility: `outcome:
+'calibrated'` if the analyzer already has its baseline, else `'defaults'`.
 
 Feedback: a tick haptic + sound when framing locks (`hold` entered), the
-success cue + `ParticleBurst` when the hold completes, the same guarded
-`expo-haptics` / `expo-audio` path as before (ambient category, so the silent
-switch is respected).
+success cue on every move ✓, the success cue + `ParticleBurst` when the flow
+completes with a baseline, the same guarded `expo-haptics` / `expo-audio` path
+as before (ambient category, so the silent switch is respected).
 
 ### Spoken prompts
 
 `src/lib/voicePrompts.ts` wraps `expo-speech` (probed with
 `requireOptionalNativeModule('ExpoSpeech')`; **requires a native build**).
 `spokenPrompt(state)` picks the line — "Step into frame", "Step back", "Come
-closer", "Center up", "Perfect, hold still", "You're set" — and `speechGate`
-enforces `SPEECH_MIN_GAP_MS = 2500` between utterances and never repeats the
-same line back to back. The ringer switch is not detectable from JS, so a
+closer", "Center up", "Perfect, hold still", "Jump!", "Duck!", "Left!",
+"Right!", "You're set" — and `speechGate` enforces `SPEECH_MIN_GAP_MS = 2500`
+between utterances and never repeats the same line back to back.
+`MOVE_WINDOW_MS` equals that gap and the next prompt never opens sooner than
+one window after the previous one, so all four move prompts and the sign-off
+are always spoken (asserted by the replay). The ringer switch is not detectable from JS, so a
 speaker toggle on the screen (and "Spoken prompts" in Profile → Tracking)
 persists `PlaySetup.voicePrompts` (default on).
 
@@ -68,10 +79,26 @@ persists `PlaySetup.voicePrompts` (default on).
   tracking loss restarts the ring (`holdRestarts`); a non-`ok` verdict drops
   back to `framing`.
 - `HOLD_LOCK_GRACE_MS = 2500`: ring full but the analyzer has not locked
-  (swaying, low light) → keep "Hold still" this much longer, then complete on
-  `'defaults'` so nobody is trapped on the screen.
+  (swaying, low light) → keep "Hold still" this much longer, then go on to the
+  move check anyway so nobody is trapped on the screen (a lock that arrives
+  during the moves still counts; otherwise the run starts on `'defaults'`).
 - `bodyVisible(frame)` (used by the in-run gate): verdict ≠ `searching` and
   no clipped core joint.
+
+### Move check
+
+- `MOVE_ORDER = Jump, Duck, Left, Right`; `MOVE_WINDOW_MS = 2500` per prompt;
+  `MOVE_LANDED_MS = 600` minimum ✓ time; `MOVES_MAX_MS = 4 × 3100 = 12 400`
+  worst case (nobody moves at all), `4 × 2500 = 10 000` best case.
+- Pass reasons (`movePasses`, in order): `detected` — the analyzer classified
+  the prompted move; `motion` — it classified a different move, **or**
+  `bodyMotion.ts` saw the body centre (shoulder/hip centre) travel
+  `MOTION_MIN_TORSO_FRACTION = 0.25` torso lengths within
+  `MOTION_WINDOW_MS = 500` (a half-hearted duck or shuffle that the cooled-down
+  classifiers ignore still counts as trying); `auto` — the window ended.
+- Framing verdicts and tracking loss are ignored during the move check: the
+  ring is gone and nothing drops back to `framing`. The clock alone finishes
+  the phase even if the body never comes back.
 
 ## Once per session
 
@@ -80,8 +107,8 @@ A successful hold stores `PlaySetup.calibrationBaseline`
 `hasFreshCalibration(baseline, now)` is true while
 `now − capturedAt < CALIBRATION_SESSION_MS` (12 h).
 
-- **Fresh baseline** → `preflight.tsx` renders nothing and routes straight to
-  `/workout` with `framingCheck=1` (the level brief, challenge deep links and
+- **Fresh baseline** → `preflight.tsx` renders nothing (no hold, no move
+  check) and routes straight to `/workout` with `framingCheck=1` (the level brief, challenge deep links and
   the paywall return all still go through `/preflight`, so every entry point
   gets the skip). No handoff snapshot: the run's analyzer re-acquires the
   baseline from its first frames, as the `defaults` outcome always did.
@@ -125,8 +152,9 @@ finishes). `WarmupOverlay` shows the move in ≥ 96 pt with an arrow and flashes
 | --- | --- | --- |
 | Permission denied (Screen 1) | "Camera access is off — open Settings" + "Continue without camera" | `off`: run launches with `tracking: 'off'` (first run: `saveFirstRunTrackingOff(true)`). |
 | Detector unavailable (simulator, Android, old build, camera error) | `unavailable` card | `off` as above. |
-| Ring full, analyzer never locks (`HOLD_LOCK_GRACE_MS`) | "Hold still" stays up, then routes | `defaults`: no snapshot is staged, run launches with `tracking: 'calibrated'` and calibrates live. |
-| Skip tapped | — | `calibrated` if the baseline exists, else `defaults`. |
+| Ring full, analyzer never locks (`HOLD_LOCK_GRACE_MS`) | "Hold still" stays up, then the move check runs (prompts auto-pass) | `defaults`: no snapshot is staged, run launches with `tracking: 'calibrated'` and calibrates live. |
+| Move not performed / body out of frame during the move check | Prompt stays up until its window ends, then ✓ | Never a fail or retry; the next prompt (or completion) follows. |
+| Skip tapped (any camera phase, including the move check) | — | `calibrated` if the baseline exists, else `defaults`. |
 | Snapshot staging fails after the hold | `unavailable` card | Retry or continue without camera. |
 | In-run gate never sees the body | Coach inline, "Start anyway" after 8 s | Run starts; analyzer calibrates live. |
 
@@ -143,4 +171,6 @@ Unchanged semantics through the facade (`analytics.ts`, every call wrapped in
   same moment.
 - `logCalibrationFailure(reason)` on `unavailable` or on the `defaults`
   outcome, with the reason derived from the last frame.
-- `calibration_move_skipped` is no longer emitted (there are no move trials).
+- `calibration_move_skipped` is not emitted: the move check has no skip per
+  move and no fail state (`movePasses` is available on the flow state for the
+  dev timer only).

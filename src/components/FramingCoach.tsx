@@ -1,6 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { StyleSheet, Text, View } from 'react-native';
-import { BodyOutline } from '@/components/BodyOutline';
 import { withAlpha } from '@/lib/hudThemes';
 import { FRAMING_MESSAGE, FRAMING_WORD, type FramingVerdict } from '@/lib/skeletonFraming';
 import { colors, font, spacing } from '@/theme';
@@ -9,7 +8,9 @@ import { colors, font, spacing } from '@/theme';
  * Far-mode framing UI: the user is across the room, so everything here is
  * legible from three metres — ONE word at ≥ 72 pt, one oversized arrow, and
  * during the hold a ring that fills over three seconds. Shared by the
- * preflight screen and the in-run framing check / re-center overlay.
+ * preflight screen and the in-run framing check / re-center overlay. No
+ * silhouette or body outline is drawn over the camera: the word + arrow are
+ * the whole instruction.
  *
  * Built from plain Views (no SVG dependency): the ring is a circle of tick
  * marks, the same construction as `PlanRingGauge`.
@@ -32,7 +33,6 @@ export function FramingCoach({
   holding,
   progress,
   accent,
-  outline = true,
   /** Optional line under the big word (e.g. "Legs don't need to be in frame"). */
   hint,
 }: {
@@ -42,7 +42,6 @@ export function FramingCoach({
   /** Ring fill 0..1 while holding. */
   progress: number;
   accent: string;
-  outline?: boolean;
   hint?: string | null;
 }) {
   const word = holding ? FRAMING_WORD.ok : FRAMING_WORD[verdict];
@@ -62,7 +61,6 @@ export function FramingCoach({
           : `${FRAMING_MESSAGE[verdict]}. Head, shoulders and hips in frame. Legs do not need to be visible.`
       }
     >
-      {outline ? <BodyOutline verdict={holding ? 'ok' : verdict} upperBody /> : null}
       <View style={styles.stack}>
         {holding ? (
           <HoldRing progress={progress} accent={accent} />

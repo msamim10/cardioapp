@@ -20,6 +20,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CalibrationIntroFigure } from '@/components/CalibrationIntroFigure';
 import { FramingCoach } from '@/components/FramingCoach';
+import { MovePromptCoach } from '@/components/MovePromptCoach';
 import { ParticleBurst } from '@/components/ParticleBurst';
 import { TvSetupGuide } from '@/components/TvSetupGuide';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
@@ -28,6 +29,7 @@ import {
   logCalibrationFailure,
   logCalibrationSuccess,
 } from '@/lib/analytics';
+import { bodyCentre, pushMotionSample, significantMotion, type BodyCentreSample } from '@/lib/bodyMotion';
 import { createCalibrationSounds, playHaptic, type FeedbackCue } from '@/lib/calibrationFeedback';
 import { proportionsFromBaseline, recordCalibrationComplete } from '@/lib/calibrationProfile';
 import { useExternalDisplay } from '@/lib/externalDisplay';
@@ -54,10 +56,12 @@ import {
 } from '@/lib/poseTracking';
 import {
   createPreflightFlowState,
+  currentMove,
   END_CARD_MS,
   flowElapsedSeconds,
   holdProgress,
   isCameraPhase,
+  moveLanded,
   type PreflightFlowEvent,
   type PreflightOutcome,
   reducePreflightFlow,
@@ -100,11 +104,13 @@ function deriveCalibrationFailureReason(frame: PoseFrame | null): CalibrationFai
 }
 
 /**
- * Calibration: a three-second hold. Screen 1 ("Your body is the controller.")
- * asks for the camera; then the far-mode coach of `preflightFlow.ts` runs on
- * top of the untouched `PoseAnalyzer`: one big word until head + shoulders +
- * hips are in frame, a ring while the user holds still, auto-advance. See
- * docs/CALIBRATION_FLOW.md.
+ * Calibration: a three-second hold, then the four moves once each. Screen 1
+ * ("Your body is the controller.") asks for the camera; then the far-mode
+ * coach of `preflightFlow.ts` runs on top of the untouched `PoseAnalyzer`:
+ * one big word until head + shoulders + hips are in frame, a ring while the
+ * user holds still, then JUMP · DUCK · LEFT · RIGHT — each passes on the
+ * move, on any motion, or on its own when its window ends; there is no fail
+ * state. Auto-advance throughout. See docs/CALIBRATION_FLOW.md.
  */
 export default function PreflightScreen() {
   const params = useLocalSearchParams<{
@@ -163,6 +169,7 @@ export default function PreflightScreen() {
   const analyzerRef = useRef(new PoseAnalyzer());
   const soundsRef = useRef(createCalibrationSounds());
   const voiceRef = useRef(createVoicePrompter(true));
+  const motionRef = useRef<BodyCentreSample[]>([]);
   const stateRef = useRef(state);
   const launchedRef = useRef(false);
   const runIdRef = useRef(createTrackingRunId(params.level));
@@ -435,11 +442,19 @@ export default function PreflightScreen() {
     }
   }, [locked, state.outcome, state.phase, windowHeight, windowWidth]);
 
-  // Feedback: a tick when framing locks, a success cue when the hold completes.
+  // Feedback: a tick when framing locks, a success cue on every move ✓ (they
+  // never fail, so this always fires four times), a burst + success cue when
+  // the flow completes with a baseline.
   const holding = state.phase === 'hold';
+  const inMoves = state.phase === 'moves';
+  const move = currentMove(state);
+  const landed = moveLanded(state);
   useEffect(() => {
     if (holding) cue('tick');
   }, [cue, holding]);
+  useEffect(() => {
+    if (landed) cue('phase');
+  }, [cue, landed]);
   useEffect(() => {
     if (!locked) return;
     setBurst((count) => count + 1);
@@ -462,12 +477,16 @@ export default function PreflightScreen() {
       const smoothed = { ...frame, keypoints: result.keypoints };
       setPoseFrame(smoothed);
       setFeedback(result.feedback);
+      // Raw body-centre travel over the last half second: the move check's
+      // "clearly moving" pass when no classifier fires (bodyMotion.ts).
+      motionRef.current = pushMotionSample(motionRef.current, bodyCentre(smoothed));
       dispatch({
         type: 'FRAME',
         now: frame.timestamp,
         framing: skeletonFraming(smoothed).verdict,
         status: result.status,
         move: result.move,
+        motion: stateRef.current.phase === 'moves' && significantMotion(motionRef.current),
       });
     },
     [dispatch],
@@ -570,19 +589,23 @@ export default function PreflightScreen() {
             pointerEvents="none"
             style={styles.bottomScrim}
           />
-          <FramingCoach
-            verdict={state.framing}
-            holding={holding}
-            progress={holdProgress(state, now)}
-            accent={hudTheme.accent}
-            hint={
-              holding
-                ? null
-                : state.framing === 'searching' || state.framing === 'closer'
-                  ? 'Head to hips is enough'
-                  : null
-            }
-          />
+          {inMoves && move ? (
+            <MovePromptCoach move={move} index={state.moveIndex} landed={landed} accent={hudTheme.accent} />
+          ) : (
+            <FramingCoach
+              verdict={state.framing}
+              holding={holding}
+              progress={holdProgress(state, now)}
+              accent={hudTheme.accent}
+              hint={
+                holding
+                  ? null
+                  : state.framing === 'searching' || state.framing === 'closer'
+                    ? 'Head to hips is enough'
+                    : null
+              }
+            />
+          )}
         </>
       ) : null}
 
@@ -599,13 +622,14 @@ export default function PreflightScreen() {
 
       {cameraPhase ? (
         <View style={[styles.header, { top: insets.top + spacing.md }]}>
-          <Text style={styles.eyebrow}>{holding ? 'LOCKING IN' : 'FRAME UP'}</Text>
+          <Text style={styles.eyebrow}>{inMoves ? 'MOVE CHECK' : holding ? 'LOCKING IN' : 'FRAME UP'}</Text>
           <Text style={styles.runName} numberOfLines={1}>{params.name ?? 'Your run'}</Text>
           {__DEV__ ? (
             <Text style={styles.devTimer}>
               {flowElapsedSeconds(state, now).toFixed(1)}s · {state.phase} ·{' '}
               {Math.max(0, (now - state.phaseStartedAt) / 1000).toFixed(1)}s · restarts{' '}
               {state.holdRestarts}
+              {inMoves ? ` · move ${state.moveIndex + 1}/4 ${state.movePasses.join(',')}` : ''}
             </Text>
           ) : null}
         </View>
@@ -693,7 +717,11 @@ export default function PreflightScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={
-              state.calibrated ? 'Skip the hold and start' : 'Skip camera setup and start with default settings'
+              inMoves
+                ? 'Skip the move check and start'
+                : state.calibrated
+                  ? 'Skip the hold and start'
+                  : 'Skip camera setup and start with default settings'
             }
             hitSlop={12}
             onPress={() => dispatch({ type: 'SKIP', now: Date.now() })}
