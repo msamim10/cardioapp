@@ -139,13 +139,15 @@ OTHER NOTES
 
 ---
 
-## Release 1.1.0 (build 26)
+## Release 1.1.0 (build 27)
 
-Build 26 supersedes build 25 (which supersedes build 24; neither shipped to
-users). Build 26 carries the 3-second calibration hold, spoken coaching, the
-in-run warm-up, the condensed level brief, the clips library and the home /
-board polish. If 1.1.0 is already "Waiting for Review" with build 25, swap the
-build to 26 in ASC before it enters review. Backend is
+Build 27 supersedes build 26 (which supersedes 25 and 24; none shipped to
+users). Build 27 carries the 3-second calibration hold followed by four quick
+guided moves (no fail state), spoken coaching, the in-run warm-up, the level
+brief with the cover stat row and Top runners card, instant leaderboards (no
+empty state or spinner), the clips library and the home / board polish. If
+1.1.0 is already "Waiting for Review" with build 25 or 26, swap the build to
+27 in ASC before it enters review. Backend is
 deployed (Functions `startRun` / `submitRun` / `reserveUsername` /
 `onUserDeleted` / `reconcileGhosts*` / `rebuildConsensusBeatmaps*` on Node 22,
 Firestore rules + indexes, TTL on `entries.expiresAt`) and the 13 composite
@@ -181,14 +183,15 @@ LEVEL UP
 - Campaign gates, streak freeze and a daily challenge bonus keep the path moving.
 
 BETTER TRACKING FROM THE FIRST SECOND
-- Calibration is now a ~3-second hold: stand in frame, hold still, done — no more move trials. Spoken coaching guides you into position, and it's remembered, so you don't redo it on every map.
+- Calibration is now a ~3-second hold followed by four quick guided moves — jump, duck, left, right — to get you into the controls. Nothing to pass or retry; spoken coaching walks you through it, and it's remembered, so you don't redo it on every map.
+- Leaderboards open instantly on every map, with the top runners right on the level brief.
 - A short in-run warm-up on your first few runs eases you into the moves before the music picks up.
 - Faster, smoother pose tracking under the hood.
 
 Plus fixes and polish throughout. Move more, sit less, and show us your best run.
 ```
 
-(≈1,750 characters; limit is 4,000.)
+(≈1,850 characters; limit is 4,000.)
 
 ### Review Notes for 1.1.0 (replace the existing notes)
 
@@ -199,7 +202,7 @@ DEMO ACCOUNT
 Sign in with appreview@cardiosurf.app / CardioReview2026!. This account already has CardioSurf Pro, so every world, level and feature is unlocked — no purchase needed.
 
 HOW THE APP WORKS
-CardioSurf is a movement-based cardio game. Stand a few feet from the device in a clear space. The front camera runs on-device full-body motion tracking (Apple Vision) so jumps, ducks and side-steps control an endless-runner game. By default only skeletal keypoints are processed in real time and no video is stored or sent anywhere. Before the first workout a ~3-second calibration hold runs (the player stands in frame and holds still; spoken prompts guide them into position — there are no movement trials). The result is remembered, so it does not repeat on every map, and the first few runs include a short in-run warm-up.
+CardioSurf is a movement-based cardio game. Stand a few feet from the device in a clear space. The front camera runs on-device full-body motion tracking (Apple Vision) so jumps, ducks and side-steps control an endless-runner game. By default only skeletal keypoints are processed in real time and no video is stored or sent anywhere. Before the first workout a ~3-second calibration hold runs (the player stands in frame and holds still; spoken prompts guide them into position), followed by four quick guided moves — jump, duck, left, right — shown one at a time for about 2.5 seconds each. These are a walkthrough of the controls, not a test: each prompt passes on its own if the player does not move, there is no fail or retry state, and a Skip button is always available. The result is remembered, so it does not repeat on every map, and the first few runs include a short in-run warm-up.
 
 NEW IN 1.1.0 — "RECORD MY RUNS" (optional, off by default)
 The "Record my runs" toggle is off by default and lives in Settings (Profile) and in the pre-run edit sheet. When the user turns it on, the camera video of each finished run is recorded to the device and composed locally into a silent share clip (game on top, camera below, with the score HUD); the latest ten are listed under Profile → Clips. The clip never leaves the device — the app does not upload it — and is only exported if the user taps "Save to Photos" (add-only Photos permission, NSPhotoLibraryAddUsageDescription) or "Share" (system share sheet). No microphone access is requested. The camera permission string discloses this recording.
