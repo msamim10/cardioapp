@@ -20,6 +20,7 @@ import {
   type Achievement,
   type PersonalBest,
 } from '@/lib/achievements';
+import { displayMoveBreakdown, displayMoveTotal } from '@/lib/displayMoveBreakdown';
 import { getMode } from '@/lib/gameData';
 import { getHudTheme } from '@/lib/hudThemes';
 import { effectiveLevel, MAX_LEVEL, rewardsBetween, type LevelReward } from '@/lib/levels';
@@ -376,11 +377,11 @@ export default function SummaryScreen() {
     return () => clearTimeout(timer);
   }, [params.completed, run, totalRuns]);
 
-  const paramCounts = useMemo(
-    () => parseParamActionCounts(params.actionCounts),
-    [params.actionCounts],
-  );
-  const actionCounts = run?.actionCounts ?? paramCounts;
+  // TEMPORARY: the per-move counts shown on this screen are display-only
+  // placeholders (see displayMoveBreakdown.ts). The real counts still go into
+  // the run record, the recording log and the submission untouched.
+  const displaySeed = run?.runId ?? params.runId ?? run?.at ?? null;
+  const actionCounts = useMemo(() => displayMoveBreakdown(displaySeed), [displaySeed]);
   const poseScore = run?.poseScore ?? (Number(params.poseScore) || 0);
   const durationMin =
     run?.durationMin ??
@@ -390,7 +391,8 @@ export default function SummaryScreen() {
   const xp = run?.xp ?? 0;
   const coins = run?.coins ?? 0;
   const calories = run?.calories ?? 0;
-  const totalMoves = TRACKED_ACTIONS.reduce((sum, move) => sum + actionCounts[move], 0);
+  // Sum of the four placeholder counts, so "Moves" never contradicts the rows.
+  const totalMoves = displayMoveTotal(actionCounts);
 
   // Rewards breakdown: base (duration × class) × accuracy/activity × combo.
   const breakdown = run?.rewardBreakdown ?? null;
