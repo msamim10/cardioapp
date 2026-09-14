@@ -224,6 +224,11 @@ a native attestation module once a native build is in play.
 
 ## Owner steps (in order)
 
+Status 2026-09-13: steps 1–3 and 5 are done (APIs enabled; the 4 functions,
+rules and indexes deployed to `cardiosurf-mvp`, composite index READY; TTL on
+`entries.expiresAt` ACTIVE). Step 4 has nothing to publish yet — the release
+registry is empty. Step 7 is build 24 (1.1.0).
+
 1. **Enable APIs** (Blaze already):
    `gcloud services enable cloudfunctions.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com eventarc.googleapis.com run.googleapis.com`
 2. **Deploy**: `firebase deploy --only functions,firestore` (rules + indexes +
@@ -254,7 +259,8 @@ a native attestation module once a native build is in play.
 
 ## Owner TODOs / deferred
 
-- No OG image asset; `web/l/index.html` references `/og/beat-my-score.png`.
+- ~~No OG image asset~~ — `og/beat-my-score.png` (1200×630) is committed in
+  the Pages repo.
 - On GitHub Pages `/l/{id}` returns HTTP 404 (then client-side forwards), so
   link previews (iMessage/Slack) won't render OG tags for challenge links.
 - The share card from the summary uses this run's accuracy/combo with the

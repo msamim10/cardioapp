@@ -139,6 +139,103 @@ OTHER NOTES
 
 ---
 
+## Release 1.1.0 (build 24)
+
+Build 24 is uploaded to App Store Connect. Backend is deployed (Functions
+`startRun` / `submitRun` / `reserveUsername` / `onUserDeleted`, Firestore
+rules + indexes, TTL on `entries.expiresAt`) and the 13 composite game clips
+are live under `composite/<slug>/game-576.mp4`, so "Record my run" is
+enabled on every map.
+
+**Known state at submission:** no beatmap is published (the release registry
+in `src/lib/beatmapRegistry.ts` is empty by design — no fabricated charts).
+Until a level ships a chart, its Leaderboard entry point reads "Needs a
+beatmap", the daily board is the "practice" challenge, and no run posts a
+score. Usernames, public profiles, Find friends / follow, the Beat-my-score
+share card and challenge links all work today. The copy below is written for
+that state; when the first beatmap ships, swap in the bracketed alternative
+bullet.
+
+### What's New in 1.1.0 (paste into App Store Connect)
+
+```
+Record my run, climb the ranks, and make every workout count.
+
+RECORD MY RUN
+Turn on "Record my run" before a workout and CardioSurf builds a shareable video of your run: the map on top, you below, with your score, combo and every PERFECT lighting up as you hit it. It's made entirely on your phone — nothing is uploaded unless you save it to Photos or share it yourself. The toggle is off by default and lives on the level screen.
+
+LEADERBOARDS, FRIENDS AND CHALLENGES
+- Pick a username and set up your public runner profile.
+- Find friends by username and follow them to see how you stack up.
+- Beat my score: share a challenge card straight from your summary. Friends tap the link and land on the exact map to take their shot.
+- Every map now has Global, Friends and Today boards, ready for ranked scoring as charted maps roll out.
+[When a beatmap is published, replace the last bullet with: "Post your score to Global, Friends and Today boards on every charted map, and take on the daily challenge for a bonus."]
+
+LEVEL UP
+- 50 runner levels with rewards along the way, and a new HUD theme to unlock as you climb.
+- XP and coins now scale with how well you run, not just how long.
+- Campaign gates, streak freeze and a daily challenge bonus keep the path moving.
+
+BETTER TRACKING FROM THE FIRST SECOND
+- A quick calibration game before each run — jump, duck and lean once so the tracker locks onto you before the music starts.
+- Faster, smoother pose tracking under the hood.
+
+Plus fixes and polish throughout. Move more, sit less, and show us your best run.
+```
+
+(≈1,500 characters; limit is 4,000.)
+
+### Review Notes for 1.1.0 (replace the existing notes)
+
+```
+Thanks for reviewing CardioSurf 1.1.0!
+
+DEMO ACCOUNT
+Sign in with appreview@cardiosurf.app / CardioReview2026!. This account already has CardioSurf Pro, so every world, level and feature is unlocked — no purchase needed.
+
+HOW THE APP WORKS
+CardioSurf is a movement-based cardio game. Stand a few feet from the device in a clear space. The front camera runs on-device full-body motion tracking (Apple Vision) so jumps, ducks and side-steps control an endless-runner game. By default only skeletal keypoints are processed in real time and no video is stored or sent anywhere. A short calibration game runs before each workout so the tracker locks onto the player.
+
+NEW IN 1.1.0 — "RECORD MY RUN" (optional, off by default)
+On the level screen there is a "Record my run" toggle. When the user turns it on, the camera video of that run is recorded to the device and composed locally into a silent share video (game on top, camera below, with the score HUD). The video never leaves the device — the app does not upload it — and is only exported if the user taps "Save to Photos" (add-only Photos permission, NSPhotoLibraryAddUsageDescription) or "Share" (system share sheet). No microphone access is requested. The camera permission string discloses this recording.
+
+NEW IN 1.1.0 — LEADERBOARDS, PROFILES AND CHALLENGES
+Users pick a username (Profile → Leaderboards → Username), can find and follow other runners, and can share a "Beat my score" card that deep-links into the level (https://cardiosurf.com/l/... and cardiosurf://). Per-level boards and score submission are verified by our backend (Cloud Functions); ranked scoring is enabled per map as charted maps roll out, so some boards may read "Needs a beatmap" during review. Nothing about the camera or video is involved in leaderboards — only the score, accuracy and combo of a run.
+
+SUBSCRIPTIONS / PAYWALL
+CardioSurf Pro is an auto-renewable subscription (Monthly $14.99 / Yearly $39.99 with a 3-day free trial). The demo account is pre-granted Pro. To see the paywall: sign out and create a new account with any email (open registration). A free account is shown the paywall when starting a locked world; it can be dismissed with the Close (X) button or "Maybe later", so the reviewer is never blocked. Purchase completes through the standard StoreKit flow.
+
+OTHER NOTES
+- Background audio is enabled so a workout can keep playing / casting to a TV via AirPlay when the screen locks. AirPlay is optional.
+- Account deletion is available in Profile (it also removes the user's leaderboard entries, username and public profile).
+- Sign in with Apple and Google Sign-In are both offered.
+```
+
+### ASC checklist for 1.1.0 (owner)
+
+1. App Store Connect → CardioSurf → **+ Version** `1.1.0` → **Build**: select **24**.
+2. **What's New**: paste the block above (pick the bullet variant that matches
+   whether a beatmap is published).
+3. **App Review Information → Notes**: replace with the 1.1.0 notes above.
+   Sign-in required stays **Yes** with `appreview@cardiosurf.app`.
+4. **App Privacy**: no change needed for run recording — keep *Photos or
+   Videos* **not collected** (reasoning in the App Privacy section above;
+   the file never leaves the device). `NSPhotoLibraryAddUsageDescription`
+   and the updated `NSCameraUsageDescription` are in `app.json`. Sign in with
+   Apple remains configured (`usesAppleSignIn: true`, `expo-apple-authentication`).
+   **Do re-check** that the ASC privacy answers already reflect the Singular
+   SDK shipped since 1.0.x: `app.json` declares `NSPrivacyTracking: true`,
+   an ATT prompt, and tracking for Device ID / User ID / Product Interaction /
+   Purchase History. If ASC still says "Data Used to Track You: None" (as the
+   older section of this file does), update it before submitting.
+5. **Screenshots**: not required for this version — the existing 6.9" set
+   still reflects the core loop. Optional later: a Record-my-run and a
+   Leaderboard screenshot.
+6. **Submit for Review**. Leave "Release this version automatically" or hold
+   for manual release as preferred.
+
+---
+
 ## "What's New" (v1.0.0)
 Welcome to CardioSurf — cardio you play by moving your body!
 
