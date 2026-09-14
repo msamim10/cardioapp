@@ -272,6 +272,48 @@ const reported = (cueAt: number, offsetMs: number) => cueAt + offsetMs / 1000 + 
   assert.equal(Math.round(100 * comboBonusFactor(20)), 170);
 }
 
+// --- Warm-up window: misses forgiven on screen, intact in the log -----------
+{
+  // loopMap cues: jump 1 s, duck 4 s, jump 9.5 s (10 s loop). Warm-up = 6 s.
+  const judge = new CueJudge(loopMap, { forgiveMissesUntilSec: 6 });
+  const strict = new CueJudge(loopMap);
+  for (const j of [judge, strict]) j.onTick(0);
+  // Spurious move inside the window: logged as 'x', not shown.
+  for (const j of [judge, strict]) j.onMove('Left', reported(2.5, 0));
+  assert.equal(judge.score.spurious, 0, 'spurious forgiven on screen');
+  assert.equal(judge.score.forgiven, 1);
+  assert.equal(judge.score.lastGrade, null, 'no MISS flash');
+  assert.equal(judge.score.judgements, 0);
+  assert.equal(strict.score.spurious, 1);
+  // The 1 s jump expires inside the window: forgiven; combo still resets.
+  for (const j of [judge, strict]) j.onTick(1 + CUE_WINDOW_MS / 1000 + COMP_S + 0.01);
+  assert.equal(judge.score.miss, 0);
+  assert.equal(judge.score.forgiven, 2);
+  assert.equal(judge.score.combo, 0);
+  // A hit inside the window scores exactly like the strict judge.
+  for (const j of [judge, strict]) assert.equal(j.onMove('Duck', reported(4, 0)).grade, 'perfect');
+  assert.equal(judge.score.score, strict.score.score);
+  assert.equal(judge.score.combo, 1);
+  assert.equal(judge.accuracy, 1, 'displayed accuracy ignores forgiven misses');
+  assert.equal(strict.accuracy, 1 / 2);
+  // After the window the judge is strict again.
+  for (const j of [judge, strict]) j.onMove('Jump', reported(9.5 + 0.3, 0));
+  assert.equal(judge.score.miss, 1, 'late hit after the window is a real miss');
+  assert.equal(judge.score.lastGrade, 'miss');
+  // The log and the verified totals are identical to a strict judge: the
+  // submission replays server-side exactly as before.
+  assert.deepEqual(judge.events, strict.events);
+  assert.deepEqual(judge.verifiedTotals(), strict.verifiedTotals());
+  assert.equal(judge.verifiedTotals().score, judge.score.score, 'points never diverge');
+  assert.equal(judge.verifiedTotals().maxCombo, judge.score.maxCombo);
+  assert.equal(judge.verifiedTotals().miss, 2, 'server counts the forgiven expiry + the late hit');
+  assert.equal(judge.verifiedTotals().spurious, 1);
+  // No window → verified totals are the displayed totals.
+  const totals = strict.verifiedTotals();
+  assert.equal(totals.miss, strict.score.miss);
+  assert.equal(totals.accuracy, strict.accuracy);
+}
+
 console.log(
-  'Cue scoring replay passed: beatmap parse/sort/dedupe/round-trip, loop-wrapped cue scheduling, perfect/good/miss boundaries, latency compensation, wrong move consumes cue, matching-move preference, spurious miss, expiry breaks combo, wrapped hits, length mismatch, combo scaling',
+  'Cue scoring replay passed: beatmap parse/sort/dedupe/round-trip, loop-wrapped cue scheduling, perfect/good/miss boundaries, latency compensation, wrong move consumes cue, matching-move preference, spurious miss, expiry breaks combo, wrapped hits, length mismatch, combo scaling, warm-up forgiveness with an intact log',
 );

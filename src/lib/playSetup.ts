@@ -12,6 +12,11 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  parseCalibrationBaseline,
+  WARMUP_RUN_COUNT,
+  type CalibrationBaseline,
+} from '@/lib/calibrationSession';
 import type { MoverKey, OnboardingAnswers } from '@/lib/onboarding';
 
 const STORAGE_KEY = 'cardiosurf.playSetup.v1';
@@ -65,6 +70,16 @@ export type RunSettings = {
   durationMin: RunDurationMin;
 };
 
+// Once-per-session calibration + warm-up decisions live in the pure module.
+export {
+  CALIBRATION_SESSION_MS,
+  hasFreshCalibration,
+  shouldShowWarmup,
+  WARMUP_RUN_COUNT,
+  WARMUP_SECONDS,
+  type CalibrationBaseline,
+} from '@/lib/calibrationSession';
+
 export type PlaySetup = {
   screen: PlayScreen | null;
   /** Level id chosen on the "Pick your first run" onboarding screen. */
@@ -73,10 +88,18 @@ export type PlaySetup = {
   runSettings: RunSettings | null;
   /** Set when the user chose to run without body tracking during onboarding. */
   firstRunTrackingOff: boolean;
-  /** "Record my run" toggle on the level screen; off until the user opts in. */
+  /** "Record my runs" (Settings / run sheet); off until the user opts in. */
   recordRun: boolean;
   /** The one-time "what gets recorded" explainer has been shown. */
   recordExplainerSeen: boolean;
+  /** The one-time "Want a clip of your next run?" card on the summary has been shown. */
+  recordInviteSeen: boolean;
+  /** Last completed framing hold; null until the user calibrates once. */
+  calibrationBaseline: CalibrationBaseline | null;
+  /** Runs that have shown the in-run warm-up (capped at WARMUP_RUN_COUNT). */
+  warmupRunsCompleted: number;
+  /** Spoken calibration prompts (expo-speech). Default on. */
+  voicePrompts: boolean;
 };
 
 export const DEFAULT_PLAY_SCREEN: PlayScreen = 'tv';
@@ -89,6 +112,10 @@ function emptySetup(): PlaySetup {
     firstRunTrackingOff: false,
     recordRun: false,
     recordExplainerSeen: false,
+    recordInviteSeen: false,
+    calibrationBaseline: null,
+    warmupRunsCompleted: 0,
+    voicePrompts: true,
   };
 }
 
@@ -121,6 +148,13 @@ function parse(raw: string | null): PlaySetup {
       firstRunTrackingOff: parsed.firstRunTrackingOff === true,
       recordRun: parsed.recordRun === true,
       recordExplainerSeen: parsed.recordExplainerSeen === true,
+      recordInviteSeen: parsed.recordInviteSeen === true,
+      calibrationBaseline: parseCalibrationBaseline(parsed.calibrationBaseline),
+      warmupRunsCompleted:
+        typeof parsed.warmupRunsCompleted === 'number' && Number.isFinite(parsed.warmupRunsCompleted)
+          ? Math.max(0, Math.floor(parsed.warmupRunsCompleted))
+          : 0,
+      voicePrompts: parsed.voicePrompts !== false,
     };
   } catch {
     return emptySetup();
@@ -198,6 +232,31 @@ export function saveRecordRun(enabled: boolean): Promise<PlaySetup> {
 export function saveRecordExplainerSeen(): Promise<PlaySetup> {
   return mutate((setup) => {
     setup.recordExplainerSeen = true;
+  });
+}
+
+export function saveRecordInviteSeen(): Promise<PlaySetup> {
+  return mutate((setup) => {
+    setup.recordInviteSeen = true;
+  });
+}
+
+export function saveCalibrationBaseline(baseline: CalibrationBaseline | null): Promise<PlaySetup> {
+  return mutate((setup) => {
+    setup.calibrationBaseline = baseline ? { ...baseline } : null;
+  });
+}
+
+/** Counts one more run that showed the warm-up; saturates at WARMUP_RUN_COUNT. */
+export function recordWarmupRun(): Promise<PlaySetup> {
+  return mutate((setup) => {
+    setup.warmupRunsCompleted = Math.min(WARMUP_RUN_COUNT, setup.warmupRunsCompleted + 1);
+  });
+}
+
+export function saveVoicePrompts(enabled: boolean): Promise<PlaySetup> {
+  return mutate((setup) => {
+    setup.voicePrompts = enabled;
   });
 }
 

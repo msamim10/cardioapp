@@ -114,6 +114,8 @@ export default function FirstRunReadyScreen() {
         tracking: trackingOff ? 'off' : 'calibrated',
         trackingRunId: runId,
         fromOnboarding: '1',
+        // First run ever: the in-run warm-up teaches the four moves.
+        ...(trackingOff ? {} : { warmup: '1' }),
       },
     });
   };
@@ -161,11 +163,11 @@ export default function FirstRunReadyScreen() {
       >
         <View style={styles.eyebrowRow}>
           <Ionicons name="checkmark-circle" size={15} color={colors.lime} />
-          <Text style={styles.eyebrow}>Calibration complete</Text>
+          <Text style={styles.eyebrow}>Camera set</Text>
         </View>
         <Text style={styles.title}>Your first run is ready</Text>
         <Text style={styles.sub}>
-          Camera locked, map loaded, session set. Everything after this is you moving.
+          Camera set, map loaded, session ready. The first few seconds walk you through the moves.
         </Text>
 
         <View style={styles.hero}>
@@ -207,7 +209,7 @@ export default function FirstRunReadyScreen() {
         </View>
 
         <View style={styles.checklist}>
-          <CheckRow label="Body tracking calibrated" done={!trackingOff} />
+          <CheckRow label="Body tracking set" done={!trackingOff} />
           <CheckRow label={`${describePlayScreen(screen)}, phone as camera`} done />
           <CheckRow label="Full catalogue of maps unlocked with membership" done={isPremium} />
         </View>

@@ -14,81 +14,68 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BodyOutline } from '@/components/BodyOutline';
 import { CalibrationIntroFigure } from '@/components/CalibrationIntroFigure';
+import { FramingCoach } from '@/components/FramingCoach';
 import { ParticleBurst } from '@/components/ParticleBurst';
 import { TvSetupGuide } from '@/components/TvSetupGuide';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import {
   logCalibrationAttempt,
   logCalibrationFailure,
-  logCalibrationMoveSkipped,
   logCalibrationSuccess,
 } from '@/lib/analytics';
 import { createCalibrationSounds, playHaptic, type FeedbackCue } from '@/lib/calibrationFeedback';
-import {
-  loadCalibrationProfile,
-  proportionsFromBaseline,
-  proportionsMismatch,
-  recordCalibrationComplete,
-  shouldGuideCalibration,
-  type BodyProportions,
-} from '@/lib/calibrationProfile';
+import { proportionsFromBaseline, recordCalibrationComplete } from '@/lib/calibrationProfile';
 import { useExternalDisplay } from '@/lib/externalDisplay';
 import type { CalibrationFailureReason } from '@/lib/funnelStore';
 import { resolveHudTheme, type HudTheme } from '@/lib/hudThemes';
 import { useOnboarding } from '@/lib/OnboardingContext';
 import {
+  hasFreshCalibration,
   isIntensityKey,
   loadPlaySetup,
+  peekPlaySetup,
+  saveCalibrationBaseline,
   saveFirstRunTrackingOff,
+  saveVoicePrompts,
+  shouldShowWarmup,
   type PlayScreen,
 } from '@/lib/playSetup';
 import {
   INITIAL_POSE_FEEDBACK,
   INITIAL_POSE_SCORE,
   PoseAnalyzer,
-  type Move,
   type PoseFeedback,
   type PoseFrame,
 } from '@/lib/poseTracking';
 import {
   createPreflightFlowState,
-  currentTestMove,
   END_CARD_MS,
   flowElapsedSeconds,
+  holdProgress,
   isCameraPhase,
-  MOVE_PROMPT,
-  MOVE_TEST_ORDER,
   type PreflightFlowEvent,
   type PreflightOutcome,
   reducePreflightFlow,
-  SYNC_LINES,
+  spokenPrompt,
 } from '@/lib/preflightFlow';
 import { useProgress } from '@/lib/ProgressContext';
 import { parseOptionalClassKeyParam } from '@/lib/progression';
-import { FRAMING_MESSAGE, skeletonFraming } from '@/lib/skeletonFraming';
+import { skeletonFraming } from '@/lib/skeletonFraming';
 import {
   clearTrackingHandoff,
   createTrackingRunId,
   stageTrackingHandoff,
 } from '@/lib/trackingSession';
+import { createVoicePrompter } from '@/lib/voicePrompts';
 import { colors, font, metric, radius, spacing, type } from '@/theme';
 
-/** Reducer clock tick: drives the 10 s fallback offer and the dev timer. */
-const TICK_MS = 500;
-/** Phase 3 playful status lines rotate at this cadence. */
-const SYNC_LINE_MS = 900;
-
-const MOVE_ICON: Record<Move, keyof typeof Ionicons.glyphMap> = {
-  Jump: 'arrow-up',
-  Duck: 'arrow-down',
-  Left: 'arrow-back',
-  Right: 'arrow-forward',
-};
+/** Reducer clock tick: drives the hold ring and the dev timer. */
+const TICK_MS = 100;
 
 /**
  * Best-effort classification of WHY a calibration failed, from the last pose
@@ -113,10 +100,11 @@ function deriveCalibrationFailureReason(frame: PoseFrame | null): CalibrationFai
 }
 
 /**
- * Calibration as a micro-game. Screen 1 ("Your body is the controller.")
- * asks for the camera; Screen 2 runs the phases of `preflightFlow.ts` on top
- * of the untouched `PoseAnalyzer`: framing coaching → move test drive (first
- * run only) → handoff. See docs/CALIBRATION_FLOW.md.
+ * Calibration: a three-second hold. Screen 1 ("Your body is the controller.")
+ * asks for the camera; then the far-mode coach of `preflightFlow.ts` runs on
+ * top of the untouched `PoseAnalyzer`: one big word until head + shoulders +
+ * hips are in frame, a ring while the user holds still, auto-advance. See
+ * docs/CALIBRATION_FLOW.md.
  */
 export default function PreflightScreen() {
   const params = useLocalSearchParams<{
@@ -127,9 +115,9 @@ export default function PreflightScreen() {
     intensity?: string;
     classKey?: string | string[];
     /**
-     * "Record my run" is on (level screen). Forwarded to the workout; also
-     * keeps this screen's camera at the recording preset so the calibration
-     * handoff sees the same frame size as the run.
+     * "Record my runs" is on. Forwarded to the workout; also keeps this
+     * screen's camera at the recording preset so the calibration handoff sees
+     * the same frame size as the run.
      */
     record?: string;
     /**
@@ -141,6 +129,7 @@ export default function PreflightScreen() {
   }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { startRun, hudThemeId, levelProgress } = useProgress();
   const { setCheckpoint } = useOnboarding();
   // Same palette the run will use, so the calibration skeleton matches.
@@ -167,16 +156,13 @@ export default function PreflightScreen() {
   const [requesting, setRequesting] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [unavailableReason, setUnavailableReason] = useState('');
-  // Guided mode keeps the longer Phase 3 countdown; express is the shorter
-  // hold for anyone who has already calibrated on this device at least once.
-  const [guided, setGuided] = useState(true);
+  const [voiceOn, setVoiceOn] = useState(true);
   const [now, setNow] = useState(() => Date.now());
-  const [syncLine, setSyncLine] = useState(0);
   const [burst, setBurst] = useState(0);
   const [bigBurst, setBigBurst] = useState(0);
-  const storedProportionsRef = useRef<BodyProportions | null>(null);
   const analyzerRef = useRef(new PoseAnalyzer());
   const soundsRef = useRef(createCalibrationSounds());
+  const voiceRef = useRef(createVoicePrompter(true));
   const stateRef = useRef(state);
   const launchedRef = useRef(false);
   const runIdRef = useRef(createTrackingRunId(params.level));
@@ -204,35 +190,79 @@ export default function PreflightScreen() {
   useEffect(() => {
     clearTrackingHandoff();
     const sounds = soundsRef.current;
+    const voice = voiceRef.current;
     sounds.preload();
     return () => {
       if (!launchedRef.current) clearTrackingHandoff();
       sounds.dispose();
+      voice.stop();
     };
   }, []);
+
+  // Once per session: a hold within CALIBRATION_SESSION_MS skips this screen
+  // entirely. Decided from the cached setup when it is warm (no flash), else
+  // once it loads. `null` = undecided, `true` = skipping (render nothing).
+  const [sessionSkip, setSessionSkip] = useState<boolean | null>(() => {
+    const cached = peekPlaySetup();
+    return cached ? (!isFirstRun && hasFreshCalibration(cached.calibrationBaseline)) : null;
+  });
 
   useEffect(() => {
     let active = true;
-    loadCalibrationProfile()
-      .then((profile) => {
-        if (!active) return;
-        storedProportionsRef.current = profile.proportions;
-        setGuided(shouldGuideCalibration(profile));
-      })
-      .catch(() => {});
     loadPlaySetup()
       .then((setup) => {
-        if (active) setPlayScreen(setup.screen);
+        if (!active) return;
+        setPlayScreen(setup.screen);
+        setVoiceOn(setup.voicePrompts);
+        voiceRef.current.setEnabled(setup.voicePrompts);
+        setSessionSkip((current) =>
+          current ?? (!isFirstRun && hasFreshCalibration(setup.calibrationBaseline)),
+        );
       })
-      .catch(() => {});
+      .catch(() => {
+        if (active) setSessionSkip((current) => current ?? false);
+      });
     return () => {
       active = false;
     };
-  }, []);
+  }, [isFirstRun]);
 
+  // Session skip: straight into the run with `framingCheck`. The workout's
+  // countdown checks the body is in frame silently (coaching only if not) and
+  // the in-run analyzer re-acquires the baseline from its first frames.
   useEffect(() => {
-    dispatch({ type: 'SET_EXPRESS', express: !guided });
-  }, [dispatch, guided]);
+    if (sessionSkip !== true || launchedRef.current) return;
+    if (!permission) return;
+    if (!permission.granted || !detectorAvailable) {
+      // Camera lost or no detector: the normal flow handles it.
+      setSessionSkip(false);
+      return;
+    }
+    launchedRef.current = true;
+    clearTrackingHandoff();
+    startRun({
+      runId: runIdRef.current,
+      levelId: params.level,
+      durationMin: Number(params.duration) || 1,
+      ...(campaignClass ? { classKey: campaignClass } : {}),
+      ...(intensity ? { intensity } : {}),
+    });
+    router.replace({
+      pathname: '/workout',
+      params: {
+        level: params.level,
+        name: params.name,
+        speed: params.speed,
+        duration: params.duration,
+        intensity,
+        tracking: 'calibrated',
+        trackingRunId: runIdRef.current,
+        framingCheck: '1',
+        ...(params.record === '1' ? { record: '1' } : {}),
+        ...(shouldShowWarmup(peekPlaySetup()) ? { warmup: '1' } : {}),
+      },
+    });
+  }, [campaignClass, detectorAvailable, intensity, params, permission, router, sessionSkip, startRun]);
 
   useEffect(() => {
     if (!permission) return;
@@ -249,10 +279,15 @@ export default function PreflightScreen() {
     }
     // Repeat runs skip Screen 1 when the camera is already allowed. The first
     // run always shows it: it is the ceremony, not just a permission prompt.
-    if (permission.granted && stateRef.current.phase === 'permission' && !isFirstRun) {
+    if (
+      sessionSkip === false &&
+      permission.granted &&
+      stateRef.current.phase === 'permission' &&
+      !isFirstRun
+    ) {
       dispatch({ type: 'PERMISSION_GRANTED', now: Date.now() });
     }
-  }, [detectorAvailable, dispatch, isFirstRun, permission]);
+  }, [detectorAvailable, dispatch, isFirstRun, permission, sessionSkip]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (next) => {
@@ -269,7 +304,7 @@ export default function PreflightScreen() {
     return () => subscription.remove();
   }, [dispatch, getPermission, permission?.canAskAgain]);
 
-  // Reducer clock while the camera is live: fallback offer + dev timer.
+  // Reducer clock while the camera is live: hold ring + dev timer.
   const cameraPhase = isCameraPhase(state.phase);
   useEffect(() => {
     if (!cameraPhase) return;
@@ -280,25 +315,6 @@ export default function PreflightScreen() {
     }, TICK_MS);
     return () => clearInterval(timer);
   }, [cameraPhase, dispatch]);
-
-  useEffect(() => {
-    if (state.phase !== 'handoff') return;
-    setSyncLine(0);
-    const timer = setInterval(
-      () => setSyncLine((index) => (index + 1) % SYNC_LINES.length),
-      SYNC_LINE_MS,
-    );
-    return () => clearInterval(timer);
-  }, [state.phase]);
-
-  useEffect(() => {
-    if (state.phase !== 'handoff' || state.countdown === null) return;
-    const timer = setTimeout(
-      () => dispatch({ type: 'COUNTDOWN_TICK', now: Date.now() }),
-      1_000,
-    );
-    return () => clearTimeout(timer);
-  }, [dispatch, state.countdown, state.phase]);
 
   const launchWorkout = useCallback(
     (outcome: PreflightOutcome) => {
@@ -352,6 +368,7 @@ export default function PreflightScreen() {
           tracking,
           trackingRunId: runIdRef.current,
           ...(params.record === '1' && tracking !== 'off' ? { record: '1' } : {}),
+          ...(tracking !== 'off' && shouldShowWarmup(peekPlaySetup()) ? { warmup: '1' } : {}),
         },
       });
     },
@@ -379,35 +396,34 @@ export default function PreflightScreen() {
   }, [celebrate, cue, outcome]);
 
   // Calibration funnel instrumentation: one attempt per cycle, then a success
-  // (reached the Phase 3 countdown — where `onboarding_complete` fires on the
-  // first ever success) or a failure with a detected reason.
-  const lockedIn = state.phase === 'handoff' && state.countdown !== null;
+  // (the hold completed with a baseline — where `onboarding_complete` fires on
+  // the first ever success) or a failure with a detected reason. A successful
+  // hold also stamps the once-per-session marker so the next run within the
+  // session window skips this screen.
+  const locked = state.phase === 'complete' && state.outcome === 'calibrated';
   useEffect(() => {
     const phase = state.phase;
-    if (phase === 'framing' || phase === 'moves' || (phase === 'handoff' && !lockedIn)) {
+    if (phase === 'framing' || phase === 'hold') {
       if (!calibrationCycleRef.current) {
         calibrationCycleRef.current = true;
         logCalibrationAttempt();
       }
-      if (phase === 'handoff') {
-        // A body whose proportions no longer match the stored ones is most
-        // likely a different person on a shared device, so keep the longer hold.
-        const fresh = analyzerRef.current.calibrationSnapshot();
-        const proportions = fresh ? proportionsFromBaseline(fresh.baseline) : null;
-        if (proportionsMismatch(storedProportionsRef.current, proportions)) {
-          setGuided(true);
-        }
-      }
       return;
     }
-    if (lockedIn) {
+    if (locked) {
       if (calibrationCycleRef.current) {
         calibrationCycleRef.current = false;
         logCalibrationSuccess();
         const snapshot = analyzerRef.current.calibrationSnapshot();
-        recordCalibrationComplete(
-          snapshot ? proportionsFromBaseline(snapshot.baseline) : null,
-        ).catch(() => {});
+        const proportions = snapshot ? proportionsFromBaseline(snapshot.baseline) : null;
+        recordCalibrationComplete(proportions).catch(() => {});
+        saveCalibrationBaseline({
+          capturedAt: Date.now(),
+          cameraFacing: 'front',
+          orientation: windowWidth > windowHeight ? 'landscape' : 'portrait',
+          torsoRatio: proportions?.torsoRatio ?? null,
+          shoulderRatio: proportions?.shoulderRatio ?? null,
+        }).catch(() => {});
       }
       return;
     }
@@ -417,24 +433,26 @@ export default function PreflightScreen() {
         logCalibrationFailure(deriveCalibrationFailureReason(latestFrameRef.current));
       }
     }
-  }, [lockedIn, state.outcome, state.phase]);
+  }, [locked, state.outcome, state.phase, windowHeight, windowWidth]);
 
-  // Feedback: framing lock, each detected move, each phase transition.
-  const framingOk = state.phase === 'framing' && state.framing === 'ok';
+  // Feedback: a tick when framing locks, a success cue when the hold completes.
+  const holding = state.phase === 'hold';
   useEffect(() => {
-    if (framingOk) cue('tick');
-  }, [cue, framingOk]);
-  const completedCount = state.completedMoves.length;
+    if (holding) cue('tick');
+  }, [cue, holding]);
   useEffect(() => {
-    if (completedCount === 0) return;
-    setBurst((count) => count + 1);
-    cue('move');
-  }, [completedCount, cue]);
-  useEffect(() => {
-    if (state.phase !== 'moves' && state.phase !== 'handoff') return;
+    if (!locked) return;
     setBurst((count) => count + 1);
     cue('phase');
-  }, [cue, state.phase]);
+  }, [cue, locked]);
+
+  // Spoken prompts follow the displayed (debounced) verdict; the prompter
+  // rate-limits and never repeats the same line back to back.
+  const spoken = spokenPrompt(state);
+  useEffect(() => {
+    if (!spoken) return;
+    voiceRef.current.say(spoken, Date.now(), spoken === "You're set");
+  }, [spoken]);
 
   const onPoseFrame = useCallback(
     (frame: PoseFrame) => {
@@ -450,7 +468,6 @@ export default function PreflightScreen() {
         framing: skeletonFraming(smoothed).verdict,
         status: result.status,
         move: result.move,
-        readiness: result.feedback.readiness,
       });
     },
     [dispatch],
@@ -481,11 +498,11 @@ export default function PreflightScreen() {
     dispatch({ type: 'RETRY', now: Date.now() });
   };
 
-  const skipMove = () => {
-    const move = currentTestMove(stateRef.current);
-    if (!move) return;
-    logCalibrationMoveSkipped(move);
-    dispatch({ type: 'SKIP_MOVE', now: Date.now() });
+  const toggleVoice = () => {
+    const next = !voiceOn;
+    setVoiceOn(next);
+    voiceRef.current.setEnabled(next);
+    void saveVoicePrompts(next);
   };
 
   const cancel = () => {
@@ -502,7 +519,15 @@ export default function PreflightScreen() {
   const cameraActive = permission?.granted === true && detectorAvailable && cameraPhase;
   const openSettings = () => Linking.openSettings().catch(() => {});
   const cameraOff = permission?.canAskAgain === false || permissionDenied;
-  const testMove = currentTestMove(state);
+
+  if (sessionSkip !== false) {
+    // Undecided or skipping: a blank frame beats a flash of the intro screen.
+    return (
+      <View style={styles.root}>
+        <StatusBar hidden />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
@@ -535,16 +560,28 @@ export default function PreflightScreen() {
 
       {cameraActive ? (
         <>
-          {state.phase === 'framing' ? <BodyOutline verdict={state.framing} /> : null}
           <LinearGradient
             colors={['rgba(0,0,0,0.72)', 'rgba(0,0,0,0)']}
             pointerEvents="none"
             style={styles.topScrim}
           />
           <LinearGradient
-            colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.86)']}
+            colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.7)']}
             pointerEvents="none"
             style={styles.bottomScrim}
+          />
+          <FramingCoach
+            verdict={state.framing}
+            holding={holding}
+            progress={holdProgress(state, now)}
+            accent={hudTheme.accent}
+            hint={
+              holding
+                ? null
+                : state.framing === 'searching' || state.framing === 'closer'
+                  ? 'Head to hips is enough'
+                  : null
+            }
           />
         </>
       ) : null}
@@ -562,42 +599,50 @@ export default function PreflightScreen() {
 
       {cameraPhase ? (
         <View style={[styles.header, { top: insets.top + spacing.md }]}>
-          <Text style={styles.eyebrow}>
-            {state.phase === 'framing'
-              ? 'STEP 1 · FRAME UP'
-              : state.phase === 'moves'
-                ? 'STEP 2 · TEST DRIVE'
-                : isFirstRun
-                  ? 'STEP 3 · SYNC'
-                  : 'SYNC'}
-          </Text>
+          <Text style={styles.eyebrow}>{holding ? 'LOCKING IN' : 'FRAME UP'}</Text>
           <Text style={styles.runName} numberOfLines={1}>{params.name ?? 'Your run'}</Text>
           {__DEV__ ? (
             <Text style={styles.devTimer}>
               {flowElapsedSeconds(state, now).toFixed(1)}s · {state.phase} ·{' '}
-              {Math.max(0, (now - state.phaseStartedAt) / 1000).toFixed(1)}s
+              {Math.max(0, (now - state.phaseStartedAt) / 1000).toFixed(1)}s · restarts{' '}
+              {state.holdRestarts}
             </Text>
           ) : null}
         </View>
       ) : null}
 
-      {playScreen === 'tv' ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={tvConnected ? 'TV connected. Open TV setup guide' : 'TV setup help'}
-          hitSlop={8}
-          onPress={() => setTvGuideOpen(true)}
-          style={[styles.tvHelp, tvConnected && styles.tvHelpConnected, { top: insets.top + spacing.sm }]}
-        >
-          <Ionicons
-            name={tvConnected ? 'tv' : 'tv-outline'}
-            size={15}
-            color={tvConnected ? colors.lime : colors.white}
-          />
-          <Text style={[styles.tvHelpText, tvConnected && styles.tvHelpTextConnected]}>
-            {tvConnected ? 'TV connected' : display.supported ? 'Choose your TV' : 'Having trouble?'}
-          </Text>
-        </Pressable>
+      {cameraPhase ? (
+        <View style={[styles.topRight, { top: insets.top + spacing.sm }]}>
+          {playScreen === 'tv' ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={tvConnected ? 'TV connected. Open TV setup guide' : 'TV setup help'}
+              hitSlop={8}
+              onPress={() => setTvGuideOpen(true)}
+              style={[styles.roundControl, tvConnected && styles.roundControlOn]}
+            >
+              <Ionicons
+                name={tvConnected ? 'tv' : 'tv-outline'}
+                size={17}
+                color={tvConnected ? colors.lime : colors.white}
+              />
+            </Pressable>
+          ) : null}
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityLabel="Voice prompts"
+            accessibilityState={{ checked: voiceOn }}
+            hitSlop={8}
+            onPress={toggleVoice}
+            style={[styles.roundControl, voiceOn && styles.roundControlOn]}
+          >
+            <Ionicons
+              name={voiceOn ? 'volume-high' : 'volume-mute'}
+              size={18}
+              color={voiceOn ? colors.lime : colors.white}
+            />
+          </Pressable>
+        </View>
       ) : null}
       <TvSetupGuide visible={tvGuideOpen} onClose={() => setTvGuideOpen(false)} detection={display} />
 
@@ -643,132 +688,19 @@ export default function PreflightScreen() {
         )
       ) : null}
 
-      {state.phase === 'framing' ? (
-        <View
-          accessible
-          accessibilityLiveRegion="polite"
-          accessibilityRole="summary"
-          accessibilityLabel={`${FRAMING_MESSAGE[state.framing]}. Stand inside the outline so your head and feet are both visible.`}
-          style={[styles.guidance, { bottom: insets.bottom + spacing.xl }]}
-        >
-          <View style={styles.statusRow}>
-            <View style={[styles.statusDot, state.framing === 'ok' && styles.statusDotReady]} />
-            <Text style={styles.statusLabel}>
-              {state.framing === 'ok'
-                ? state.calibrated
-                  ? 'LOCKED'
-                  : 'READING'
-                : state.trackingLost || state.framing === 'searching'
-                  ? 'LOOKING FOR YOU'
-                  : 'ADJUST'}
-            </Text>
-          </View>
-          <Text style={[styles.guidanceTitle, state.framing === 'ok' && styles.guidanceTitleOk]}>
-            {FRAMING_MESSAGE[state.framing]}
-          </Text>
-          <Text style={styles.setupGuidance}>
-            {state.framing === 'searching'
-              ? 'Prop your phone up, then step back until you fill the outline.'
-              : state.framing === 'ok'
-                ? 'Stay right there for a second.'
-                : 'Head to feet inside the outline works best.'}
-          </Text>
-          {state.fallbackOffered ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={
-                state.calibrated ? 'Good enough, continue' : 'Continue with default settings'
-              }
-              hitSlop={10}
-              onPress={() => dispatch({ type: 'FALLBACK_CONTINUE', now: Date.now() })}
-              style={styles.helpLink}
-            >
-              <Text style={styles.helpLinkText}>
-                Having trouble?{' '}
-                <Text style={styles.helpLinkStrong}>
-                  {state.calibrated ? 'Good enough, continue' : 'Continue with default settings'}
-                </Text>
-              </Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
-
-      {state.phase === 'moves' && testMove ? (
-        <>
-          <View
-            accessible
-            accessibilityLiveRegion="assertive"
-            accessibilityLabel={`${MOVE_PROMPT[testMove]} Move ${state.moveIndex + 1} of ${MOVE_TEST_ORDER.length}.`}
-            pointerEvents="none"
-            style={styles.movePrompt}
+      {cameraPhase ? (
+        <View style={[styles.footer, { bottom: insets.bottom + spacing.lg }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              state.calibrated ? 'Skip the hold and start' : 'Skip camera setup and start with default settings'
+            }
+            hitSlop={12}
+            onPress={() => dispatch({ type: 'SKIP', now: Date.now() })}
+            style={({ pressed }) => [styles.skip, pressed && styles.pressed]}
           >
-            <Ionicons name={MOVE_ICON[testMove]} size={54} color={hudTheme.accent} />
-            <Text style={[styles.movePromptText, { color: hudTheme.accent }]}>
-              {MOVE_PROMPT[testMove]}
-            </Text>
-            {state.trackingLost ? (
-              <Text style={styles.moveHint}>Step back into view</Text>
-            ) : (
-              <Text style={styles.moveHint}>Do it once. The game reads it live.</Text>
-            )}
-          </View>
-          <View style={[styles.guidance, { bottom: insets.bottom + spacing.xl }]}>
-            <View style={styles.moveDots}>
-              {MOVE_TEST_ORDER.map((move, index) => (
-                <View
-                  key={move}
-                  style={[
-                    styles.moveDot,
-                    index < state.moveIndex && { backgroundColor: hudTheme.accent },
-                    index === state.moveIndex && styles.moveDotActive,
-                  ]}
-                />
-              ))}
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Skip this move"
-              hitSlop={10}
-              onPress={skipMove}
-              style={styles.helpLink}
-            >
-              <Text style={styles.helpLinkText}>
-                Having trouble? <Text style={styles.helpLinkStrong}>Skip this move</Text>
-              </Text>
-            </Pressable>
-          </View>
-        </>
-      ) : null}
-
-      {state.phase === 'handoff' ? (
-        <View
-          accessible
-          accessibilityLiveRegion="polite"
-          accessibilityRole="summary"
-          accessibilityLabel={
-            state.countdown !== null
-              ? `Locked. Starting in ${state.countdown}. Hold still.`
-              : `${SYNC_LINES[syncLine]} Stand still in the center.`
-          }
-          style={[styles.guidance, { bottom: insets.bottom + spacing.xl }]}
-        >
-          {state.countdown !== null ? (
-            <>
-              <Text style={styles.readyLabel}>LOCKED</Text>
-              <Text style={styles.countdown}>{state.countdown}</Text>
-            </>
-          ) : (
-            <>
-              <View style={styles.statusRow}>
-                <ActivityIndicator size="small" color={hudTheme.accent} />
-                <Text style={styles.statusLabel}>
-                  {state.trackingLost ? 'LOOKING FOR YOU' : 'HOLD STILL'}
-                </Text>
-              </View>
-              <Text style={styles.guidanceTitle}>{SYNC_LINES[syncLine]}</Text>
-            </>
-          )}
+            <Text style={styles.skipText}>Skip</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -821,11 +753,13 @@ function IntroScreen({
       </View>
       <View style={styles.introCopy}>
         <Text style={styles.introTitle}>Your body is the controller.</Text>
-        <Text style={styles.introSub}>Turn on your camera so the game can see your moves.</Text>
+        <Text style={styles.introSub}>
+          Turn on your camera, step back until you see yourself, hold still for three seconds.
+        </Text>
         <View style={styles.tip}>
-          <Ionicons name="sunny-outline" size={15} color={colors.lime} />
+          <Ionicons name="body-outline" size={15} color={colors.lime} />
           <Text style={styles.tipText}>
-            Find some space and good lighting. You will need room to jump and dodge.
+            Head to hips in frame is all it needs. Legs are optional.
           </Text>
         </View>
       </View>
@@ -869,7 +803,7 @@ function IntroScreen({
             <Text style={styles.privacy}>
               {recording
                 ? 'Processed on your phone. Your run video stays on this device unless you share it.'
-                : 'Processed on your phone. Not recorded unless you turn on "Record my run".'}
+                : 'Processed on your phone. Nothing is recorded unless you turn on "Record my runs".'}
             </Text>
           </>
         )}
@@ -916,7 +850,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.black },
   emptyCamera: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.bg },
   topScrim: { position: 'absolute', top: 0, left: 0, right: 0, height: 190 },
-  bottomScrim: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 340 },
+  bottomScrim: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 220 },
   close: {
     position: 'absolute',
     left: spacing.lg,
@@ -936,120 +870,43 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: font.bold,
   },
-  tvHelp: {
+  topRight: {
     position: 'absolute',
     right: spacing.lg,
     zIndex: 10,
-    height: 42,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+  },
+  roundControl: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: radius.pill,
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
-  tvHelpConnected: { borderWidth: 1, borderColor: colors.lime },
-  tvHelpText: { color: colors.white, fontSize: 12, fontWeight: font.bold },
-  tvHelpTextConnected: { color: colors.lime },
+  roundControlOn: { borderWidth: 1, borderColor: 'rgba(215,255,62,0.6)' },
   eyebrow: { ...type.micro, color: colors.lime, letterSpacing: 1.7 },
   runName: { ...type.h3, color: colors.white, marginTop: 3 },
-  guidance: {
+  footer: {
     position: 'absolute',
-    left: spacing.xl,
-    right: spacing.xl,
+    left: 0,
+    right: 0,
     alignItems: 'center',
   },
-  statusRow: {
-    flexDirection: 'row',
+  skip: {
+    minHeight: 44,
+    minWidth: 96,
     alignItems: 'center',
-    gap: spacing.xs,
-    marginBottom: spacing.sm,
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
     borderRadius: radius.pill,
-    backgroundColor: colors.textFaint,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
   },
-  statusDotReady: { backgroundColor: colors.lime },
-  statusLabel: {
-    ...type.micro,
-    color: colors.white,
-    letterSpacing: 1.4,
-  },
-  guidanceTitle: {
-    ...type.h1,
-    color: colors.white,
-    fontSize: 30,
-    lineHeight: 34,
-    textAlign: 'center',
-  },
-  guidanceTitleOk: { color: colors.lime },
-  setupGuidance: {
-    ...type.body,
-    color: 'rgba(255,255,255,0.82)',
-    textAlign: 'center',
-    marginTop: spacing.sm,
-    maxWidth: 320,
-  },
-  readyLabel: {
-    ...type.micro,
-    color: colors.lime,
-    letterSpacing: 2,
-  },
-  countdown: {
-    ...metric,
-    color: colors.white,
-    fontSize: 104,
-    lineHeight: 112,
-    fontWeight: font.heavy,
-    letterSpacing: -3,
-  },
-  helpLink: { marginTop: spacing.lg, paddingVertical: spacing.xs },
-  helpLinkText: {
-    ...type.bodySm,
-    color: 'rgba(255,255,255,0.66)',
-    fontWeight: font.bold,
-    textAlign: 'center',
-  },
-  helpLinkStrong: { color: colors.white, textDecorationLine: 'underline' },
-  movePrompt: {
-    position: 'absolute',
-    top: '26%',
-    left: spacing.xl,
-    right: spacing.xl,
-    alignItems: 'center',
-  },
-  movePromptText: {
-    ...type.hero,
-    fontSize: 58,
-    lineHeight: 62,
-    textAlign: 'center',
-    marginTop: spacing.sm,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
-  },
-  moveHint: {
-    ...type.body,
-    color: 'rgba(255,255,255,0.86)',
-    marginTop: spacing.sm,
-    textAlign: 'center',
-  },
-  moveDots: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
-  moveDot: {
-    width: 10,
-    height: 10,
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(255,255,255,0.28)',
-  },
-  moveDotActive: {
-    width: 14,
-    height: 14,
-    borderWidth: 2,
-    borderColor: colors.white,
-    backgroundColor: 'transparent',
-  },
+  skipText: { color: 'rgba(255,255,255,0.86)', fontSize: 14, fontWeight: font.bold, letterSpacing: 0.4 },
   endCard: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',

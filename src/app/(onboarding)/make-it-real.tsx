@@ -107,7 +107,7 @@ export default function MakeItRealScreen() {
         <Text style={styles.eyebrow}>Almost there</Text>
         <Text style={styles.title}>Let&apos;s make it real</Text>
         <Text style={styles.sub}>
-          Your first session, exactly as you set it. One quick camera calibration and
+          Your first session, exactly as you set it. A five-second camera check and
           it&apos;s ready to start.
         </Text>
 
@@ -163,11 +163,11 @@ export default function MakeItRealScreen() {
         <View style={styles.headsUp}>
           <Ionicons name="camera-outline" size={14} color={colors.lime} />
           <Text style={styles.headsUpText} numberOfLines={1}>
-            Next: turn on your camera and try your first moves.
+            Next: turn on your camera and hold still for three seconds.
           </Text>
         </View>
         <GradientButton
-          label="Calibrate my camera"
+          label="Set up my camera"
           icon="scan-outline"
           accent="lime"
           onPress={level ? onCalibrate : undefined}

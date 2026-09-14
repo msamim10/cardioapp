@@ -3,61 +3,76 @@ import assert from 'node:assert/strict';
 // intentionally disallows source imports with a .ts suffix.
 import {
   createPreflightFlowState,
-  currentTestMove,
   END_CARD_MS,
   flowElapsedSeconds,
   FRAMING_DEBOUNCE_MS,
-  FRAMING_FALLBACK_MS,
+  HOLD_LOCK_GRACE_MS,
+  HOLD_MS,
+  holdProgress,
   isCameraPhase,
-  MOVE_TEST_ORDER,
   reducePreflightFlow,
+  spokenPrompt,
   type PreflightFlowEvent,
   type PreflightFlowState,
   // @ts-expect-error -- required by Node's type-stripping ESM resolver
 } from '../src/lib/preflightFlow.ts';
 import {
-  PREFLIGHT_COUNTDOWN_SECONDS,
-  PREFLIGHT_EXPRESS_COUNTDOWN_SECONDS,
-  PREFLIGHT_STABLE_FRAMES,
-  // @ts-expect-error -- required by Node's type-stripping ESM resolver
-} from '../src/lib/preflightState.ts';
-import {
-  FRAMING_MAX_HEIGHT,
-  FRAMING_MIN_HEIGHT,
+  bodyVisible,
+  FRAMING_HEAD_MARGIN,
+  FRAMING_MAX_TORSO,
+  FRAMING_MIN_TORSO,
+  FRAMING_WORD,
   skeletonFraming,
   type FramingVerdict,
   // @ts-expect-error -- required by Node's type-stripping ESM resolver
 } from '../src/lib/skeletonFraming.ts';
+import {
+  CALIBRATION_SESSION_MS,
+  hasFreshCalibration,
+  shouldShowWarmup,
+  WARMUP_RUN_COUNT,
+  // @ts-expect-error -- required by Node's type-stripping ESM resolver
+} from '../src/lib/calibrationSession.ts';
+import {
+  INITIAL_SPEECH_GATE,
+  nextUtterance,
+  SPEECH_MIN_GAP_MS,
+  // @ts-expect-error -- required by Node's type-stripping ESM resolver
+} from '../src/lib/speechGate.ts';
 import type { Move, PoseFrame, PoseJoint, TrackingStatus } from '../src/lib/poseTracking';
 
 // ---------------------------------------------------------------------------
-// skeletonFraming: synthetic frames with a given height fraction / clipping.
+// skeletonFraming: synthetic frames with a given torso fraction / clipping.
 
-/** Standing body whose skeleton spans `height` of the frame, centered at `centerY`. */
+/**
+ * Body whose shoulder→hip distance spans `torso` of the frame, hips centred
+ * at (`x`, `hipY`). Legs extend below the hips by 1.5 torso (may run off the
+ * frame — that is the point).
+ */
 function bodyFrame(
-  height: number,
-  options: { centerY?: number; drop?: PoseJoint[]; shiftX?: number; lowConfidence?: PoseJoint[] } = {},
+  torso: number,
+  options: { hipY?: number; x?: number; drop?: PoseJoint[]; lowConfidence?: PoseJoint[] } = {},
 ): PoseFrame {
-  const centerY = options.centerY ?? 0.5;
-  const top = centerY - height / 2;
-  const at = (fraction: number) => top + fraction * height;
-  const x = 0.5 + (options.shiftX ?? 0);
+  const hipY = options.hipY ?? 0.55;
+  const x = options.x ?? 0.5;
+  const shoulderY = hipY - torso;
+  const w = torso * 0.55;
   const layout: Record<PoseJoint, [number, number]> = {
-    nose: [x, at(0)],
-    neck: [x, at(0.1)],
-    leftShoulder: [x - 0.07, at(0.13)],
-    rightShoulder: [x + 0.07, at(0.13)],
-    leftElbow: [x - 0.1, at(0.32)],
-    rightElbow: [x + 0.1, at(0.32)],
-    leftWrist: [x - 0.12, at(0.5)],
-    rightWrist: [x + 0.12, at(0.5)],
-    root: [x, at(0.47)],
-    leftHip: [x - 0.045, at(0.48)],
-    rightHip: [x + 0.045, at(0.48)],
-    leftKnee: [x - 0.045, at(0.74)],
-    rightKnee: [x + 0.045, at(0.74)],
-    leftAnkle: [x - 0.05, at(1)],
-    rightAnkle: [x + 0.05, at(1)],
+    nose: [x, shoulderY - torso * 0.42],
+    neck: [x, shoulderY - torso * 0.12],
+    leftShoulder: [x - w / 2, shoulderY],
+    rightShoulder: [x + w / 2, shoulderY],
+    leftElbow: [x - w * 0.7, shoulderY + torso * 0.55],
+    rightElbow: [x + w * 0.7, shoulderY + torso * 0.55],
+    leftWrist: [x - w * 0.8, hipY + torso * 0.1],
+    rightWrist: [x + w * 0.8, hipY + torso * 0.1],
+    root: [x, hipY - 0.01],
+    leftHip: [x - w * 0.3, hipY],
+    rightHip: [x + w * 0.3, hipY],
+    leftKnee: [x - w * 0.3, hipY + torso * 0.75],
+    rightKnee: [x + w * 0.3, hipY + torso * 0.75],
+    leftAnkle: [x - w * 0.33, hipY + torso * 1.5],
+    rightAnkle: [x + w * 0.33, hipY + torso * 1.5],
   };
   const drop = new Set(options.drop ?? []);
   const low = new Set(options.lowConfidence ?? []);
@@ -68,6 +83,8 @@ function bodyFrame(
     sourceHeight: 1280,
     keypoints: (Object.keys(layout) as PoseJoint[])
       .filter((name) => !drop.has(name))
+      // Anything outside the frame is simply not detected.
+      .filter((name) => layout[name][1] >= 0 && layout[name][1] <= 1)
       .map((name) => ({
         name,
         x: layout[name][0],
@@ -82,58 +99,66 @@ const close = (actual: number, expected: number, message?: string) =>
 
 {
   assert.equal(skeletonFraming(null).verdict, 'searching');
-  const empty = skeletonFraming({ ...bodyFrame(0.7), keypoints: [] });
+  const empty = skeletonFraming({ ...bodyFrame(0.25), keypoints: [] });
   assert.equal(empty.verdict, 'searching');
-  assert.equal(empty.heightFraction, 0);
+  assert.equal(empty.torsoFraction, 0);
 
-  const small = skeletonFraming(bodyFrame(0.45));
-  close(small.heightFraction, 0.45, 'height');
-  assert.equal(small.verdict, 'closer', 'below 0.6 → move closer');
-  assert.equal(small.ok, false);
-
-  const edge = skeletonFraming(bodyFrame(FRAMING_MIN_HEIGHT));
-  assert.equal(edge.verdict, 'ok', 'exactly 0.6 is inside the band');
-
-  const good = skeletonFraming(bodyFrame(0.7));
-  assert.equal(good.verdict, 'ok');
-  assert.equal(good.ok, true);
-  assert.deepEqual(good.clippedJoints, []);
-
-  const tall = skeletonFraming(bodyFrame(0.85));
-  assert.equal(tall.verdict, 'back', 'above 0.8 → move back');
-  assert.equal(skeletonFraming(bodyFrame(FRAMING_MAX_HEIGHT)).verdict, 'ok', 'exactly 0.8 is inside');
-
-  // Feet run off the bottom edge: ankles missing while the knees sit at the floor.
-  const feetCut = skeletonFraming(bodyFrame(0.7, { centerY: 0.62, drop: ['leftAnkle', 'rightAnkle'] }));
-  assert.equal(feetCut.verdict, 'closer', 'small visible height without an edge contact is not clipping');
-  const feetAtEdge = skeletonFraming(
-    bodyFrame(0.9, { centerY: 0.77, drop: ['leftAnkle', 'rightAnkle'] }),
+  // Legs optional: a frame with no knees or ankles at all frames fine.
+  const legless = skeletonFraming(
+    bodyFrame(0.25, { drop: ['leftKnee', 'rightKnee', 'leftAnkle', 'rightAnkle'] }),
   );
-  assert.ok(feetAtEdge.clippedJoints.includes('leftAnkle'), 'knees at the bottom edge → feet clipped');
-  assert.equal(feetAtEdge.verdict, 'back');
+  close(legless.torsoFraction, 0.25, 'torso');
+  assert.equal(legless.verdict, 'ok', 'head + shoulders + hips is enough');
+  assert.equal(legless.ok, true);
+  assert.deepEqual(legless.clippedJoints, []);
+  assert.equal(bodyVisible(bodyFrame(0.25, { drop: ['leftAnkle', 'rightAnkle'] })), true);
 
-  // Head against the top edge (0.7 tall, centered high) → clipped → back.
-  const headCut = skeletonFraming(bodyFrame(0.7, { centerY: 0.36 }));
-  assert.ok(headCut.clippedJoints.includes('nose'));
-  assert.equal(headCut.verdict, 'back');
+  // Legs running off the bottom of the frame (phone on a desk) is not clipping.
+  const desk = skeletonFraming(bodyFrame(0.3, { hipY: 0.98 }));
+  assert.equal(desk.verdict, 'back', 'hips against the bottom edge are clipped');
+  const deskOk = skeletonFraming(bodyFrame(0.3, { hipY: 0.82 }));
+  assert.equal(deskOk.verdict, 'ok', 'hips in, knees off the bottom → fine');
 
-  // Ankles visible but pressed against the bottom edge count as clipped.
-  const anklesEdge = skeletonFraming(bodyFrame(0.7, { centerY: 0.64 }));
-  assert.ok(anklesEdge.clippedJoints.includes('leftAnkle'));
-  assert.equal(anklesEdge.verdict, 'back');
+  const small = skeletonFraming(bodyFrame(0.12));
+  assert.equal(small.verdict, 'closer', 'below the torso floor → come closer');
+  assert.equal(skeletonFraming(bodyFrame(FRAMING_MIN_TORSO)).verdict, 'ok', 'floor is inclusive');
+
+  const huge = skeletonFraming(bodyFrame(0.4, { hipY: 0.8 }));
+  assert.equal(huge.verdict, 'back', 'above the torso ceiling → step back');
+  assert.equal(
+    skeletonFraming(bodyFrame(FRAMING_MAX_TORSO, { hipY: 0.8 })).verdict,
+    'ok',
+    'ceiling is inclusive',
+  );
+
+  // No headroom for a jump: nose too close to the top → step back.
+  const headHigh = skeletonFraming(bodyFrame(0.25, { hipY: 0.25 + 0.25 * 0.42 + FRAMING_HEAD_MARGIN - 0.01 }));
+  assert.ok(headHigh.clippedJoints.includes('nose'));
+  assert.equal(headHigh.verdict, 'back');
 
   // A shoulder off the side of the frame → clipped → back.
-  const sideCut = skeletonFraming(bodyFrame(0.7, { shiftX: 0.43 }));
+  const sideCut = skeletonFraming(bodyFrame(0.25, { x: 0.95 }));
   assert.ok(sideCut.clippedJoints.includes('rightShoulder'));
   assert.equal(sideCut.verdict, 'back');
 
-  // Low-confidence hips are not "seen": a single hip missing still frames,
-  // both missing means no body.
-  assert.equal(skeletonFraming(bodyFrame(0.7, { lowConfidence: ['leftHip'] })).verdict, 'back');
+  // Off-centre but inside the frame → center up.
+  assert.equal(skeletonFraming(bodyFrame(0.22, { x: 0.15 })).verdict, 'center');
+  assert.equal(skeletonFraming(bodyFrame(0.22, { x: 0.85 })).verdict, 'center');
+  assert.equal(bodyVisible(bodyFrame(0.22, { x: 0.15 })), true, 'visible even when off-centre');
+
+  // Low-confidence hips are not "seen": a single hip missing still frames
+  // (as clipped), both missing means no body.
+  assert.equal(skeletonFraming(bodyFrame(0.25, { lowConfidence: ['leftHip'] })).verdict, 'back');
   assert.equal(
-    skeletonFraming(bodyFrame(0.7, { lowConfidence: ['leftHip', 'rightHip'] })).verdict,
+    skeletonFraming(bodyFrame(0.25, { lowConfidence: ['leftHip', 'rightHip'] })).verdict,
     'searching',
   );
+  assert.equal(bodyVisible(bodyFrame(0.25, { lowConfidence: ['leftHip', 'rightHip'] })), false);
+
+  // Every verdict has a big word.
+  for (const verdict of ['searching', 'closer', 'back', 'center', 'ok'] as FramingVerdict[]) {
+    assert.ok(FRAMING_WORD[verdict].length > 0 && FRAMING_WORD[verdict].length <= 10, verdict);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -141,9 +166,9 @@ const close = (actual: number, expected: number, message?: string) =>
 
 type Flow = { state: PreflightFlowState; now: number };
 
-function start(firstRun: boolean, express = false): Flow {
+function start(firstRun: boolean): Flow {
   const now = 1_000_000;
-  let state = createPreflightFlowState({ firstRun, express, now });
+  let state = createPreflightFlowState({ firstRun, now });
   assert.equal(state.phase, 'permission');
   assert.equal(isCameraPhase(state.phase), false);
   assert.equal(flowElapsedSeconds(state, now + 5_000), 0, 'timer idle before the camera');
@@ -162,10 +187,9 @@ function frame(
   framing: FramingVerdict,
   status: TrackingStatus = 'tracking',
   move: Move | null = null,
-  readiness: 'ready' | 'return-to-center' = 'ready',
 ) {
   flow.now += 100;
-  send(flow, { type: 'FRAME', now: flow.now, framing, status, move, readiness });
+  send(flow, { type: 'FRAME', now: flow.now, framing, status, move });
 }
 
 function frames(
@@ -174,21 +198,22 @@ function frames(
   framing: FramingVerdict,
   status: TrackingStatus = 'tracking',
   move: Move | null = null,
-  readiness: 'ready' | 'return-to-center' = 'ready',
 ) {
-  for (let index = 0; index < count; index += 1) frame(flow, framing, status, move, readiness);
+  for (let index = 0; index < count; index += 1) frame(flow, framing, status, move);
 }
 
-// Framing messages debounce: a new verdict needs ≥ 400 ms before it shows.
+// Framing words debounce: a new verdict needs ≥ 400 ms before it shows.
 {
   const flow = start(false);
   assert.equal(flow.state.framing, 'searching');
+  assert.equal(spokenPrompt(flow.state), 'Step into frame');
   frame(flow, 'closer', 'calibrating');
   assert.equal(flow.state.framing, 'searching', 'first differing frame only starts the candidate');
   frames(flow, 3, 'closer', 'calibrating'); // 300 ms after candidate start
   assert.equal(flow.state.framing, 'searching', 'still debouncing at 300 ms');
   frame(flow, 'closer', 'calibrating'); // 400 ms
   assert.equal(flow.state.framing, 'closer', `shows after ${FRAMING_DEBOUNCE_MS} ms`);
+  assert.equal(spokenPrompt(flow.state), 'Come closer');
 
   // Flicker: a single 'back' frame between 'closer' frames never shows.
   frame(flow, 'back', 'calibrating');
@@ -198,65 +223,127 @@ function frames(
   assert.equal(flow.state.framing, 'closer', 'flicker suppressed');
   assert.equal(flow.state.framingCandidate, null, 'candidate cleared when the shown verdict recurs');
 
-  // Analyzer calibrated but framing not ok → stay in Phase 1.
+  // Analyzer calibrated but framing not ok → still framing (no hold).
   frames(flow, 5, 'closer', 'tracking');
   assert.equal(flow.state.calibrated, true);
   assert.equal(flow.state.phase, 'framing');
 
-  // Framing ok → advance as soon as both hold (repeat run → handoff).
-  frames(flow, 5, 'ok', 'tracking');
-  assert.equal(flow.state.phase, 'handoff', 'repeat runs skip the test drive');
-}
-
-// Calibrated arriving AFTER framing ok also advances.
-{
-  const flow = start(false);
-  frames(flow, 6, 'ok', 'calibrating');
-  assert.equal(flow.state.framing, 'ok');
-  assert.equal(flow.state.phase, 'framing', 'waits for the analyzer baseline');
+  // Framing ok (debounced) → the hold starts without any tap.
+  frames(flow, 4, 'ok', 'tracking');
+  assert.equal(flow.state.phase, 'framing', '300 ms after the first ok frame: still debouncing');
   frame(flow, 'ok', 'tracking');
-  assert.equal(flow.state.phase, 'handoff');
+  assert.equal(flow.state.phase, 'hold', 'hold starts on the frame that settles the debounce');
+  assert.equal(flow.state.holdStartedAt, flow.now);
+  assert.equal(holdProgress(flow.state, flow.now), 0);
+  assert.equal(spokenPrompt(flow.state), 'Perfect, hold still');
 }
 
-// Native "searching" (no frames) shows the searching line after the debounce
-// and flags tracking lost.
+// The hold does not wait for the analyzer: framing ok alone starts the ring,
+// the baseline usually lands during it, and the flow completes on its own.
 {
   const flow = start(false);
-  frames(flow, 6, 'closer', 'calibrating');
-  assert.equal(flow.state.framing, 'closer');
+  frames(flow, 5, 'ok', 'calibrating');
+  assert.equal(flow.state.phase, 'hold', 'ring starts while the analyzer is still calibrating');
+  frames(flow, 15, 'ok', 'calibrating'); // 1.5 s
+  close(holdProgress(flow.state, flow.now), 0.5, 'ring half full');
+  frames(flow, 14, 'ok', 'tracking'); // 2.9 s
+  assert.equal(flow.state.phase, 'hold');
+  frame(flow, 'ok', 'tracking'); // 3.0 s
+  assert.equal(flow.state.phase, 'complete', `completes at ${HOLD_MS} ms`);
+  assert.equal(flow.state.outcome, 'calibrated');
+  assert.equal(spokenPrompt(flow.state), "You're set");
+  // Terminal for user events.
+  send(flow, { type: 'SKIP', now: flow.now });
+  send(flow, { type: 'RETRY', now: flow.now });
+  frame(flow, 'back', 'tracking');
+  assert.equal(flow.state.phase, 'complete');
+  assert.equal(flow.state.outcome, 'calibrated');
+}
+
+// Moving during the hold restarts the ring, not the phase.
+{
+  const flow = start(false);
+  frames(flow, 5, 'ok', 'tracking');
+  assert.equal(flow.state.phase, 'hold');
+  frames(flow, 20, 'ok', 'tracking'); // 2 s in
+  close(holdProgress(flow.state, flow.now), 2 / 3, 'ring at 2 s');
+  frame(flow, 'ok', 'tracking', 'Jump');
+  assert.equal(flow.state.phase, 'hold', 'still holding');
+  assert.equal(holdProgress(flow.state, flow.now), 0, 'a move restarts the ring');
+  assert.equal(flow.state.holdRestarts, 1);
+  frames(flow, 30, 'ok', 'tracking');
+  assert.equal(flow.state.phase, 'complete');
+}
+
+// Drifting out of frame during the hold drops back to framing (debounced),
+// keeps the verdict that caused it, and the ring starts over once re-framed.
+{
+  const flow = start(false);
+  frames(flow, 5, 'ok', 'tracking');
+  frames(flow, 10, 'ok', 'tracking');
+  frames(flow, 4, 'back', 'tracking');
+  assert.equal(flow.state.phase, 'hold', 'a short wobble is debounced');
+  frame(flow, 'back', 'tracking');
+  assert.equal(flow.state.phase, 'framing', 'sustained "back" drops the hold');
+  assert.equal(flow.state.framing, 'back', 'the big word is instant');
+  assert.equal(flow.state.holdRestarts, 1);
+  assert.equal(flow.state.calibrated, true, 'the analyzer baseline is not forgotten');
+  frames(flow, 5, 'ok', 'tracking');
+  assert.equal(flow.state.phase, 'hold');
+  assert.equal(holdProgress(flow.state, flow.now), 0);
+}
+
+// Native "searching" (no frames) during the hold: debounced, then drops.
+{
+  const flow = start(false);
+  frames(flow, 5, 'ok', 'tracking');
   flow.now += 100;
   send(flow, { type: 'TRACKING_LOST', now: flow.now });
   assert.equal(flow.state.trackingLost, true);
-  assert.equal(flow.state.framing, 'closer', 'debounced');
+  assert.equal(flow.state.phase, 'hold', 'debounced');
   flow.now += FRAMING_DEBOUNCE_MS;
   send(flow, { type: 'TRACKING_LOST', now: flow.now });
+  assert.equal(flow.state.phase, 'framing');
   assert.equal(flow.state.framing, 'searching');
 }
 
-// 10 s fallback: offered on the reducer clock, from ticks or frames.
+// Ring full but no analyzer lock: "Hold still" stays up for the grace, then
+// the run starts on defaults (calibrates live) — nobody is trapped here.
 {
   const flow = start(false);
-  send(flow, { type: 'TICK', now: flow.now + FRAMING_FALLBACK_MS - 1 });
-  assert.equal(flow.state.fallbackOffered, false);
-  send(flow, { type: 'TICK', now: flow.now + FRAMING_FALLBACK_MS });
-  assert.equal(flow.state.fallbackOffered, true, 'offered at 10 s');
-  // Not calibrated → defaults: the run starts without a snapshot.
-  send(flow, { type: 'FALLBACK_CONTINUE', now: flow.now + FRAMING_FALLBACK_MS + 500 });
+  frames(flow, 5, 'ok', 'calibrating');
+  frames(flow, 30, 'ok', 'calibrating'); // 3 s
+  assert.equal(flow.state.phase, 'hold', 'ring full, waiting on the baseline');
+  assert.equal(holdProgress(flow.state, flow.now), 1);
+  send(flow, { type: 'TICK', now: flow.now + HOLD_LOCK_GRACE_MS - 1 });
+  assert.equal(flow.state.phase, 'hold');
+  send(flow, { type: 'TICK', now: flow.now + HOLD_LOCK_GRACE_MS });
   assert.equal(flow.state.phase, 'complete');
   assert.equal(flow.state.outcome, 'defaults');
 
-  // Calibrated but framing never ok → "good enough" advances normally.
-  const stuck = start(true);
-  frames(stuck, 105, 'closer', 'tracking'); // 10.5 s of frames
-  assert.equal(stuck.state.fallbackOffered, true, 'frames also advance the fallback clock');
-  assert.equal(stuck.state.calibrated, true);
-  send(stuck, { type: 'FALLBACK_CONTINUE', now: stuck.now });
-  assert.equal(stuck.state.phase, 'moves', 'calibrated fallback keeps the flow, first run → moves');
-  assert.equal(stuck.state.outcome, null);
+  // …but a late lock inside the grace completes calibrated.
+  const late = start(false);
+  frames(late, 35, 'ok', 'calibrating');
+  frame(late, 'ok', 'tracking');
+  assert.equal(late.state.outcome, 'calibrated');
+}
 
-  // Ignored outside Phase 1.
-  send(stuck, { type: 'FALLBACK_CONTINUE', now: stuck.now });
-  assert.equal(stuck.state.phase, 'moves');
+// Skip: calibrated → hands off; not calibrated → defaults. Ignored elsewhere.
+{
+  const flow = start(false);
+  frames(flow, 3, 'closer', 'calibrating');
+  send(flow, { type: 'SKIP', now: flow.now });
+  assert.equal(flow.state.phase, 'complete');
+  assert.equal(flow.state.outcome, 'defaults');
+
+  const locked = start(false);
+  frames(locked, 6, 'closer', 'tracking');
+  send(locked, { type: 'SKIP', now: locked.now });
+  assert.equal(locked.state.outcome, 'calibrated');
+
+  let idle = createPreflightFlowState({ firstRun: false, now: 0 });
+  idle = reducePreflightFlow(idle, { type: 'SKIP', now: 0 });
+  assert.equal(idle.phase, 'permission', 'skip needs a live camera');
 }
 
 // Denied / unavailable: explicit continue-without-camera → outcome 'off'.
@@ -266,22 +353,22 @@ function frames(
   state = reducePreflightFlow(state, { type: 'CONTINUE_WITHOUT_CAMERA', now });
   assert.equal(state.phase, 'complete');
   assert.equal(state.outcome, 'off');
+  assert.equal(spokenPrompt(state), null, 'nothing to say without a camera');
 
   const flow = start(false);
   send(flow, { type: 'UNAVAILABLE', now: flow.now });
   assert.equal(flow.state.phase, 'unavailable');
-  send(flow, { type: 'FRAME', now: flow.now, framing: 'ok', status: 'tracking', move: null, readiness: 'ready' });
+  send(flow, { type: 'FRAME', now: flow.now, framing: 'ok', status: 'tracking', move: null });
   assert.equal(flow.state.phase, 'unavailable', 'frames ignored while unavailable');
   send(flow, { type: 'RETRY', now: flow.now });
   assert.equal(flow.state.phase, 'framing');
-  assert.equal(flow.state.fallbackOffered, false);
+  assert.equal(flow.state.holdStartedAt, null);
   send(flow, { type: 'UNAVAILABLE', now: flow.now });
   send(flow, { type: 'CONTINUE_WITHOUT_CAMERA', now: flow.now });
   assert.equal(flow.state.outcome, 'off');
   // Terminal for user events…
   send(flow, { type: 'RETRY', now: flow.now });
-  send(flow, { type: 'FALLBACK_CONTINUE', now: flow.now });
-  send(flow, { type: 'COUNTDOWN_TICK', now: flow.now });
+  send(flow, { type: 'SKIP', now: flow.now });
   assert.equal(flow.state.phase, 'complete');
   // …but a failed handoff after completion must still be surfaceable.
   send(flow, { type: 'UNAVAILABLE', now: flow.now });
@@ -289,176 +376,96 @@ function frames(
   assert.equal(flow.state.outcome, null);
 }
 
-// First run: framing → moves (JUMP, DUCK, DODGE LEFT, DODGE RIGHT) → handoff.
-function toMoves(): Flow {
-  const flow = start(true);
-  frames(flow, 6, 'ok', 'tracking');
-  assert.equal(flow.state.phase, 'moves');
-  assert.equal(currentTestMove(flow.state), 'Jump');
-  return flow;
-}
-
+// First run and repeat run take the same path now (no move test drive).
 {
-  const flow = toMoves();
-  assert.deepEqual(MOVE_TEST_ORDER, ['Jump', 'Duck', 'Left', 'Right']);
-
-  // Wrong move does not advance; the expected one does.
-  frame(flow, 'ok', 'tracking', 'Left');
-  assert.equal(flow.state.moveIndex, 0, 'a different move is ignored');
-  frame(flow, 'ok', 'tracking', 'Jump');
-  assert.equal(flow.state.moveIndex, 1);
-  assert.deepEqual(flow.state.completedMoves, ['Jump']);
-  assert.equal(currentTestMove(flow.state), 'Duck');
-
-  // Neutral frames between moves (analyzer cooldown/rearm) change nothing.
-  frames(flow, 4, 'ok', 'tracking', null, 'return-to-center');
-  assert.equal(flow.state.moveIndex, 1);
-
-  frame(flow, 'ok', 'tracking', 'Duck');
-  frame(flow, 'ok', 'tracking', 'Left');
-  assert.equal(currentTestMove(flow.state), 'Right');
-  frame(flow, 'ok', 'tracking', 'Right');
-  assert.equal(flow.state.phase, 'handoff', 'fourth move completes the test drive');
-  assert.equal(flow.state.movesDone, true);
-  assert.deepEqual(flow.state.completedMoves, ['Jump', 'Duck', 'Left', 'Right']);
-  assert.deepEqual(flow.state.skippedMoves, []);
-}
-
-// Skipping never blocks: each skip advances and is recorded.
-{
-  const flow = toMoves();
-  send(flow, { type: 'SKIP_MOVE', now: flow.now });
-  assert.equal(currentTestMove(flow.state), 'Duck');
-  frame(flow, 'ok', 'tracking', 'Duck');
-  send(flow, { type: 'SKIP_MOVE', now: flow.now });
-  send(flow, { type: 'SKIP_MOVE', now: flow.now });
-  assert.equal(flow.state.phase, 'handoff');
-  assert.deepEqual(flow.state.skippedMoves, ['Jump', 'Left', 'Right']);
-  assert.deepEqual(flow.state.completedMoves, ['Duck']);
-  send(flow, { type: 'SKIP_MOVE', now: flow.now });
-  assert.equal(flow.state.phase, 'handoff', 'skip outside Phase 2 is a no-op');
-}
-
-// Body lost during the test drive: a brief loss keeps the phase; the analyzer
-// dropping its baseline (status calibrating) returns to framing with the
-// earned moves intact, then resumes where it left off.
-{
-  const flow = toMoves();
-  frame(flow, 'ok', 'tracking', 'Jump');
-  frame(flow, 'searching', 'searching');
-  assert.equal(flow.state.phase, 'moves');
-  assert.equal(flow.state.trackingLost, true);
-  frame(flow, 'ok', 'reconnecting');
-  frame(flow, 'ok', 'tracking');
-  assert.equal(flow.state.trackingLost, false);
-
-  frame(flow, 'ok', 'calibrating');
-  assert.equal(flow.state.phase, 'framing', 'baseline lost → re-frame');
-  assert.equal(flow.state.calibrated, false);
-  assert.equal(flow.state.moveIndex, 1, 'progress kept');
-  frames(flow, 6, 'ok', 'tracking');
-  assert.equal(flow.state.phase, 'moves');
-  assert.equal(currentTestMove(flow.state), 'Duck');
-}
-
-// Phase 3: PREFLIGHT_STABLE_FRAMES neutral frames start the countdown; any
-// move or non-ready frame restarts the hold; the countdown reaching 0
-// completes with a calibrated handoff. Guided = 3 s, express = 2 s.
-function toHandoff(express: boolean): Flow {
-  const flow = start(false, express);
-  frames(flow, 4, 'ok', 'tracking');
-  assert.equal(flow.state.phase, 'framing', '300 ms after the first ok frame: still debouncing');
-  frame(flow, 'ok', 'tracking');
-  assert.equal(flow.state.phase, 'handoff', 'advances on the frame that settles the debounce');
-  assert.equal(flow.state.stableFrames, 0);
-  return flow;
-}
-
-{
-  const flow = toHandoff(false);
-  frames(flow, PREFLIGHT_STABLE_FRAMES - 1, 'ok', 'tracking');
-  assert.equal(flow.state.countdown, null);
-  frame(flow, 'ok', 'tracking', 'Jump');
-  assert.equal(flow.state.stableFrames, 0, 'a move restarts the hold');
-  frames(flow, PREFLIGHT_STABLE_FRAMES - 1, 'ok', 'tracking');
-  frame(flow, 'ok', 'tracking', null, 'return-to-center');
-  assert.equal(flow.state.stableFrames, 0, 'not-ready restarts the hold');
-  frames(flow, PREFLIGHT_STABLE_FRAMES, 'ok', 'tracking');
-  assert.equal(flow.state.countdown, PREFLIGHT_COUNTDOWN_SECONDS, 'guided countdown');
-
-  // Tracking lost from the native side during the countdown cancels it.
-  send(flow, { type: 'TRACKING_LOST', now: flow.now });
-  assert.equal(flow.state.countdown, null);
-  assert.equal(flow.state.phase, 'handoff');
-  frames(flow, PREFLIGHT_STABLE_FRAMES, 'ok', 'tracking');
-  assert.equal(flow.state.countdown, PREFLIGHT_COUNTDOWN_SECONDS);
-
-  // Steady frames during the countdown do not change it; ticks do.
-  frames(flow, 3, 'ok', 'tracking');
-  assert.equal(flow.state.countdown, PREFLIGHT_COUNTDOWN_SECONDS);
-  for (let remaining = PREFLIGHT_COUNTDOWN_SECONDS; remaining > 1; remaining -= 1) {
-    send(flow, { type: 'COUNTDOWN_TICK', now: flow.now });
-    assert.equal(flow.state.countdown, remaining - 1);
+  const first = start(true);
+  const repeat = start(false);
+  for (const flow of [first, repeat]) {
+    frames(flow, 5, 'ok', 'calibrating');
+    frames(flow, 30, 'ok', 'tracking');
+    assert.equal(flow.state.phase, 'complete');
+    assert.equal(flow.state.outcome, 'calibrated');
   }
-  send(flow, { type: 'COUNTDOWN_TICK', now: flow.now });
-  assert.equal(flow.state.phase, 'complete');
-  assert.equal(flow.state.outcome, 'calibrated');
-  send(flow, { type: 'COUNTDOWN_TICK', now: flow.now });
-  assert.equal(flow.state.phase, 'complete', 'terminal');
+  assert.equal(first.state.firstRun, true);
 }
 
-{
-  const flow = toHandoff(true);
-  frames(flow, PREFLIGHT_STABLE_FRAMES, 'ok', 'tracking');
-  assert.equal(flow.state.countdown, PREFLIGHT_EXPRESS_COUNTDOWN_SECONDS, 'express countdown');
-  // Express can be revoked (proportion mismatch) — only affects the next lock.
-  send(flow, { type: 'SET_EXPRESS', express: false });
-  assert.equal(flow.state.countdown, PREFLIGHT_EXPRESS_COUNTDOWN_SECONDS);
-  send(flow, { type: 'TRACKING_LOST', now: flow.now });
-  frames(flow, PREFLIGHT_STABLE_FRAMES, 'ok', 'tracking');
-  assert.equal(flow.state.countdown, PREFLIGHT_COUNTDOWN_SECONDS);
-}
-
-// Baseline lost in Phase 3 → back to framing, and (first run) straight back to
-// handoff afterwards because the test drive is already done.
-{
-  const flow = toMoves();
-  for (const move of MOVE_TEST_ORDER) frame(flow, 'ok', 'tracking', move);
-  assert.equal(flow.state.phase, 'handoff');
-  frame(flow, 'ok', 'calibrating');
-  assert.equal(flow.state.phase, 'framing');
-  frames(flow, 6, 'ok', 'tracking');
-  assert.equal(flow.state.phase, 'handoff', 'moves are not repeated');
-}
-
-// Happy-path budget: Phase 1 ≈ 5 s, Phase 2 ≈ 4 × 3 s, Phase 3 ≈ 2–3 s.
+// Happy-path budget: ~2 s walking in + 3 s hold ≈ 5 s (+ the first-run card).
 {
   const flow = start(true);
   const t0 = flow.now;
-  frames(flow, 20, 'closer', 'calibrating'); // 2 s walking in
-  frames(flow, 25, 'ok', 'calibrating'); // 2.5 s: analyzer's 20 stable frames
-  frame(flow, 'ok', 'tracking');
-  assert.equal(flow.state.phase, 'moves');
-  const phase1 = flow.now - t0;
-  for (const move of MOVE_TEST_ORDER) {
-    frames(flow, 20, 'ok', 'tracking', null, 'return-to-center'); // ~2 s settle
-    frame(flow, 'ok', 'tracking', move);
-  }
-  assert.equal(flow.state.phase, 'handoff');
-  const phase2 = flow.now - t0 - phase1;
-  frames(flow, PREFLIGHT_STABLE_FRAMES, 'ok', 'tracking');
-  for (let tick = 0; tick < PREFLIGHT_COUNTDOWN_SECONDS; tick += 1) {
-    flow.now += 1_000;
-    send(flow, { type: 'COUNTDOWN_TICK', now: flow.now });
-  }
+  frames(flow, 15, 'closer', 'calibrating'); // 1.5 s walking in
+  frames(flow, 5, 'ok', 'calibrating'); // 0.5 s debounce → hold
+  assert.equal(flow.state.phase, 'hold');
+  const framingMs = flow.now - t0;
+  frames(flow, 20, 'ok', 'calibrating'); // analyzer's 20 stable frames
+  frames(flow, 10, 'ok', 'tracking');
   assert.equal(flow.state.phase, 'complete');
-  const total = flow.now - t0 + END_CARD_MS;
-  assert.ok(phase1 <= 5_000, `phase 1 ${phase1} ms`);
-  assert.ok(phase2 <= 12_000, `phase 2 ${phase2} ms`);
-  assert.ok(total <= 30_000, `happy path ${total} ms must stay within ~30 s`);
+  assert.equal(flow.state.outcome, 'calibrated');
+  const total = flow.now - t0;
+  assert.ok(framingMs <= 2_000, `framing ${framingMs} ms`);
+  assert.equal(total - framingMs, HOLD_MS, 'hold is exactly the ring');
+  assert.ok(total + END_CARD_MS <= 7_000, `happy path ${total + END_CARD_MS} ms must stay within ~7 s`);
   close(flowElapsedSeconds(flow.state, flow.now), (flow.now - t0) / 1000, 'dev timer');
 }
 
+// ---------------------------------------------------------------------------
+// Once per session: the stored baseline decides whether preflight is skipped.
+{
+  const now = 1_700_000_000_000;
+  const baseline = {
+    capturedAt: now - 60_000,
+    cameraFacing: 'front' as const,
+    orientation: 'portrait' as const,
+    torsoRatio: 0.3,
+    shoulderRatio: 0.2,
+  };
+  assert.equal(hasFreshCalibration(null, now), false, 'no baseline → full preflight');
+  assert.equal(hasFreshCalibration(baseline, now), true, 'a minute old → skip');
+  assert.equal(
+    hasFreshCalibration(baseline, baseline.capturedAt + CALIBRATION_SESSION_MS),
+    true,
+    'exactly 12 h → still fresh',
+  );
+  assert.equal(
+    hasFreshCalibration(baseline, baseline.capturedAt + CALIBRATION_SESSION_MS + 1),
+    false,
+    'older than 12 h → full preflight',
+  );
+  assert.equal(hasFreshCalibration({ ...baseline, capturedAt: now + 5_000 }, now), false, 'clock skew → not fresh');
+  assert.equal(CALIBRATION_SESSION_MS, 12 * 3_600_000);
+
+  // Warm-up: the first WARMUP_RUN_COUNT runs only.
+  assert.equal(WARMUP_RUN_COUNT, 2);
+  assert.equal(shouldShowWarmup(null), true);
+  assert.equal(shouldShowWarmup({ warmupRunsCompleted: 0 }), true);
+  assert.equal(shouldShowWarmup({ warmupRunsCompleted: 1 }), true);
+  assert.equal(shouldShowWarmup({ warmupRunsCompleted: 2 }), false);
+}
+
+// ---------------------------------------------------------------------------
+// Spoken prompts: ≥ 2.5 s apart, never the same line twice in a row.
+{
+  let gate = INITIAL_SPEECH_GATE;
+  let decision = nextUtterance(gate, 'Step back', 0);
+  assert.equal(decision.speak, true);
+  gate = decision.gate;
+  decision = nextUtterance(gate, 'Step back', 1_000);
+  assert.equal(decision.speak, false, 'same line is not repeated');
+  decision = nextUtterance(gate, 'Come closer', 1_000);
+  assert.equal(decision.speak, false, 'inside the minimum gap');
+  decision = nextUtterance(gate, 'Come closer', SPEECH_MIN_GAP_MS);
+  assert.equal(decision.speak, true, 'gap elapsed → new line spoken');
+  gate = decision.gate;
+  decision = nextUtterance(gate, null, 10_000);
+  assert.equal(decision.speak, false, 'nothing to say');
+  decision = nextUtterance(gate, 'Come closer', 10_000, true);
+  assert.equal(decision.speak, true, 'urgent skips the de-dup');
+  gate = decision.gate;
+  decision = nextUtterance(gate, "You're set", 10_000 + SPEECH_MIN_GAP_MS - 1, true);
+  assert.equal(decision.speak, false, 'urgent never skips the gap');
+  assert.equal(SPEECH_MIN_GAP_MS, 2_500);
+}
+
 console.log(
-  'Preflight flow replay passed: framing verdicts at 0.6/0.8 with edge clipping, 400 ms debounce, calibrated+ok gate, 10 s fallback (defaults vs good-enough), denied/unavailable → off, test drive advance/skip/lost, handoff hold + guided/express countdown, first-run vs repeat paths, ≤ 30 s happy path',
+  'Preflight flow replay passed: upper-body framing (legs optional, torso band 0.16–0.34, head margin, centre band), 400 ms debounce, framing → 3 s hold → auto-complete, move/drift/loss restart the ring, lock grace → defaults, skip, denied/unavailable → off, ~5 s happy path, 12 h session skip, warm-up count, spoken prompt gate',
 );

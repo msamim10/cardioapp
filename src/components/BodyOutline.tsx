@@ -13,11 +13,19 @@ import { colors } from '@/theme';
  */
 export function BodyOutline({
   verdict,
-  heightFraction = 0.7,
+  heightFraction,
+  upperBody = false,
 }: {
   verdict: FramingVerdict;
   heightFraction?: number;
+  /**
+   * Upper-body framing: the figure is anchored near the top and its legs run
+   * off the bottom edge, so it reads as "head to hips in frame, legs
+   * optional" — the band the analyzer actually needs.
+   */
+  upperBody?: boolean;
 }) {
+  const figureHeight = heightFraction ?? (upperBody ? 1.12 : 0.7);
   const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -45,11 +53,11 @@ export function BodyOutline({
   const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.03] });
 
   return (
-    <View pointerEvents="none" style={styles.root}>
+    <View pointerEvents="none" style={[styles.root, upperBody && styles.rootUpper]}>
       <Animated.View
         style={[
           styles.figure,
-          { height: `${Math.round(heightFraction * 100)}%`, transform: [{ scale }] },
+          { height: `${Math.round(figureHeight * 100)}%`, transform: [{ scale }] },
         ]}
       >
         <View style={[styles.head, { backgroundColor: fill, borderColor: stroke }]} />
@@ -77,7 +85,9 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
+  rootUpper: { justifyContent: 'flex-start', paddingTop: '9%' },
   figure: { aspectRatio: 0.42, alignItems: 'center' },
   head: {
     width: '34%',

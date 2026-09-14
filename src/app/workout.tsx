@@ -17,10 +17,15 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FramingCoach } from '@/components/FramingCoach';
+import { WarmupOverlay, WARMUP_MOVE_ORDER, WARMUP_LANDED_MS, type WarmupLanded } from '@/components/WarmupOverlay';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import { Card, GradientButton, Pill, ProgressTrack, SpeedPill, StatReadout } from '@/components/ui';
 import { logPoseLatency, logRunRecordingFailed } from '@/lib/analytics';
 import { getBeatmap } from '@/lib/beatmapRegistry';
+import { playHaptic } from '@/lib/calibrationFeedback';
+import { proportionsFromBaseline } from '@/lib/calibrationProfile';
+import { skeletonFraming, bodyVisible, type FramingVerdict } from '@/lib/skeletonFraming';
 import { requestRunNonce } from '@/lib/leaderboards';
 import { peekRunNonce, stageRunNonce, stageRunSubmission, type RunNonce } from '@/lib/runSubmission';
 import { beatmapDurationMismatch, type Beatmap, type BeatmapMove } from '@/lib/beatmaps';
@@ -48,7 +53,10 @@ import {
 import {
   INTENSITY_META,
   isIntensityKey,
+  recordWarmupRun,
+  saveCalibrationBaseline,
   targetSecondsForRun,
+  WARMUP_SECONDS,
 } from '@/lib/playSetup';
 import { useProgress } from '@/lib/ProgressContext';
 import { CLASS_META, caloriesForRun } from '@/lib/progression';
@@ -67,6 +75,20 @@ import { colors, font, metric, radius, spacing, type } from '@/theme';
  * become ready, so the wait is rarely visible.
  */
 const CHART_RESOLVE_TIMEOUT_MS = 4000;
+/**
+ * Silent framing check for runs that skipped the preflight screen: the body
+ * (shoulders + hips, nothing clipped) must be seen for this long before the
+ * map starts. Usually passes while the map is still loading — nothing shows.
+ */
+const FRAMING_GATE_VISIBLE_MS = 1000;
+/** If the gate is still closed this long after the map is ready, coach. */
+const FRAMING_GATE_COACH_DELAY_MS = 1500;
+/** The framing coach offers "Start anyway" after this long. */
+const FRAMING_GATE_SKIP_AFTER_MS = 8000;
+/** Framing words during the in-run coach debounce like the preflight. */
+const FRAMING_GATE_DEBOUNCE_MS = 400;
+/** In warm-up, a charted cue is prompted this far ahead of its time. */
+const WARMUP_PROMPT_LEAD_MS = 2200;
 
 /** mm:ss from a seconds value (clamped, non-negative). */
 function formatClock(seconds: number): string {
@@ -92,21 +114,38 @@ function safe(fn: () => void): void {
 }
 
 export default function WorkoutScreen() {
-  const { level, speed, duration: durationParam, intensity: intensityParam, tracking, trackingRunId, fromOnboarding, record } =
-    useLocalSearchParams<{
-      level: string;
-      name?: string;
-      speed?: string;
-      /** Target run length in minutes. The map loops until it is reached. */
-      duration?: string;
-      intensity?: string;
-      tracking?: 'calibrated' | 'off';
-      trackingRunId?: string;
-      /** Set when launched from the onboarding ceremony; forwarded to the summary. */
-      fromOnboarding?: string;
-      /** "Record my run" (level screen): record the camera + a run log for the share video. */
-      record?: string;
-    }>();
+  const {
+    level,
+    speed,
+    duration: durationParam,
+    intensity: intensityParam,
+    tracking,
+    trackingRunId,
+    fromOnboarding,
+    record,
+    warmup,
+    framingCheck,
+  } = useLocalSearchParams<{
+    level: string;
+    name?: string;
+    speed?: string;
+    /** Target run length in minutes. The map loops until it is reached. */
+    duration?: string;
+    intensity?: string;
+    tracking?: 'calibrated' | 'off';
+    trackingRunId?: string;
+    /** Set when launched from the onboarding ceremony; forwarded to the summary. */
+    fromOnboarding?: string;
+    /** "Record my runs": record the camera + a run log for the share video. */
+    record?: string;
+    /** First two runs: oversized move prompts for the first WARMUP_SECONDS. */
+    warmup?: string;
+    /**
+     * The preflight screen was skipped (fresh once-per-session calibration):
+     * confirm the body is in frame before the map starts.
+     */
+    framingCheck?: string;
+  }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
@@ -218,10 +257,27 @@ export default function WorkoutScreen() {
     };
   }, [chart, level, runId]);
   const beatmap = chart?.beatmap ?? null;
+  // Warm-up (first two tracked runs): the first WARMUP_SECONDS show oversized
+  // move prompts and the judge forgives misses on screen (the log it submits
+  // is untouched — see CueJudge.forgiveMissesUntilSec). The judge clock is
+  // accumulated VIDEO seconds, so the wall window is scaled by the rate.
+  const warmupRequested = warmup === '1' && tracking !== 'off';
+  const [warmupEnded, setWarmupEnded] = useState(!warmupRequested);
+  const warmupEndedRef = useRef(warmupEnded);
+  warmupEndedRef.current = warmupEnded;
+  const [warmupLanded, setWarmupLanded] = useState<WarmupLanded | null>(null);
+  // Free-move warm-up (no chart): the four moves once each, in order.
+  const [warmupFreeIndex, setWarmupFreeIndex] = useState(0);
+  const warmupFreeIndexRef = useRef(0);
+  const landedCounterRef = useRef(0);
   // Timing-window scoring when this level has a chart; otherwise null and the
   // free-scoring `applyRecognizedMove` path above is used unchanged.
   const cueJudgeRef = useRef<CueJudge | null>(null);
-  if (beatmap && !cueJudgeRef.current) cueJudgeRef.current = new CueJudge(beatmap);
+  if (beatmap && !cueJudgeRef.current) {
+    cueJudgeRef.current = new CueJudge(beatmap, {
+      forgiveMissesUntilSec: warmupRequested ? WARMUP_SECONDS * playbackRate : 0,
+    });
+  }
   const cueJudge = cueJudgeRef.current;
   const [cueScore, setCueScore] = useState<CueScore | null>(null);
   useEffect(() => {
@@ -267,6 +323,50 @@ export default function WorkoutScreen() {
               : 'Body tracking is unavailable.';
   const pipWidth = Math.min(120, Math.max(96, screenWidth * 0.28));
   const pipHeight = pipWidth * (4 / 3);
+
+  // Framing gate (preflight skipped) + Re-center (mid-run). Both show the
+  // same far-mode coach as the preflight screen; the gate holds playback
+  // until the body has been in frame for FRAMING_GATE_VISIBLE_MS, re-center
+  // pauses until the analyzer has re-measured its baseline.
+  const framingGateRequested = framingCheck === '1' && tracking !== 'off';
+  const [gateOpen, setGateOpen] = useState(!framingGateRequested);
+  const gateOpenRef = useRef(gateOpen);
+  gateOpenRef.current = gateOpen;
+  const [recentering, setRecentering] = useState(false);
+  const recenteringRef = useRef(false);
+  const [coachVerdict, setCoachVerdict] = useState<FramingVerdict>('searching');
+  const [coachHold, setCoachHold] = useState(0);
+  const [coachClock, setCoachClock] = useState(() => Date.now());
+  const visibleSinceRef = useRef<number | null>(null);
+  const coachCandidateRef = useRef<{ verdict: FramingVerdict; since: number } | null>(null);
+  const coachVerdictRef = useRef<FramingVerdict>('searching');
+  const gateReadyAtRef = useRef<number | null>(null);
+  const coachActive = (!gateOpen || recentering) && trackingMode === 'real';
+  useEffect(() => {
+    if (trackingMode === 'unavailable') setGateOpen(true);
+  }, [trackingMode]);
+  useEffect(() => {
+    if (!coachActive) return;
+    const timer = setInterval(() => setCoachClock(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, [coachActive]);
+  /** Debounced framing verdict for the in-run coach (same 400 ms as preflight). */
+  const applyCoachVerdict = useCallback((verdict: FramingVerdict, now: number) => {
+    if (verdict === coachVerdictRef.current) {
+      coachCandidateRef.current = null;
+      return;
+    }
+    const candidate = coachCandidateRef.current;
+    if (!candidate || candidate.verdict !== verdict) {
+      coachCandidateRef.current = { verdict, since: now };
+      return;
+    }
+    if (now - candidate.since >= FRAMING_GATE_DEBOUNCE_MS) {
+      coachVerdictRef.current = verdict;
+      coachCandidateRef.current = null;
+      setCoachVerdict(verdict);
+    }
+  }, []);
 
   // Additive (AirPlay): resolve the class + level for the companion dashboard.
   const { activeClass, activeRun, abandonRun, hudThemeId, levelProgress } = useProgress();
@@ -375,10 +475,57 @@ export default function WorkoutScreen() {
       const classifiedTs = Date.now();
       const deltas = latencyDeltas(frame, classifiedTs);
       if (deltas) latencyRef.current.record(deltas);
-      setPoseFrame({ ...frame, keypoints: result.keypoints });
+      const smoothed = { ...frame, keypoints: result.keypoints };
+      setPoseFrame(smoothed);
       setPoseFeedback(result.feedback);
+      // Framing gate: open once the body has been in frame for a second.
+      if (!gateOpenRef.current || recenteringRef.current) {
+        applyCoachVerdict(skeletonFraming(smoothed).verdict, classifiedTs);
+        if (bodyVisible(smoothed)) {
+          visibleSinceRef.current ??= classifiedTs;
+          const held = classifiedTs - visibleSinceRef.current;
+          setCoachHold(Math.min(1, held / FRAMING_GATE_VISIBLE_MS));
+          if (!gateOpenRef.current && held >= FRAMING_GATE_VISIBLE_MS) {
+            gateOpenRef.current = true;
+            setGateOpen(true);
+          }
+        } else {
+          visibleSinceRef.current = null;
+          setCoachHold(0);
+        }
+        // Re-center completes when the analyzer has a fresh baseline.
+        if (recenteringRef.current && result.status === 'tracking') {
+          recenteringRef.current = false;
+          setRecentering(false);
+          playHaptic('phase');
+          const snapshot = poseAnalyzer.current.calibrationSnapshot(classifiedTs);
+          const proportions = snapshot ? proportionsFromBaseline(snapshot.baseline) : null;
+          void saveCalibrationBaseline({
+            capturedAt: classifiedTs,
+            cameraFacing: 'front',
+            orientation: 'portrait',
+            torsoRatio: proportions?.torsoRatio ?? null,
+            shoulderRatio: proportions?.shoulderRatio ?? null,
+          });
+        }
+      }
       const recording = recordingRef.current;
       if (recording?.recording) recording.log.onPose({ keypoints: result.keypoints });
+      // Warm-up: a landed move flashes "JUMP ✓"; the free-move variant walks
+      // the four moves once each and ends as soon as the last one lands.
+      if (result.move && !cueJudge && !warmupEndedRef.current && runClock.isScoringActive(classifiedTs)) {
+        const landedMove = toBeatmapMove(result.move);
+        if (landedMove === WARMUP_MOVE_ORDER[warmupFreeIndexRef.current]) {
+          landedCounterRef.current += 1;
+          setWarmupLanded({ move: landedMove, id: landedCounterRef.current });
+          warmupFreeIndexRef.current += 1;
+          setWarmupFreeIndex(warmupFreeIndexRef.current);
+          if (warmupFreeIndexRef.current >= WARMUP_MOVE_ORDER.length) {
+            warmupEndedRef.current = true;
+            setWarmupEnded(true);
+          }
+        }
+      }
       if (result.move && runClock.isScoringActive(classifiedTs)) {
         // Combos chain on the VIDEO clock, not wall time or frame timestamps.
         const videoSec = runClock.videoTimeSec(classifiedTs);
@@ -397,6 +544,10 @@ export default function WorkoutScreen() {
           setCueScore(cueJudge.score);
           if (recording?.recording) recording.log.onJudgement(judgement, videoSec, cueJudge.score, classifiedTs);
           setPoseScore((current) => countRecognizedMove(current, result.move!));
+          if (!warmupEndedRef.current && judgement.grade !== 'miss') {
+            landedCounterRef.current += 1;
+            setWarmupLanded({ move: toBeatmapMove(result.move), id: landedCounterRef.current });
+          }
         } else {
           setPoseScore((current) =>
             applyRecognizedMove(current, result.move!, Math.round(videoSec * 1000)),
@@ -404,7 +555,7 @@ export default function WorkoutScreen() {
         }
       }
     },
-    [cueJudge, runClock, trackingMode],
+    [applyCoachVerdict, cueJudge, runClock, trackingMode],
   );
 
   const handleStaleFrame = useCallback(() => {
@@ -413,13 +564,35 @@ export default function WorkoutScreen() {
 
   const handleTrackingStatus = useCallback(() => {
     poseAnalyzer.current.markTrackingLost();
+    visibleSinceRef.current = null;
+    setCoachHold(0);
+    applyCoachVerdict('searching', Date.now());
     setPoseFrame(null);
     setPoseFeedback((current) => ({
       ...current,
       instruction: 'Tracking lost — step back into view',
       framingHint: 'Tracking lost — step back into view',
     }));
-  }, []);
+  }, [applyCoachVerdict]);
+
+  // Warm-up window ends on the wall clock (charted and free-move alike); the
+  // free-move variant may end earlier once all four moves have landed. Either
+  // way this run counted toward WARMUP_RUN_COUNT.
+  useEffect(() => {
+    if (!warmupRequested || warmupEnded) return;
+    if (elapsed >= WARMUP_SECONDS) {
+      warmupEndedRef.current = true;
+      setWarmupEnded(true);
+    }
+  }, [elapsed, warmupEnded, warmupRequested]);
+  useEffect(() => {
+    if (warmupRequested && warmupEnded) void recordWarmupRun();
+  }, [warmupEnded, warmupRequested]);
+  useEffect(() => {
+    if (!warmupLanded) return;
+    const timer = setTimeout(() => setWarmupLanded(null), WARMUP_LANDED_MS + 120);
+    return () => clearTimeout(timer);
+  }, [warmupLanded]);
 
   const finish = useCallback(() => {
     // Reaching the target (timed run) or playToEnd (untimed) are the only paths
@@ -471,6 +644,9 @@ export default function WorkoutScreen() {
     const nonce = peekRunNonce(typeof trackingRunId === 'string' ? trackingRunId : undefined);
     if (nonce && typeof trackingRunId === 'string' && timedRun) {
       const charted = judge !== null && cue !== null && nonce.beatmap !== null;
+      // Submit what the server will replay from the log: with a warm-up the
+      // displayed `cue` forgives early misses, the log never does.
+      const verified = charted ? judge.verifiedTotals() : null;
       stageRunSubmission({
         runId: trackingRunId,
         levelId: level,
@@ -483,10 +659,10 @@ export default function WorkoutScreen() {
         elapsedSeconds: elapsedRef.current,
         videoLengthSec: runClock.videoLengthSec,
         events: charted ? judge.events : [],
-        spurious: charted ? cue.spurious : 0,
-        score: charted ? cue.score : poseScoreRef.current.score,
-        maxCombo: charted ? cue.maxCombo : poseScoreRef.current.maxCombo,
-        accuracy: charted ? judge.accuracy : 0,
+        spurious: verified ? verified.spurious : 0,
+        score: verified ? verified.score : poseScoreRef.current.score,
+        maxCombo: verified ? verified.maxCombo : poseScoreRef.current.maxCombo,
+        accuracy: verified ? verified.accuracy : 0,
         moveCount: moveCountRef.current,
         samples: samplesRef.current,
         naturalPlaySec: runClock.videoPlayedSec,
@@ -548,9 +724,36 @@ export default function WorkoutScreen() {
   const playStartedRef = useRef(false);
   useEffect(() => {
     if (!source || playStartedRef.current || status !== 'ready' || chart === null) return;
+    // Framing gate: the map is ready but the body has not been seen yet.
+    // Start the coach clock; playback waits for `gateOpen`.
+    if (!gateOpen) {
+      gateReadyAtRef.current ??= Date.now();
+      return;
+    }
     playStartedRef.current = true;
     safe(() => player.play());
-  }, [chart, player, source, status]);
+  }, [chart, gateOpen, player, source, status]);
+
+  // Re-center: throw the baseline away, pause, and hold until the analyzer
+  // has measured a new one (same coach as the framing gate; the ring is the
+  // analyzer's own calibration progress). Also refreshes the session marker.
+  const recenter = useCallback(() => {
+    if (recenteringRef.current || trackingMode !== 'real') return;
+    recenteringRef.current = true;
+    visibleSinceRef.current = null;
+    setCoachHold(0);
+    setRecentering(true);
+    clearTrackingHandoff();
+    poseAnalyzer.current.reset();
+    safe(() => player.pause());
+  }, [player, trackingMode]);
+  useEffect(() => {
+    if (recentering || !playStartedRef.current) return;
+    // Re-center finished: resume where the map was paused.
+    safe(() => {
+      if (!player.playing && !finishedRef.current) player.play();
+    });
+  }, [player, recentering]);
 
   const externalPlaybackRef = useRef<boolean | null>(null);
   const sourceOrientationRef = useRef<'vertical' | 'horizontal'>('vertical');
@@ -788,6 +991,65 @@ export default function WorkoutScreen() {
       <StatusBar hidden />
       <VideoView style={StyleSheet.absoluteFill} player={player} contentFit="cover" nativeControls={false} />
 
+      {/* Framing gate (preflight skipped) / Re-center: the far-mode coach.
+          The gate stays silent for a moment — the body is usually already in
+          frame — and only coaches if it is not. */}
+      {coachActive &&
+      (recentering ||
+        (gateReadyAtRef.current !== null &&
+          coachClock - gateReadyAtRef.current >= FRAMING_GATE_COACH_DELAY_MS)) ? (
+        <View style={styles.coachScrim} pointerEvents="box-none">
+          <FramingCoach
+            verdict={coachVerdict}
+            holding={recentering ? coachVerdict === 'ok' : coachHold > 0}
+            progress={recentering ? poseFeedback.calibrationProgress : coachHold}
+            accent={hudTheme.accent}
+            hint={recentering && coachVerdict === 'ok' ? 'Re-centering' : 'Head to hips is enough'}
+          />
+          {recentering ||
+          (gateReadyAtRef.current !== null &&
+            coachClock - gateReadyAtRef.current >= FRAMING_GATE_SKIP_AFTER_MS) ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={recentering ? 'Cancel re-center' : 'Start anyway'}
+              hitSlop={12}
+              onPress={() => {
+                if (recentering) {
+                  recenteringRef.current = false;
+                  setRecentering(false);
+                } else {
+                  gateOpenRef.current = true;
+                  setGateOpen(true);
+                }
+              }}
+              style={({ pressed }) => [
+                styles.coachSkip,
+                { bottom: Math.max(insets.bottom, spacing.md) + spacing.lg },
+                pressed && styles.controlPressed,
+              ]}
+            >
+              <Text style={styles.coachSkipText}>{recentering ? 'Cancel' : 'Start anyway'}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* Warm-up: oversized move prompts for the first WARMUP_SECONDS. */}
+      {warmupRequested && !warmupEnded && !coachActive && status === 'ready' && chart !== null && !onExternalScreen ? (
+        <WarmupOverlay
+          prompt={
+            cueJudge
+              ? upcomingCue && upcomingCue.inMs <= WARMUP_PROMPT_LEAD_MS
+                ? upcomingCue.move
+                : null
+              : WARMUP_MOVE_ORDER[warmupFreeIndex] ?? null
+          }
+          landed={warmupLanded}
+          accent={hudTheme.accent}
+          intro={cueJudge ? 'Get ready' : undefined}
+        />
+      ) : null}
+
       {/* Additive (AirPlay): live form preview + compact companion dashboard on
           the phone while the run plays on the TV. */}
       {onExternalScreen ? (
@@ -945,6 +1207,7 @@ export default function WorkoutScreen() {
         </View>
       ) : null}
 
+
       {/* Error / not uploaded yet */}
       {status === 'error' ? (
         <View style={styles.endOverlay}>
@@ -1008,6 +1271,18 @@ export default function WorkoutScreen() {
               <Ionicons name="tv" size={13} color={colors.lime} />
               <Text style={styles.tvPillText}>On TV</Text>
             </View>
+          ) : null}
+          {trackingMode === 'real' && status === 'ready' && gateOpen && !recentering ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Re-center"
+              accessibilityHint="Pauses and re-measures your standing position"
+              hitSlop={8}
+              onPress={recenter}
+              style={({ pressed }) => [styles.airplayBtn, pressed && styles.controlPressed]}
+            >
+              <Ionicons name="scan-outline" size={19} color={colors.white} />
+            </Pressable>
           ) : null}
           <View style={styles.airplayBtn}>
             <VideoAirPlayButton
@@ -1181,6 +1456,23 @@ const styles = StyleSheet.create({
     opacity: 0.72,
     transform: [{ scale: 0.96 }],
   },
+  coachScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+  },
+  coachSkip: {
+    position: 'absolute',
+    alignSelf: 'center',
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  coachSkipText: { color: 'rgba(255,255,255,0.86)', fontSize: 14, fontWeight: font.bold, letterSpacing: 0.4 },
   companion: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.bg,
