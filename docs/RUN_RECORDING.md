@@ -298,11 +298,14 @@ Photos and the share sheet, and the latency gate in §2.
 
 ## 8. Owner TODOs (in order)
 
-1. **Cut and upload the composites** for every hosted level
-   (`scripts/transcode-composite.sh` then `scripts/upload-hls.sh`); until a
+1. ~~Cut and upload the composites~~ — done 2026-09-13 for all 13 hosted
+   levels (`composite/level{1..11,13,14}/game-576.mp4`), cut from the hosted
+   `hls-v2/<slug>/vertical/1080/stream.m3u8` variant with the exact
+   `transcode-composite.sh` output spec (no local sources existed). Re-cutting
+   a level: run `scripts/transcode-composite.sh` then `scripts/upload-hls.sh`
+   (its `HLS_PREFIX` now defaults to `hls-v2`, matching the app). Until a
    level's `composite/<slug>/game-576.mp4` exists the toggle is disabled for
-   that map. Note `upload-hls.sh` syncs `hls/` while the app reads `hls-v2/`
-   — point the script at the right prefix when you next upload.
+   that map.
 2. **Device build** and run the §2 latency check before shipping.
 3. **App Privacy labels:** leave "Photos or Videos" as *not collected* (see
    `APP_STORE_SUBMISSION.md` for the reasoning), update the Review Notes
