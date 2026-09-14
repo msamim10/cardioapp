@@ -50,19 +50,23 @@ import {
 } from '../../shared/scoring';
 import {
   activeDailyKeys,
+  chartCuesPerMin,
+  dailyBoardFingerprint,
   defaultCuesPerMin,
   generateDailyGhosts,
   generateLevelGhosts,
   GHOST_DAILY_TARGET,
   GHOST_STALE_AT_DAYS,
   GHOST_TARGET_TOTAL,
+  ghostChartFields,
   ghostDailyUid,
   ghostEntryFields,
-  ghostGenFingerprint,
   ghostProfileFields,
   ghostTarget,
   isGhostUid,
+  levelBoardFingerprint,
   staleDailyKeys,
+  type GhostChartRef,
   type GhostRunner,
 } from '../../shared/scoring/ghosts';
 
@@ -280,15 +284,16 @@ export type ReconcileResult = {
   ms: number;
 };
 
-type ChartInfo = {
+type ChartInfo = GhostChartRef & {
   /** Cue density of the published chart (score model). */
   cuesPerMin: number;
-  /** `chartVersion` of the published chart (1 when the field is absent). */
-  chartVersion: number;
-  hash: string;
 };
 
-/** Published charts by level id. */
+/**
+ * Published charts by level id. Density and chart fields come from the
+ * shared helpers so the client's instant boards (`src/lib/ghostBoards.ts`)
+ * derive byte-identical ghosts from its chart mirror.
+ */
 async function loadPublishedCharts(db: Firestore): Promise<Map<string, ChartInfo>> {
   const snapshot = await db.collection('beatmaps').where('published', '==', true).get();
   const charts = new Map<string, ChartInfo>();
@@ -299,7 +304,7 @@ async function loadPublishedCharts(db: Firestore): Promise<Map<string, ChartInfo
     if (typeof data.hash !== 'string' || !data.hash) continue;
     const version = typeof data.chartVersion === 'number' && data.chartVersion >= 1 ? Math.floor(data.chartVersion) : 1;
     charts.set(doc.id, {
-      cuesPerMin: Math.round((beatmap.cues.length / beatmap.videoDurationSec) * 60),
+      cuesPerMin: chartCuesPerMin(beatmap.cues.length, beatmap.videoDurationSec),
       chartVersion: version,
       hash: data.hash,
     });
@@ -307,16 +312,7 @@ async function loadPublishedCharts(db: Firestore): Promise<Map<string, ChartInfo
   return charts;
 }
 
-/**
- * Chart-related entry fields, shaped like `entryDoc` writes them: a level with
- * a published chart → verified against it; otherwise a provisional run
- * (`beatmapVersion: 0`, hash `'none'`, matching `PROVISIONAL_BEATMAP_HASH`).
- */
-function chartFields(chart: ChartInfo | undefined): Record<string, unknown> {
-  return chart
-    ? { provisional: false, beatmapVersion: chart.chartVersion, beatmapHash: chart.hash }
-    : { provisional: true, beatmapVersion: 0, beatmapHash: 'none' };
-}
+const chartFields = (chart: ChartInfo | undefined): Record<string, unknown> => ghostChartFields(chart ?? null);
 
 /** Sweep ghosts of daily boards nobody can see any more (TTL is the backstop). */
 async function sweepStaleDaily(db: Firestore, dateKey: string, writer: BatchWriter): Promise<number> {
@@ -368,7 +364,7 @@ async function reconcileAllGhosts(options: ReconcileOptions = {}): Promise<Recon
           entries: db.collection(`leaderboards/${levelId}/entries`),
           ghosts,
           // A new chart (density or hash) rewrites the ghosts against it.
-          fingerprint: `${ghostGenFingerprint(cuesPerMin)}:${chart?.hash ?? 'none'}`,
+          fingerprint: levelBoardFingerprint(cuesPerMin, chart ?? null),
           targetTotal,
           atFor: (ghost) => now - ghost.atOffsetMs,
           extra: chartFields(chart),
@@ -396,7 +392,7 @@ async function reconcileAllGhosts(options: ReconcileOptions = {}): Promise<Recon
           label: `dailyLeaderboards/${dateKey}`,
           entries: db.collection(`dailyLeaderboards/${dateKey}/entries`),
           ghosts,
-          fingerprint: `${ghostGenFingerprint(cuesPerMin)}:${chart?.hash ?? 'none'}:${levelId}`,
+          fingerprint: dailyBoardFingerprint(cuesPerMin, chart ?? null, levelId),
           targetTotal: dailyTarget,
           atFor: (ghost) => midnightOffset + ghost.atOffsetMs,
           extra: {

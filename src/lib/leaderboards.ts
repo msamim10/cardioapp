@@ -24,34 +24,18 @@ import { localDateKey } from '@shared/scoring/daily';
 import type { JudgeEvent } from '@shared/scoring/grading';
 import { PROVISIONAL_BEATMAP_HASH, type SubmitRunPayload } from '@shared/scoring/submission';
 import { adoptChart, refreshBeatmap } from './beatmapRegistry';
+import { num, str, toEntry, type LeaderboardEntry } from './boardEntry';
 import { isFirebaseConfigured } from './config';
 import { getFirebaseDb } from './firebase';
 import { CallableError, callFunction } from './functionsClient';
 import { consumeRunSubmission, type RunNonce } from './runSubmission';
 
+export { displayHandle, rankRows, sortBoardRows, toEntry, type LeaderboardEntry } from './boardEntry';
+
 export const LEADERBOARD_PAGE = 50;
 /** Firestore `in` queries take at most 30 values. */
 export const IN_QUERY_CHUNK = 30;
 export const MAX_FOLLOWING = 100;
-
-export type LeaderboardEntry = {
-  uid: string;
-  score: number;
-  accuracy: number;
-  maxCombo: number;
-  at: number;
-  recorded: boolean;
-  runId: string;
-  username: string | null;
-  photoURL: string | null;
-  classKey: string | null;
-  level: number;
-  playbackRate: number;
-  /** Scored with the free-move rules because the level had no chart at run start. */
-  provisional: boolean;
-  /** Chart revision the run was verified against; 0 for provisional entries. */
-  beatmapVersion: number;
-};
 
 export type ChallengeCard = {
   runId: string;
@@ -64,29 +48,6 @@ export type ChallengeCard = {
   at: number;
   recorded: boolean;
 };
-
-const num = (value: unknown, fallback = 0): number =>
-  typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-const str = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
-
-function toEntry(id: string, data: Record<string, unknown>): LeaderboardEntry {
-  return {
-    uid: str(data.uid) ?? id,
-    score: Math.max(0, Math.round(num(data.score))),
-    accuracy: Math.min(1, Math.max(0, num(data.accuracy))),
-    maxCombo: Math.max(0, Math.round(num(data.maxCombo))),
-    at: num(data.at),
-    recorded: data.recorded === true,
-    runId: str(data.runId) ?? '',
-    username: str(data.username),
-    photoURL: str(data.photoURL),
-    classKey: str(data.classKey),
-    level: Math.max(1, Math.round(num(data.level, 1))),
-    playbackRate: num(data.playbackRate, 1),
-    provisional: data.provisional === true || num(data.beatmapVersion, 1) === 0,
-    beatmapVersion: Math.max(0, Math.round(num(data.beatmapVersion, data.provisional === true ? 0 : 1))),
-  };
-}
 
 function entries(board: 'leaderboards' | 'dailyLeaderboards', key: string) {
   return collection(getFirebaseDb(), board, key, 'entries');
@@ -320,21 +281,6 @@ export async function fetchChallenge(runId: string): Promise<ChallengeCard | nul
       recorded: data.recorded === true,
     };
   });
-}
-
-/** Rows with a 1-based rank attached (ties share the higher rank). */
-export function rankRows(rows: readonly LeaderboardEntry[]): (LeaderboardEntry & { rank: number })[] {
-  const out: (LeaderboardEntry & { rank: number })[] = [];
-  rows.forEach((row, index) => {
-    const previous = out[index - 1];
-    const rank = previous && previous.score === row.score ? previous.rank : index + 1;
-    out.push({ ...row, rank });
-  });
-  return out;
-}
-
-export function displayHandle(entry: { username: string | null; uid: string }): string {
-  return entry.username ? `@${entry.username}` : `runner-${entry.uid.slice(0, 4)}`;
 }
 
 // ---------------------------------------------------------------------------

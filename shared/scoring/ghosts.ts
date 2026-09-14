@@ -502,6 +502,79 @@ export function ghostGenFingerprint(cuesPerMin: number): string {
   return `v${GHOST_GEN_VERSION}:${cuesPerMin}`;
 }
 
+/**
+ * Cue density the generator reads from a published chart. ONE definition for
+ * the server reconcile and the client's instant boards, so both sides feed
+ * the generator the same number and produce the same ghosts.
+ */
+export function chartCuesPerMin(cueCount: number, videoDurationSec: number): number {
+  if (!(videoDurationSec > 0) || !(cueCount > 0)) return 0;
+  return Math.round((cueCount / videoDurationSec) * 60);
+}
+
+/** The published chart facts a ghost document depends on. */
+export type GhostChartRef = { chartVersion: number; hash: string };
+
+/**
+ * Chart-related entry fields, shaped like `entryDoc` writes them: a level
+ * with a published chart → verified against it; otherwise a provisional run
+ * (`beatmapVersion: 0`, hash `'none'`, matching `PROVISIONAL_BEATMAP_HASH`).
+ */
+export function ghostChartFields(chart: GhostChartRef | null | undefined): Record<string, unknown> {
+  return chart
+    ? { provisional: false, beatmapVersion: chart.chartVersion, beatmapHash: chart.hash }
+    : { provisional: true, beatmapVersion: 0, beatmapHash: 'none' };
+}
+
+/** Document fingerprint for a level board (density + chart hash). */
+export function levelBoardFingerprint(cuesPerMin: number, chart: GhostChartRef | null | undefined): string {
+  return `${ghostGenFingerprint(cuesPerMin)}:${chart?.hash ?? 'none'}`;
+}
+
+/** Document fingerprint for a daily board (density + chart hash + the day's level). */
+export function dailyBoardFingerprint(
+  cuesPerMin: number,
+  chart: GhostChartRef | null | undefined,
+  levelId: string,
+): string {
+  return `${ghostGenFingerprint(cuesPerMin)}:${chart?.hash ?? 'none'}:${levelId}`;
+}
+
+/**
+ * The complete entry document for ghost `n` of a level board, exactly as the
+ * reconcile writes it (minus the handle fallback a real owner can force).
+ * `now` is the reconcile time the `at` spread is anchored to.
+ */
+export function ghostLevelEntryDoc(
+  levelId: string,
+  ghost: GhostRunner,
+  cuesPerMin: number,
+  chart: GhostChartRef | null | undefined,
+  now: number,
+): Record<string, unknown> {
+  return {
+    ...ghostEntryFields(ghost, ghost.username, now - ghost.atOffsetMs, levelBoardFingerprint(cuesPerMin, chart)),
+    ...ghostChartFields(chart),
+  };
+}
+
+/** Same for a daily board entry (`expiresAt` is added by the Function as a Timestamp). */
+export function ghostDailyEntryDoc(
+  dateKey: string,
+  levelId: string,
+  ghost: GhostRunner,
+  cuesPerMin: number,
+  chart: GhostChartRef | null | undefined,
+): Record<string, unknown> {
+  const midnight = dateKeyToUtcMidnight(dateKey);
+  return {
+    ...ghostEntryFields(ghost, ghost.username, midnight + ghost.atOffsetMs, dailyBoardFingerprint(cuesPerMin, chart, levelId)),
+    ...ghostChartFields(chart),
+    levelId,
+    dateKey,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Documents (plain objects; the Function adds Firestore types like expiresAt)
 // ---------------------------------------------------------------------------

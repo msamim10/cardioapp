@@ -327,18 +327,20 @@ Friends tab shows the following list (≤ 100) plus you.
 
 Boards and the Home "runners" counts must never look empty at launch, so the
 server seeds every board with plausible **ghost runners** and phases them out
-automatically as real players fill in. Nothing in the client knows about
-ghosts: they are ordinary entry documents (+ `profiles/{uid}` +
-`usernames/{handle}`) written by Functions and tagged `ghost: true`, so the
-existing UI renders them, tapping a row opens `runner/[uid]`, and the
-`count()`-based runner counts include them.
+automatically as real players fill in. To the UI they are ordinary entry
+documents (+ `profiles/{uid}` + `usernames/{handle}`) written by Functions
+and tagged `ghost: true`, so the existing rows render them, tapping a row
+opens `runner/[uid]`, and the `count()`-based runner counts include them. The
+only client code that knows about ghosts is the instant-board layer below,
+which runs the same generator to show a board before Firestore answers.
 
 | Piece | Path |
 | --- | --- |
 | Generator (pure, deterministic) | `shared/scoring/ghosts.ts` |
 | Reconcile (hourly schedule + admin callable) | `functions/src/seed.ts` → `reconcileGhosts`, `reconcileGhostsNow` |
 | In-app trigger (admin) | Profile → "Seed boards now (admin)", shown only when `admins/{uid}` exists; `seedBoardsNow()` / `describeSeedBoards()` in `src/lib/functionsClient.ts` alert the `ReconcileResult` (writes, deletes, ms, per-board `total/real → target · +added ~refreshed -removed`, swept daily keys) |
-| Test | `npm run test:ghosts` (`scripts/replay-ghosts.ts`) |
+| Instant boards (client) | `src/lib/ghostBoards.ts` (pure), `src/lib/instantBoards.ts`, `src/lib/boardCache.ts`, `src/lib/boardEntry.ts`, `src/components/TopRunnersCard.tsx` |
+| Tests | `npm run test:ghosts` (`scripts/replay-ghosts.ts`), `npm run test:ghosts-client-parity` (`scripts/replay-ghosts-client-parity.ts`) |
 
 **What a ghost is.** `(levelId, n)` — or `(dateKey, n)` for daily boards —
 deterministically yields uid `ghost_<levelId>_<n>` / `ghost_d_<dateKey>_<n>`,
@@ -392,6 +394,31 @@ documents whose id starts with `ghost_` **and** carry `ghost: true` are ever
 written or deleted — real players' documents are never touched. Idempotent;
 ≤ 400 writes per batch commit; one `reconcileGhosts summary` log line per run
 with per-board `total / real / ghosts→target / +added ~refreshed −removed`.
+
+**Instant boards (client).** No board ever opens on a spinner or an empty
+state. Every board surface — the level brief's **Top runners** card
+(`TopRunnersCard`), `leaderboard/[id]` Global/Today, the Home
+`DailyChallengeBoard`, and the mode-card runner counts — first renders
+`instantLevelBoard` / `instantDailyBoard` / `instantRunnerCount`
+(`src/lib/instantBoards.ts`): the last live result from the 24 h AsyncStorage
+`boardCache` (`@cardiosurf/boards/v1`, hydrated in `_layout.tsx`) merged with
+the ghost rows the server keeps on that board, computed on-device by
+`src/lib/ghostBoards.ts` from the **same** shared generator and inputs the
+reconcile uses — `CANONICAL_LEVEL_IDS`, `dailyChallengeLevelId`,
+`GHOST_TARGET_TOTAL` / `GHOST_DAILY_TARGET`, `ghostTarget(realCount)`,
+`chartCuesPerMin` from the chart mirror (`beatmapRegistry`) else
+`defaultCuesPerMin`, and the document shape `ghostLevelEntryDoc` /
+`ghostDailyEntryDoc`, all exported by `shared/scoring/ghosts.ts` and called by
+`functions/src/seed.ts` too. The live Firestore result then replaces it
+(`rememberBoard`), deduped by uid with the server row winning. Real players
+already in the cache shrink the ghost set exactly like the server's phase-out.
+`npm run test:ghosts-client-parity` composes the server documents from the
+shared helpers and asserts the client rows are identical (uids, handles,
+scores, combos, accuracy, chart fields, order) for every level, with and
+without a chart, at several real-player counts and across 40 daily keys, and
+pins that `seed.ts` uses the shared helpers rather than a private copy. Only
+`at` on level boards can differ (anchored to the reconcile clock) until the
+live row lands.
 
 **Handle registry.** Ghost handles are reserved in `usernames/{handle}` as
 `{uid: 'ghost_…', reservedAt, ghost: true}`, so a real player who wants that

@@ -15,6 +15,7 @@ import { SubscriptionProvider } from '@/lib/SubscriptionContext';
 import { initAnalytics } from '@/lib/analytics';
 import { decideAuthGate } from '@/lib/authGate';
 import { hydrateBeatmapCache, refreshAllBeatmaps } from '@/lib/beatmapRegistry';
+import { hydrateBoardCache } from '@/lib/boardCache';
 import { modes } from '@/lib/gameData';
 import { challengeHref, parseChallengeLink } from '@/lib/challengeLinks';
 import { stashPendingDeepLink, takePendingDeepLink } from '@/lib/pendingDeepLink';
@@ -33,6 +34,7 @@ export default function RootLayout() {
   useEffect(() => {
     initAnalytics();
     void hydrateBeatmapCache();
+    void hydrateBoardCache();
   }, []);
 
   return (
