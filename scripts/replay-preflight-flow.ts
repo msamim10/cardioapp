@@ -3,28 +3,38 @@ import assert from 'node:assert/strict';
 // intentionally disallows source imports with a .ts suffix.
 import {
   createPreflightFlowState,
-  currentMove,
-  END_CARD_MS,
+  currentTeaserClip,
   flowElapsedSeconds,
   FRAMING_DEBOUNCE_MS,
   HOLD_LOCK_GRACE_MS,
   HOLD_MS,
   holdProgress,
   isCameraPhase,
-  MOVE_LANDED_MS,
   MOVE_ORDER,
-  MOVE_SPOKEN,
-  MOVE_WINDOW_MS,
-  MOVE_WORD,
-  moveLanded,
-  MOVES_MAX_MS,
-  moveWindowProgress,
   reducePreflightFlow,
+  SCORE_CARD_MS,
   spokenPrompt,
+  TEASER_CLIPS,
+  TEASER_END_TOLERANCE_MS,
+  TEASER_INTERSTITIAL_MS,
+  TEASER_MAX_MS,
+  TEASER_MIN_MS,
+  TEASER_PLAY_GRACE_MS,
+  TEASER_STEP_IN_MS,
+  TEASER_TAIL_MS,
+  teaserHit,
+  teaserLandedCount,
+  teaserOnLastClip,
+  teaserStepDeadline,
   type PreflightFlowEvent,
   type PreflightFlowState,
   // @ts-expect-error -- required by Node's type-stripping ESM resolver
 } from '../src/lib/preflightFlow.ts';
+import {
+  CALIBRATION_TEASER,
+  CALIBRATION_TEASER_DURATION_MS,
+  // @ts-expect-error -- required by Node's type-stripping ESM resolver
+} from '../src/data/calibrationTeaser.ts';
 import {
   bodyVisible,
   FRAMING_HEAD_MARGIN,
@@ -46,14 +56,6 @@ import {
   SPEECH_MIN_GAP_MS,
   // @ts-expect-error -- required by Node's type-stripping ESM resolver
 } from '../src/lib/speechGate.ts';
-import {
-  bodyCentre,
-  MOTION_MIN_TORSO_FRACTION,
-  MOTION_WINDOW_MS,
-  pushMotionSample,
-  significantMotion,
-  // @ts-expect-error -- required by Node's type-stripping ESM resolver
-} from '../src/lib/bodyMotion.ts';
 import type { Move, PoseFrame, PoseJoint, TrackingStatus } from '../src/lib/poseTracking';
 
 // ---------------------------------------------------------------------------
@@ -177,6 +179,25 @@ const close = (actual: number, expected: number, message?: string) =>
 }
 
 // ---------------------------------------------------------------------------
+// Teaser data: four clips, one per move, contiguous, inside the bundled file.
+{
+  assert.equal(CALIBRATION_TEASER.levelId, 'neon-rails');
+  assert.equal(TEASER_CLIPS, CALIBRATION_TEASER.clips);
+  assert.deepEqual(TEASER_CLIPS.map((clip) => clip.move), [...MOVE_ORDER], 'one clip per move, in MOVE_ORDER');
+  assert.equal(TEASER_CLIPS[0].startMs, 0, 'the file starts with the first clip');
+  for (let index = 0; index < TEASER_CLIPS.length; index += 1) {
+    const clip = TEASER_CLIPS[index];
+    const length = clip.endMs - clip.startMs;
+    assert.ok(length >= 1_800 && length <= 2_600, `${clip.move} clip is ${length} ms; expected ~2–2.5 s`);
+    assert.ok(clip.reactMs > clip.startMs + 800, `${clip.move}: ≥ 0.8 s of approach before the dodge`);
+    assert.ok(clip.endMs - clip.reactMs >= 600, `${clip.move}: ≥ 0.6 s of follow-through after the dodge`);
+    if (index > 0) assert.equal(clip.startMs, TEASER_CLIPS[index - 1].endMs, 'clips are back to back');
+  }
+  assert.equal(TEASER_CLIPS[TEASER_CLIPS.length - 1].endMs, CALIBRATION_TEASER_DURATION_MS);
+  assert.ok(CALIBRATION_TEASER_DURATION_MS >= 8_000 && CALIBRATION_TEASER_DURATION_MS <= 10_000, 'about 9 s of footage');
+}
+
+// ---------------------------------------------------------------------------
 // preflightFlow reducer.
 
 type Flow = { state: PreflightFlowState; now: number };
@@ -226,20 +247,24 @@ function ticks(flow: Flow, count: number) {
 }
 
 /**
- * Let the move phase run on its own (no moves detected): every prompt passes
- * when its window ends, then the ✓ tail, then the next. Returns the phase
- * duration in ms.
+ * A healthy player: from the moment a clip starts playing, `timeUpdate`
+ * ticks arrive every 100 ms with the position advancing from startMs. One
+ * call = 100 ms of wall time and one position report (plus one analyzer
+ * frame so the body stays "seen").
  */
-function autoPassMoves(flow: Flow, status: TrackingStatus = 'tracking'): number {
-  assert.equal(flow.state.phase, 'moves');
-  const started = flow.state.phaseStartedAt;
-  let guard = 0;
-  while (flow.state.phase === 'moves' && guard < 400) {
-    frame(flow, 'ok', status);
-    guard += 1;
+function playerTick(flow: Flow, framing: FramingVerdict = 'ok', status: TrackingStatus = 'tracking', move: Move | null = null) {
+  const clip = currentTeaserClip(flow.state);
+  const step = flow.state.teaserStep;
+  const started = flow.state.teaserStepStartedAt ?? flow.now;
+  flow.now += 100;
+  if (clip && step === 'playing') {
+    send(flow, { type: 'VIDEO_TIME', now: flow.now, positionMs: clip.startMs + (flow.now - started) });
   }
-  assert.equal(flow.state.phase, 'complete', 'moves must always finish');
-  return flow.now - started;
+  send(flow, { type: 'FRAME', now: flow.now, framing, status, move });
+}
+
+function playerTicks(flow: Flow, count: number, framing: FramingVerdict = 'ok', status: TrackingStatus = 'tracking') {
+  for (let index = 0; index < count; index += 1) playerTick(flow, framing, status);
 }
 
 // Framing words debounce: a new verdict needs ≥ 400 ms before it shows.
@@ -279,8 +304,8 @@ function autoPassMoves(flow: Flow, status: TrackingStatus = 'tracking'): number 
 }
 
 // The hold does not wait for the analyzer: framing ok alone starts the ring,
-// the baseline usually lands during it, and the ring hands over to the move
-// check on its own; the move check then completes on its own too.
+// the baseline usually lands during it, and the ring hands over to the
+// teaser on its own.
 {
   const flow = start(false);
   frames(flow, 5, 'ok', 'calibrating');
@@ -290,20 +315,14 @@ function autoPassMoves(flow: Flow, status: TrackingStatus = 'tracking'): number 
   frames(flow, 14, 'ok', 'tracking'); // 2.9 s
   assert.equal(flow.state.phase, 'hold');
   frame(flow, 'ok', 'tracking'); // 3.0 s
-  assert.equal(flow.state.phase, 'moves', `ring full at ${HOLD_MS} ms → move check`);
-  assert.equal(flow.state.moveIndex, 0);
-  assert.equal(currentMove(flow.state), 'Jump');
-  assert.equal(spokenPrompt(flow.state), 'Jump!');
+  assert.equal(flow.state.phase, 'teaser', `ring full at ${HOLD_MS} ms → teaser`);
+  assert.equal(flow.state.teaserClip, 0);
+  assert.equal(flow.state.teaserStep, 'playing');
+  assert.equal(flow.state.teaserStartedAt, flow.now);
+  assert.equal(currentTeaserClip(flow.state)?.move, 'Jump');
+  assert.equal(spokenPrompt(flow.state), null, 'the teaser is silent');
+  assert.equal(flow.state.bodyVisible, true, 'ring is green straight out of the hold');
   assert.equal(holdProgress(flow.state, flow.now), 0, 'ring is gone');
-  autoPassMoves(flow);
-  assert.equal(flow.state.outcome, 'calibrated');
-  assert.equal(spokenPrompt(flow.state), "You're set");
-  // Terminal for user events.
-  send(flow, { type: 'SKIP', now: flow.now });
-  send(flow, { type: 'RETRY', now: flow.now });
-  frame(flow, 'back', 'tracking');
-  assert.equal(flow.state.phase, 'complete');
-  assert.equal(flow.state.outcome, 'calibrated');
 }
 
 // Moving during the hold restarts the ring, not the phase.
@@ -318,197 +337,303 @@ function autoPassMoves(flow: Flow, status: TrackingStatus = 'tracking'): number 
   assert.equal(holdProgress(flow.state, flow.now), 0, 'a move restarts the ring');
   assert.equal(flow.state.holdRestarts, 1);
   frames(flow, 30, 'ok', 'tracking');
-  assert.equal(flow.state.phase, 'moves');
+  assert.equal(flow.state.phase, 'teaser');
 }
 
 // ---------------------------------------------------------------------------
-// Move check: JUMP · DUCK · LEFT · RIGHT, one at a time, each MOVE_WINDOW_MS.
+// Teaser: four clips from the bundled MP4, the user copies each dodge.
 
-assert.deepEqual([...MOVE_ORDER], ['Jump', 'Duck', 'Left', 'Right']);
-assert.equal(MOVE_WINDOW_MS, 2_500);
-assert.equal(MOVE_WINDOW_MS, SPEECH_MIN_GAP_MS, 'prompts are paced to the speech gate');
-for (const move of MOVE_ORDER) {
-  assert.ok(MOVE_WORD[move].length <= 5, 'one short word fits at ≥ 96 pt');
-  assert.equal(MOVE_SPOKEN[move], `${MOVE_WORD[move][0]}${MOVE_WORD[move].slice(1).toLowerCase()}!`);
-}
-
-/** Drive a flow to the first move prompt (analyzer locked). */
-function toMoves(firstRun = false): Flow {
+/** Drive a flow to the first clip (analyzer locked). */
+function toTeaser(firstRun = false): Flow {
   const flow = start(firstRun);
   frames(flow, 35, 'ok', 'tracking'); // 0.5 s debounce + 3 s ring
-  assert.equal(flow.state.phase, 'moves');
-  assert.equal(flow.state.moveIndex, 0);
-  assert.equal(moveLanded(flow.state), false);
+  assert.equal(flow.state.phase, 'teaser');
+  assert.equal(flow.state.teaserClip, 0);
+  assert.equal(flow.state.teaserStep, 'playing');
+  assert.equal(teaserHit(flow.state), null);
   return flow;
 }
 
-// Nothing detected: every prompt passes when its window ends ("auto"), the ✓
-// stays up MOVE_LANDED_MS, then the next prompt. No fail state, no retry.
+/** Let one clip play out with a healthy player and nobody moving. */
+function playClipThrough(flow: Flow) {
+  const clip = currentTeaserClip(flow.state)!;
+  const index = flow.state.teaserClip;
+  let guard = 0;
+  while (flow.state.teaserClip === index && flow.state.teaserStep === 'playing' && guard < 100) {
+    playerTick(flow);
+    guard += 1;
+  }
+  assert.ok(guard < 100, `${clip.move} clip must end`);
+}
+
+// All landed: every move detected while its clip plays → perfect, no tail,
+// interstitial, next clip; score card 4/4; complete with the baseline.
 {
-  const flow = toMoves();
+  const flow = toTeaser();
   const t0 = flow.now;
-  frames(flow, 24, 'ok', 'tracking'); // 2.4 s
-  assert.equal(moveLanded(flow.state), false, 'prompt still up inside the window');
-  close(moveWindowProgress(flow.state, flow.now), 0.96, 'window progress');
-  frame(flow, 'ok', 'tracking'); // 2.5 s
-  assert.equal(moveLanded(flow.state), true, 'window ended → passes on its own');
-  assert.equal(flow.state.movePassedBy, 'auto');
-  assert.equal(moveWindowProgress(flow.state, flow.now), 1);
-  assert.equal(flow.state.moveIndex, 0, '✓ shows before the next prompt');
-  assert.equal(spokenPrompt(flow.state), 'Jump!', 'the ✓ does not re-prompt');
-  frames(flow, 5, 'ok', 'tracking'); // 3.0 s
-  assert.equal(flow.state.moveIndex, 0, '✓ up for the landed tail');
-  frame(flow, 'ok', 'tracking'); // 3.1 s
-  assert.equal(flow.state.moveIndex, 1, `next prompt after ${MOVE_WINDOW_MS + MOVE_LANDED_MS} ms`);
-  assert.equal(currentMove(flow.state), 'Duck');
-  assert.equal(moveLanded(flow.state), false);
-  assert.equal(spokenPrompt(flow.state), 'Duck!');
-  autoPassMoves(flow);
+  for (const clip of TEASER_CLIPS) {
+    assert.equal(currentTeaserClip(flow.state), clip);
+    assert.equal(flow.state.teaserStep, 'playing');
+    playerTicks(flow, 5); // 0.5 s in, nothing yet
+    assert.equal(teaserHit(flow.state), null);
+    playerTick(flow, 'ok', 'tracking', clip.move);
+    assert.equal(teaserHit(flow.state), 'perfect', `${clip.move} lands as perfect`);
+    assert.equal(flow.state.teaserHitAt, flow.now);
+    assert.equal(flow.state.teaserStep, 'playing', 'the clip keeps playing so the dodge is seen');
+    playerTick(flow, 'ok', 'tracking', clip.move);
+    assert.equal(flow.state.teaserHits.filter(Boolean).length, flow.state.teaserClip + 1, 'a second detection is ignored');
+    const started = flow.state.teaserStepStartedAt!;
+    playClipThrough(flow);
+    assert.equal(flow.state.teaserStep, 'interstitial', 'landed → straight to the interstitial, no tail');
+    const played = flow.state.teaserStepStartedAt! - started;
+    assert.ok(
+      played >= clip.endMs - clip.startMs - TEASER_END_TOLERANCE_MS - 100 && played <= clip.endMs - clip.startMs + 100,
+      `${clip.move}: ended on the player's clock (${played} ms for a ${clip.endMs - clip.startMs} ms clip)`,
+    );
+    assert.equal(teaserOnLastClip(flow.state), clip === TEASER_CLIPS[TEASER_CLIPS.length - 1]);
+    ticks(flow, TEASER_INTERSTITIAL_MS / 100 - 1);
+    assert.equal(flow.state.teaserStep, 'interstitial', 'interstitial is up for its full second');
+    ticks(flow, 1);
+  }
+  assert.equal(flow.state.teaserStep, 'done', 'after the last interstitial: the score card');
+  assert.equal(flow.state.teaserClip, TEASER_CLIPS.length);
+  assert.equal(currentTeaserClip(flow.state), null);
+  assert.equal(teaserLandedCount(flow.state), 4);
+  assert.deepEqual(flow.state.teaserHits, ['perfect', 'perfect', 'perfect', 'perfect']);
+  assert.equal(spokenPrompt(flow.state), "You're set", 'sign-off on the score card');
+  frame(flow, 'ok', 'tracking', 'Jump');
+  assert.equal(teaserLandedCount(flow.state), 4, 'moves on the score card do not count');
+  ticks(flow, SCORE_CARD_MS / 100 - 2); // (the frame above already spent 100 ms)
+  assert.equal(flow.state.phase, 'teaser');
+  ticks(flow, 1);
+  assert.equal(flow.state.phase, 'complete', `score card → complete after ${SCORE_CARD_MS} ms`);
   assert.equal(flow.state.outcome, 'calibrated');
-  assert.deepEqual(flow.state.movePasses, ['auto', 'auto', 'auto', 'auto']);
-  assert.equal(flow.state.moveIndex, MOVE_ORDER.length);
-  assert.equal(flow.now - t0, MOVES_MAX_MS, 'worst case = 4 × (window + ✓ tail)');
-  assert.ok(MOVES_MAX_MS <= 12_500, `move check adds at most ${MOVES_MAX_MS} ms`);
-}
-
-// The prompted move passes immediately ("detected"); the next prompt still
-// waits for the window so the spoken prompts stay ≥ 2.5 s apart.
-{
-  const flow = toMoves();
-  const opened = flow.state.moveWindowStartedAt!;
-  frames(flow, 4, 'ok', 'tracking'); // 0.4 s
-  frame(flow, 'ok', 'tracking', 'Jump'); // 0.5 s
-  assert.equal(moveLanded(flow.state), true);
-  assert.equal(flow.state.movePassedBy, 'detected');
-  frame(flow, 'ok', 'tracking', 'Jump');
-  assert.equal(flow.state.movePasses.length, 1, 'a second detection while landed is ignored');
-  frames(flow, 18, 'ok', 'tracking'); // 2.4 s
-  assert.equal(flow.state.moveIndex, 0, 'still paced to the window');
-  frame(flow, 'ok', 'tracking'); // 2.5 s
-  assert.equal(flow.state.moveIndex, 1);
-  assert.equal(flow.state.moveWindowStartedAt! - opened, MOVE_WINDOW_MS, 'exactly one window later');
-
-  // A different move than the one asked for still passes ("motion").
-  frame(flow, 'ok', 'tracking', 'Left');
-  assert.equal(moveLanded(flow.state), true);
-  assert.equal(flow.state.movePassedBy, 'motion');
-  frames(flow, 25, 'ok', 'tracking');
-  assert.equal(flow.state.moveIndex, 2);
-  assert.equal(currentMove(flow.state), 'Left');
-
-  // A very late pass (✓ needs its tail) pushes the next prompt by the tail only.
-  frames(flow, 23, 'ok', 'tracking'); // 2.4 s into LEFT (0.1 s already elapsed)
-  frame(flow, 'ok', 'tracking', 'Left'); // 2.5 s: detection on the last frame wins over auto
-  assert.equal(flow.state.movePassedBy, 'detected');
-  frames(flow, 5, 'ok', 'tracking');
-  assert.equal(flow.state.moveIndex, 2);
-  frame(flow, 'ok', 'tracking');
-  assert.equal(flow.state.moveIndex, 3);
-  assert.equal(currentMove(flow.state), 'Right');
-  frame(flow, 'ok', 'tracking', 'Right');
-  frames(flow, 25, 'ok', 'tracking');
+  assert.equal(flow.state.skipped, false);
+  assert.equal(flow.state.teaserStep, null);
+  assert.equal(spokenPrompt(flow.state), "You're set");
+  const total = flow.now - t0;
+  assert.ok(total <= TEASER_MIN_MS + 4 * 200, `all landed: ${total} ms ≈ TEASER_MIN_MS ${TEASER_MIN_MS}`);
+  // Terminal for user events.
+  send(flow, { type: 'SKIP', now: flow.now });
+  send(flow, { type: 'RETRY', now: flow.now });
+  frame(flow, 'back', 'tracking');
+  send(flow, { type: 'VIDEO_TIME', now: flow.now, positionMs: 0 });
   assert.equal(flow.state.phase, 'complete');
-  assert.deepEqual(flow.state.movePasses, ['detected', 'motion', 'detected', 'detected']);
-  assert.equal(flow.state.moveWindowStartedAt, null, 'window cleared on completion');
+  assert.equal(flow.state.outcome, 'calibrated');
 }
 
-// Best case: every move landed early → exactly four windows ≈ 10 s.
+// None landed: every clip plays, freezes for the tail, shows the
+// interstitial and moves on — no miss, no retry; score card 0/4; still
+// calibrated. Exactly clip + tail + interstitial per clip.
 {
-  const flow = toMoves();
+  const flow = toTeaser();
   const t0 = flow.now;
-  for (const move of MOVE_ORDER) {
-    frame(flow, 'ok', 'tracking', move);
-    frames(flow, 24, 'ok', 'tracking');
+  for (const clip of TEASER_CLIPS) {
+    const clipStart = flow.now;
+    playClipThrough(flow);
+    assert.equal(flow.state.teaserStep, 'tail', 'nothing landed → frozen frame, window stays open');
+    assert.equal(teaserStepDeadline(flow.state), flow.state.teaserStepStartedAt! + TEASER_TAIL_MS);
+    ticks(flow, TEASER_TAIL_MS / 100 - 1);
+    assert.equal(flow.state.teaserStep, 'tail');
+    ticks(flow, 1);
+    assert.equal(flow.state.teaserStep, 'interstitial', `tail over after ${TEASER_TAIL_MS} ms`);
+    assert.equal(teaserHit(flow.state), null);
+    ticks(flow, TEASER_INTERSTITIAL_MS / 100);
+    const slot = flow.now - clipStart;
+    const expected = clip.endMs - clip.startMs + TEASER_TAIL_MS + TEASER_INTERSTITIAL_MS;
+    assert.ok(Math.abs(slot - expected) <= TEASER_END_TOLERANCE_MS + 100, `${clip.move} slot ${slot} ms ≈ ${expected} ms`);
   }
-  assert.equal(flow.state.phase, 'complete');
-  assert.equal(flow.now - t0, MOVE_ORDER.length * MOVE_WINDOW_MS, 'four windows, no tails');
-}
-
-// Significant body motion (no classifier fired) passes the prompt as "motion";
-// outside the move check the flag is ignored. `bodyMotion.ts` decides the
-// flag from raw frames: body-centre travel ≥ 0.25 torso within 500 ms.
-{
-  const at = (frame_: PoseFrame, timestamp: number): PoseFrame => ({ ...frame_, timestamp });
-  const standing = bodyFrame(0.25);
-  let history = pushMotionSample([], bodyCentre(at(standing, 0)));
-  assert.equal(bodyCentre(null), null);
-  assert.equal(bodyCentre(bodyFrame(0.25, { drop: ['leftShoulder', 'rightShoulder'] })), null, 'no torso → no centre');
-  assert.equal(history.length, 1);
-  assert.equal(significantMotion(history), false, 'one sample is not motion');
-  // Detector jitter (≈ 0.03 torso) over half a second: still.
-  for (let t = 100; t <= 500; t += 100) {
-    history = pushMotionSample(history, bodyCentre(at(bodyFrame(0.25, { x: 0.5 + (t % 200 === 0 ? 0.004 : -0.004) }), t)));
-  }
-  assert.equal(significantMotion(history), false, 'jitter is not motion');
-  // A half-hearted duck: shoulders + hips drop 0.3 torso within 200 ms.
-  history = pushMotionSample(history, bodyCentre(at(bodyFrame(0.25, { hipY: 0.55 + 0.25 * 0.3 }), 700)));
-  assert.equal(significantMotion(history), true, 'a 0.3-torso drop is motion');
-  // A side shuffle of 0.4 torso.
-  history = pushMotionSample([], bodyCentre(at(standing, 1_000)));
-  history = pushMotionSample(history, bodyCentre(at(bodyFrame(0.25, { x: 0.5 + 0.25 * 0.4 }), 1_300)));
-  assert.equal(significantMotion(history), true, 'a 0.4-torso side step is motion');
-  // The same travel spread over more than the window is a slow drift, not a move.
-  history = pushMotionSample([], bodyCentre(at(standing, 2_000)));
-  history = pushMotionSample(history, bodyCentre(at(bodyFrame(0.25, { x: 0.5 + 0.25 * 0.2 }), 2_400)));
-  history = pushMotionSample(history, bodyCentre(at(bodyFrame(0.25, { x: 0.5 + 0.25 * 0.4 }), 2_800)));
-  assert.equal(history.length, 2, `samples older than ${MOTION_WINDOW_MS} ms are dropped`);
-  assert.equal(significantMotion(history), false, 'drift across windows is not motion');
-  assert.equal(pushMotionSample(history, null).length, 2, 'a frame without a body keeps the history');
-  assert.equal(MOTION_MIN_TORSO_FRACTION, 0.25);
-
-  // Reducer: the flag passes the prompt during `moves` only.
-  const flow = start(false);
-  frames(flow, 5, 'ok', 'tracking');
-  const before = flow.state;
-  flow.now += 100;
-  send(flow, { type: 'FRAME', now: flow.now, framing: 'ok', status: 'tracking', move: null, motion: true });
-  assert.equal(flow.state.phase, 'hold', 'motion is not a move during the hold');
-  assert.equal(flow.state.holdStartedAt, before.holdStartedAt, 'and does not restart the ring');
-  frames(flow, 29, 'ok', 'tracking');
-  assert.equal(flow.state.phase, 'moves');
-  flow.now += 100;
-  send(flow, { type: 'FRAME', now: flow.now, framing: 'ok', status: 'tracking', move: null, motion: true });
-  assert.equal(moveLanded(flow.state), true, 'clearly moving → the prompt passes');
-  assert.equal(flow.state.movePassedBy, 'motion');
-  frames(flow, 24, 'ok', 'tracking');
-  assert.equal(flow.state.moveIndex, 1);
-  flow.now += 100;
-  send(flow, { type: 'FRAME', now: flow.now, framing: 'ok', status: 'tracking', move: 'Duck', motion: true });
-  assert.equal(flow.state.movePassedBy, 'detected', 'the classified move outranks the motion flag');
-  autoPassMoves(flow);
-  assert.deepEqual(flow.state.movePasses, ['motion', 'detected', 'auto', 'auto']);
-}
-
-// Framing and tracking are not judged during the move check: stepping back,
-// leaving the frame or losing the body never drops to framing or fails.
-{
-  const flow = toMoves();
-  frames(flow, 8, 'back', 'tracking');
-  assert.equal(flow.state.phase, 'moves', 'a bad verdict does not drop the phase');
-  assert.equal(flow.state.framing, 'ok', 'verdicts are not even applied');
-  ticks(flow, 5);
-  send(flow, { type: 'TRACKING_LOST', now: flow.now });
-  assert.equal(flow.state.phase, 'moves');
-  assert.equal(flow.state.trackingLost, true);
-  ticks(flow, 30); // the window runs out with nobody in frame
-  assert.equal(flow.state.moveIndex, 1, 'auto-passes on the clock alone');
-  frames(flow, 200, 'searching', 'searching');
-  assert.equal(flow.state.phase, 'complete', 'finishes even if the body never comes back');
+  assert.equal(flow.state.teaserStep, 'done');
+  assert.equal(teaserLandedCount(flow.state), 0);
+  assert.deepEqual(flow.state.teaserHits, [null, null, null, null]);
+  ticks(flow, SCORE_CARD_MS / 100);
+  assert.equal(flow.state.phase, 'complete', 'auto-advances all the way out');
   assert.equal(flow.state.outcome, 'calibrated', 'the baseline from the hold is kept');
+  const total = flow.now - t0;
+  assert.ok(total < TEASER_MAX_MS, `none landed with a healthy player: ${total} ms < TEASER_MAX_MS ${TEASER_MAX_MS}`);
+  assert.ok(total <= 18_000, `teaser worst case with a healthy player ${total} ms stays under 18 s`);
 }
 
-// Skip during the move check: straight out, with the baseline when there is one.
+// Late and lenient: a move in the tail lands (skipping the rest of the
+// tail); a DIFFERENT move than the clip's lands as "good".
 {
-  const flow = toMoves();
-  frame(flow, 'ok', 'tracking', 'Jump');
+  const flow = toTeaser();
+  playClipThrough(flow); // Jump clip, nothing yet
+  assert.equal(flow.state.teaserStep, 'tail');
+  ticks(flow, 3);
+  frame(flow, 'ok', 'tracking', 'Jump'); // 0.4 s into the tail
+  assert.equal(teaserHit(flow.state), 'perfect', 'the tail is part of the window');
+  assert.equal(flow.state.teaserStep, 'interstitial', 'landing in the tail ends it at once');
+  ticks(flow, TEASER_INTERSTITIAL_MS / 100);
+  assert.equal(currentTeaserClip(flow.state)?.move, 'Duck');
+  playerTicks(flow, 3);
+  playerTick(flow, 'ok', 'tracking', 'Left');
+  assert.equal(teaserHit(flow.state), 'good', 'any classified move counts, shown as GOOD');
+  playerTick(flow, 'ok', 'tracking', 'Duck');
+  assert.equal(teaserHit(flow.state), 'good', 'the first hit stands');
+  playClipThrough(flow);
+  assert.equal(flow.state.teaserStep, 'interstitial');
+  ticks(flow, TEASER_INTERSTITIAL_MS / 100);
+  assert.equal(currentTeaserClip(flow.state)?.move, 'Left');
+  // Moves during the interstitial do not count for the next clip.
+  playClipThrough(flow);
+  ticks(flow, TEASER_TAIL_MS / 100);
+  assert.equal(flow.state.teaserStep, 'interstitial');
+  frame(flow, 'ok', 'tracking', 'Right');
+  assert.equal(teaserHit(flow.state), null, 'interstitial is outside every window');
+  ticks(flow, TEASER_INTERSTITIAL_MS / 100);
+  assert.equal(currentTeaserClip(flow.state)?.move, 'Right');
+  assert.equal(teaserHit(flow.state), null, 'and not carried into the next clip');
+  playerTick(flow, 'ok', 'tracking', 'Right');
+  playClipThrough(flow);
+  ticks(flow, TEASER_INTERSTITIAL_MS / 100);
+  assert.equal(flow.state.teaserStep, 'done');
+  assert.deepEqual(flow.state.teaserHits, ['perfect', 'good', null, 'perfect']);
+  assert.equal(teaserLandedCount(flow.state), 3, 'score card reads 3/4');
+}
+
+// Stalled player: no VIDEO_TIME at all (or a frozen position) can never hang
+// the flow — the wall clock ends each clip TEASER_PLAY_GRACE_MS past its
+// own length, and the whole teaser stays under TEASER_MAX_MS.
+{
+  const flow = toTeaser();
+  const t0 = flow.now;
+  const jump = TEASER_CLIPS[0];
+  const length = jump.endMs - jump.startMs;
+  assert.equal(teaserStepDeadline(flow.state), flow.state.teaserStepStartedAt! + length + TEASER_PLAY_GRACE_MS);
+  ticks(flow, Math.floor((length + TEASER_PLAY_GRACE_MS) / 100) - 1);
+  assert.equal(flow.state.teaserStep, 'playing', 'still waiting on the player inside the grace');
+  ticks(flow, 2);
+  assert.equal(flow.state.teaserStep, 'tail', 'grace over → the flow moves on without the player');
+  // A frozen position (the player reports the same early time forever).
+  ticks(flow, TEASER_TAIL_MS / 100 + TEASER_INTERSTITIAL_MS / 100);
+  assert.equal(currentTeaserClip(flow.state)?.move, 'Duck');
+  const duck = TEASER_CLIPS[1];
+  for (let i = 0; i < 40; i += 1) {
+    flow.now += 100;
+    send(flow, { type: 'VIDEO_TIME', now: flow.now, positionMs: duck.startMs + 300 });
+  }
+  assert.equal(flow.state.teaserStep, 'tail', 'a stuck position still times out');
+  // Stale positions from before the seek never end a clip early.
+  ticks(flow, TEASER_TAIL_MS / 100 + TEASER_INTERSTITIAL_MS / 100);
+  assert.equal(currentTeaserClip(flow.state)?.move, 'Left');
+  send(flow, { type: 'VIDEO_TIME', now: flow.now, positionMs: duck.startMs + 300 });
+  assert.equal(flow.state.teaserStep, 'playing', 'a position from the previous clip is ignored');
+  assert.equal(flow.state.teaserVideoMs, null);
+  send(flow, { type: 'VIDEO_TIME', now: flow.now, positionMs: CALIBRATION_TEASER_DURATION_MS });
+  assert.equal(flow.state.teaserStep, 'tail', 'the player racing to the end of the file ends the clip');
+  // Finish with nobody moving and no player.
+  let guard = 0;
+  while (flow.state.phase === 'teaser' && guard < 400) {
+    ticks(flow, 1);
+    guard += 1;
+  }
+  assert.equal(flow.state.phase, 'complete', 'the teaser always finishes on the clock alone');
+  assert.equal(flow.state.outcome, 'calibrated');
+  const total = flow.now - t0;
+  assert.ok(total <= TEASER_MAX_MS + 200, `stalled player: ${total} ms ≤ TEASER_MAX_MS ${TEASER_MAX_MS}`);
+  assert.ok(TEASER_MAX_MS <= 25_000, `TEASER_MAX_MS ${TEASER_MAX_MS} ms must stay within ~25 s`);
+
+  // A player that fails outright: finish with the baseline, no score card.
+  const broken = toTeaser();
+  playerTick(broken, 'ok', 'tracking', 'Jump');
+  send(broken, { type: 'VIDEO_FAILED', now: broken.now });
+  assert.equal(broken.state.phase, 'complete');
+  assert.equal(broken.state.outcome, 'calibrated');
+  assert.equal(broken.state.skipped, false);
+  const idle = start(false);
+  send(idle, { type: 'VIDEO_FAILED', now: idle.now });
+  assert.equal(idle.state.phase, 'framing', 'ignored outside the teaser');
+}
+
+// Tracking loss never blocks the teaser: the body leaving turns the ring
+// amber, "Step in" is due after TEASER_STEP_IN_MS, clips keep ending on the
+// clock, and the body coming back clears both.
+{
+  const flow = toTeaser();
+  assert.equal(flow.state.bodyVisible, true);
+  playerTicks(flow, 3);
+  flow.now += 100;
+  send(flow, { type: 'TRACKING_LOST', now: flow.now });
+  assert.equal(flow.state.phase, 'teaser', 'no drop to framing');
+  assert.equal(flow.state.teaserStep, 'playing');
+  assert.equal(flow.state.bodyVisible, false, 'ring goes amber');
+  assert.equal(flow.state.bodyLostSince, flow.now);
+  assert.equal(flow.state.trackingLost, true);
+  assert.equal(spokenPrompt(flow.state), null, 'nothing said yet');
+  ticks(flow, TEASER_STEP_IN_MS / 100 - 1);
+  assert.equal(flow.state.teaserStepIn, false);
+  ticks(flow, 1);
+  assert.equal(flow.state.teaserStepIn, true, `"Step in" after ${TEASER_STEP_IN_MS} ms without a body`);
+  assert.equal(spokenPrompt(flow.state), 'Step in');
+  // The clip ends on the clock with nobody in frame…
+  let guard = 0;
+  while (flow.state.teaserStep === 'playing' && guard < 100) {
+    ticks(flow, 1);
+    guard += 1;
+  }
+  assert.equal(flow.state.teaserStep, 'tail', 'clip ended without the body');
+  // …frames with only the head visible keep the ring amber…
+  frame(flow, 'searching', 'searching');
+  assert.equal(flow.state.bodyVisible, false);
+  assert.equal(flow.state.teaserStepIn, true);
+  // …and the body coming back clears everything, at any framing verdict.
+  frame(flow, 'closer', 'tracking');
+  assert.equal(flow.state.bodyVisible, true, 'shoulders + hips seen → green (framing not judged)');
+  assert.equal(flow.state.bodyLostSince, null);
+  assert.equal(flow.state.teaserStepIn, false);
+  assert.equal(spokenPrompt(flow.state), null);
+  assert.equal(flow.state.framing, 'ok', 'framing verdicts are not even applied');
+  // A reconnecting analyzer counts as lost too; a short loss says nothing.
+  frame(flow, 'ok', 'reconnecting');
+  assert.equal(flow.state.bodyVisible, false);
+  frames(flow, 5, 'ok', 'reconnecting');
+  assert.equal(flow.state.teaserStepIn, false, 'under 2 s: silent');
+  frame(flow, 'ok', 'tracking');
+  assert.equal(flow.state.bodyVisible, true);
+  // Losing the body for the rest of the teaser still finishes it.
+  send(flow, { type: 'TRACKING_LOST', now: (flow.now += 100) });
+  guard = 0;
+  while (flow.state.phase === 'teaser' && guard < 400) {
+    ticks(flow, 1);
+    guard += 1;
+  }
+  assert.equal(flow.state.phase, 'complete', 'finishes even if the body never comes back');
+  assert.equal(flow.state.outcome, 'calibrated');
+  assert.equal(flow.state.teaserStepIn, false, 'prompt flag cleared on completion');
+}
+
+// Skip mid-teaser: straight out, with the baseline when there is one, no
+// score card; flagged for analytics.
+{
+  const flow = toTeaser();
+  playerTick(flow, 'ok', 'tracking', 'Jump');
+  playClipThrough(flow);
+  ticks(flow, TEASER_INTERSTITIAL_MS / 100);
+  playerTicks(flow, 4);
+  assert.equal(currentTeaserClip(flow.state)?.move, 'Duck');
   send(flow, { type: 'SKIP', now: flow.now });
   assert.equal(flow.state.phase, 'complete');
   assert.equal(flow.state.outcome, 'calibrated');
-  assert.equal(flow.state.moveWindowStartedAt, null);
+  assert.equal(flow.state.skipped, true);
+  assert.equal(flow.state.teaserStep, null);
+  assert.equal(teaserLandedCount(flow.state), 1, 'hits so far survive for the analytics event');
+  assert.equal(flow.state.teaserStartedAt !== null, true);
+
+  // Skip on the score card too.
+  const card = toTeaser();
+  for (let i = 0; i < TEASER_CLIPS.length; i += 1) {
+    playClipThrough(card);
+    ticks(card, TEASER_TAIL_MS / 100 + TEASER_INTERSTITIAL_MS / 100);
+  }
+  assert.equal(card.state.teaserStep, 'done');
+  send(card, { type: 'SKIP', now: card.now });
+  assert.equal(card.state.phase, 'complete');
+  assert.equal(card.state.skipped, true);
 }
 
-// Spoken prompts through the real gate: hold → Jump! → Duck! → Left! →
-// Right! → You're set, every line spoken (≥ 2.5 s apart, none deduped away).
+// Spoken prompts through the real gate: framing → hold → (silence) → sign-off.
+// The teaser adds no lines unless the body goes missing.
 {
   const flow = start(false);
   let gate = INITIAL_SPEECH_GATE;
@@ -518,10 +643,11 @@ function toMoves(firstRun = false): Flow {
     const line = spokenPrompt(flow.state);
     if (line === last) return;
     last = line;
-    const decision = nextUtterance(gate, line, flow.now, line === "You're set");
+    if (line === null) return;
+    const decision = nextUtterance(gate, line, flow.now, line === "You're set" || line === 'Step in');
     if (decision.speak) {
       gate = decision.gate;
-      spokenLines.push(line!);
+      spokenLines.push(line);
     }
   };
   observe();
@@ -529,22 +655,29 @@ function toMoves(firstRun = false): Flow {
     frame(flow, 'ok', 'tracking');
     observe();
   }
-  assert.equal(flow.state.phase, 'moves');
-  // Land every move as early as possible: the tightest pacing there is.
-  for (const move of MOVE_ORDER) {
-    frame(flow, 'ok', 'tracking', move);
+  assert.equal(flow.state.phase, 'teaser');
+  for (const clip of TEASER_CLIPS) {
+    playerTick(flow, 'ok', 'tracking', clip.move);
     observe();
-    for (let i = 0; i < 24; i += 1) {
-      frame(flow, 'ok', 'tracking');
+    while (flow.state.teaserStep === 'playing') {
+      playerTick(flow);
+      observe();
+    }
+    for (let i = 0; i < TEASER_INTERSTITIAL_MS / 100; i += 1) {
+      ticks(flow, 1);
       observe();
     }
   }
+  assert.equal(flow.state.teaserStep, 'done');
+  for (let i = 0; i < SCORE_CARD_MS / 100; i += 1) {
+    ticks(flow, 1);
+    observe();
+  }
   assert.equal(flow.state.phase, 'complete');
   // "Perfect, hold still" lands 0.5 s after "Step into frame" here and is
-  // gated (pre-existing behaviour); every move prompt and the sign-off clear
-  // the gate because the windows are paced to it.
-  assert.equal(spokenLines[0], 'Step into frame');
-  assert.deepEqual(spokenLines.slice(-5), ['Jump!', 'Duck!', 'Left!', 'Right!', "You're set"]);
+  // gated (pre-existing behaviour); the sign-off clears the gate.
+  assert.deepEqual(spokenLines, ['Step into frame', "You're set"]);
+  assert.ok(SPEECH_MIN_GAP_MS <= TEASER_STEP_IN_MS + TEASER_TAIL_MS, 'a "Step in" always has room to clear the gate');
 }
 
 // Drifting out of frame during the hold drops back to framing (debounced),
@@ -580,7 +713,8 @@ function toMoves(firstRun = false): Flow {
 }
 
 // Ring full but no analyzer lock: "Hold still" stays up for the grace, then
-// the run starts on defaults (calibrates live) — nobody is trapped here.
+// the teaser runs and the run starts on defaults (calibrates live) — nobody
+// is trapped here.
 {
   const flow = start(false);
   frames(flow, 5, 'ok', 'calibrating');
@@ -591,25 +725,38 @@ function toMoves(firstRun = false): Flow {
   assert.equal(flow.state.phase, 'hold');
   flow.now += HOLD_LOCK_GRACE_MS;
   send(flow, { type: 'TICK', now: flow.now });
-  assert.equal(flow.state.phase, 'moves', 'grace over → the move check runs anyway');
-  autoPassMoves(flow, 'calibrating');
+  assert.equal(flow.state.phase, 'teaser', 'grace over → the teaser runs anyway');
+  let guard = 0;
+  while (flow.state.phase === 'teaser' && guard < 400) {
+    playerTick(flow, 'ok', 'calibrating');
+    guard += 1;
+  }
+  assert.equal(flow.state.phase, 'complete');
   assert.equal(flow.state.outcome, 'defaults');
 
   // …but a late lock inside the grace completes calibrated.
   const late = start(false);
   frames(late, 35, 'ok', 'calibrating');
   frame(late, 'ok', 'tracking');
-  assert.equal(late.state.phase, 'moves');
-  autoPassMoves(late);
+  assert.equal(late.state.phase, 'teaser');
+  guard = 0;
+  while (late.state.phase === 'teaser' && guard < 400) {
+    playerTick(late);
+    guard += 1;
+  }
   assert.equal(late.state.outcome, 'calibrated');
 
-  // A lock that only arrives during the move check still counts.
+  // A lock that only arrives during the teaser still counts.
   const later = start(false);
   frames(later, 35, 'ok', 'calibrating');
   send(later, { type: 'TICK', now: (later.now += HOLD_LOCK_GRACE_MS) });
-  assert.equal(later.state.phase, 'moves');
-  frames(later, 3, 'ok', 'tracking');
-  autoPassMoves(later);
+  assert.equal(later.state.phase, 'teaser');
+  playerTicks(later, 3, 'ok', 'tracking');
+  guard = 0;
+  while (later.state.phase === 'teaser' && guard < 400) {
+    playerTick(later);
+    guard += 1;
+  }
   assert.equal(later.state.outcome, 'calibrated');
 }
 
@@ -620,6 +767,7 @@ function toMoves(firstRun = false): Flow {
   send(flow, { type: 'SKIP', now: flow.now });
   assert.equal(flow.state.phase, 'complete');
   assert.equal(flow.state.outcome, 'defaults');
+  assert.equal(flow.state.skipped, true);
 
   const locked = start(false);
   frames(locked, 6, 'closer', 'tracking');
@@ -659,24 +807,40 @@ function toMoves(firstRun = false): Flow {
   send(flow, { type: 'UNAVAILABLE', now: flow.now });
   assert.equal(flow.state.phase, 'unavailable');
   assert.equal(flow.state.outcome, null);
+
+  // Camera dying mid-teaser: unavailable card, teaser state cleared; retry
+  // starts a fresh cycle from framing.
+  const mid = toTeaser();
+  playerTicks(mid, 4);
+  send(mid, { type: 'UNAVAILABLE', now: mid.now });
+  assert.equal(mid.state.phase, 'unavailable');
+  assert.equal(mid.state.teaserStep, null);
+  send(mid, { type: 'RETRY', now: mid.now });
+  assert.equal(mid.state.phase, 'framing');
+  assert.equal(mid.state.teaserClip, 0);
+  assert.deepEqual(mid.state.teaserHits, []);
+  assert.equal(mid.state.teaserStartedAt, null);
 }
 
-// First run and repeat run take the same path (hold → move check).
+// First run and repeat run take the same path (hold → teaser → score card).
 {
   const first = start(true);
   const repeat = start(false);
   for (const flow of [first, repeat]) {
     frames(flow, 5, 'ok', 'calibrating');
     frames(flow, 30, 'ok', 'tracking');
-    assert.equal(flow.state.phase, 'moves');
-    autoPassMoves(flow);
+    assert.equal(flow.state.phase, 'teaser');
+    let guard = 0;
+    while (flow.state.phase === 'teaser' && guard < 400) {
+      playerTick(flow);
+      guard += 1;
+    }
     assert.equal(flow.state.outcome, 'calibrated');
   }
   assert.equal(first.state.firstRun, true);
 }
 
-// Happy-path budget: ~2 s walking in + 3 s hold + 10–12 s of moves
-// (+ the first-run card).
+// Happy-path budget: ~2 s walking in + 3 s hold + the teaser (+ score card).
 {
   const flow = start(true);
   const t0 = flow.now;
@@ -686,15 +850,28 @@ function toMoves(firstRun = false): Flow {
   const framingMs = flow.now - t0;
   frames(flow, 20, 'ok', 'calibrating'); // analyzer's 20 stable frames
   frames(flow, 10, 'ok', 'tracking');
-  assert.equal(flow.state.phase, 'moves');
+  assert.equal(flow.state.phase, 'teaser');
   const holdMs = flow.now - t0 - framingMs;
-  const movesMs = autoPassMoves(flow); // nobody moves: the slow path
+  const teaserStart = flow.now;
+  // Realistic: each dodge copied ~0.6 s after the runner's, healthy player.
+  for (const clip of TEASER_CLIPS) {
+    while (flow.state.teaserStep === 'playing' || flow.state.teaserStep === 'tail') {
+      const at = flow.state.teaserStep === 'playing' ? clip.startMs + (flow.now + 100 - flow.state.teaserStepStartedAt!) : Infinity;
+      const react = at >= clip.reactMs + 600 && teaserHit(flow.state) === null;
+      playerTick(flow, 'ok', 'tracking', react ? clip.move : null);
+    }
+    ticks(flow, TEASER_INTERSTITIAL_MS / 100);
+  }
+  assert.deepEqual(flow.state.teaserHits, ['perfect', 'perfect', 'perfect', 'perfect']);
+  ticks(flow, SCORE_CARD_MS / 100);
+  assert.equal(flow.state.phase, 'complete');
   assert.equal(flow.state.outcome, 'calibrated');
+  const teaserMs = flow.now - teaserStart;
   const total = flow.now - t0;
   assert.ok(framingMs <= 2_000, `framing ${framingMs} ms`);
   assert.equal(holdMs, HOLD_MS, 'hold is exactly the ring');
-  assert.ok(movesMs >= 10_000 && movesMs <= 12_500, `move check ${movesMs} ms must be ≈ 10–12 s`);
-  assert.ok(total + END_CARD_MS <= 19_000, `happy path ${total + END_CARD_MS} ms must stay within ~19 s`);
+  assert.ok(teaserMs >= 13_000 && teaserMs <= 18_000, `teaser ${teaserMs} ms must be ≈ 13–18 s`);
+  assert.ok(total >= 18_000 && total <= 25_000, `happy path ${total} ms must land in ≈ 20–25 s`);
   close(flowElapsedSeconds(flow.state, flow.now), (flow.now - t0) / 1000, 'dev timer');
 }
 
@@ -750,5 +927,5 @@ function toMoves(firstRun = false): Flow {
 }
 
 console.log(
-  'Preflight flow replay passed: upper-body framing (legs optional, torso band 0.16–0.34, head margin, centre band), 400 ms debounce, framing → 3 s hold → move check (JUMP·DUCK·LEFT·RIGHT, 2.5 s windows, detected/motion/auto pass, ✓ tail, never fails, ≈10–12 s) → complete, move/drift/loss restart the ring, lock grace → defaults, skip, denied/unavailable → off, ~15–17 s happy path, 12 h session skip, spoken prompt gate',
+  `Preflight flow replay passed: upper-body framing (legs optional, torso band 0.16–0.34, head margin, centre band), 400 ms debounce, framing → 3 s hold → teaser (${TEASER_CLIPS.length} clips ${CALIBRATION_TEASER_DURATION_MS} ms, perfect/good/none, ${TEASER_TAIL_MS} ms tail, ${TEASER_INTERSTITIAL_MS} ms interstitial, ${TEASER_PLAY_GRACE_MS} ms stall guard, min ${TEASER_MIN_MS} / max ${TEASER_MAX_MS} ms) → ${SCORE_CARD_MS} ms score card → complete; all landed, none landed, lenient/late hits, stalled + failed player, tracking loss never blocks, skip mid-teaser, lock grace → defaults, denied/unavailable → off, 12 h session skip, spoken prompt gate`,
 );

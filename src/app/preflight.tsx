@@ -19,17 +19,17 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CalibrationIntroFigure } from '@/components/CalibrationIntroFigure';
+import { CalibrationTeaser, useTeaserPlayback, useTeaserPlayer } from '@/components/CalibrationTeaser';
 import { FramingCoach } from '@/components/FramingCoach';
-import { MovePromptCoach } from '@/components/MovePromptCoach';
-import { ParticleBurst } from '@/components/ParticleBurst';
+import { RunPipFrame, runPipSize } from '@/components/RunPip';
 import { TvSetupGuide } from '@/components/TvSetupGuide';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import {
   logCalibrationAttempt,
   logCalibrationFailure,
   logCalibrationSuccess,
+  logCalibrationTeaserCompleted,
 } from '@/lib/analytics';
-import { bodyCentre, pushMotionSample, significantMotion, type BodyCentreSample } from '@/lib/bodyMotion';
 import { createCalibrationSounds, playHaptic, type FeedbackCue } from '@/lib/calibrationFeedback';
 import { proportionsFromBaseline, recordCalibrationComplete } from '@/lib/calibrationProfile';
 import { useExternalDisplay } from '@/lib/externalDisplay';
@@ -55,16 +55,15 @@ import {
 } from '@/lib/poseTracking';
 import {
   createPreflightFlowState,
-  currentMove,
-  END_CARD_MS,
   flowElapsedSeconds,
   holdProgress,
   isCameraPhase,
-  moveLanded,
   type PreflightFlowEvent,
   type PreflightOutcome,
   reducePreflightFlow,
   spokenPrompt,
+  TEASER_CLIPS,
+  teaserLandedCount,
 } from '@/lib/preflightFlow';
 import { useProgress } from '@/lib/ProgressContext';
 import { parseOptionalClassKeyParam } from '@/lib/progression';
@@ -77,8 +76,12 @@ import {
 import { createVoicePrompter } from '@/lib/voicePrompts';
 import { colors, font, metric, radius, spacing, type } from '@/theme';
 
-/** Reducer clock tick: drives the hold ring and the dev timer. */
+/** Reducer clock tick: drives the hold ring, the teaser's wall-clock guards and the dev timer. */
 const TICK_MS = 100;
+/** The camera PiP during the teaser: the run's PiP, 1.5× so the person can see themselves. */
+const TEASER_PIP_SCALE = 1.5;
+/** Thin PiP ring while shoulders/hips are not in view. */
+const PIP_RING_SEARCHING = '#FFB340';
 
 /**
  * Best-effort classification of WHY a calibration failed, from the last pose
@@ -103,13 +106,15 @@ function deriveCalibrationFailureReason(frame: PoseFrame | null): CalibrationFai
 }
 
 /**
- * Calibration: a three-second hold, then the four moves once each. Screen 1
+ * Calibration: a three-second hold, then a teaser of the run. Screen 1
  * ("Your body is the controller.") asks for the camera; then the far-mode
  * coach of `preflightFlow.ts` runs on top of the untouched `PoseAnalyzer`:
  * one big word until head + shoulders + hips are in frame, a ring while the
- * user holds still, then JUMP · DUCK · LEFT · RIGHT — each passes on the
- * move, on any motion, or on its own when its window ends; there is no fail
- * state. Auto-advance throughout. See docs/CALIBRATION_FLOW.md.
+ * user holds still, then four short clips of real gameplay (jump, duck,
+ * left, right) play full-screen with the camera in the run's PiP — the user
+ * copies each dodge, a landed move gets the run's ✓ PERFECT pop, a missed
+ * one just moves on; there is no fail state. A score card, then the run.
+ * Auto-advance throughout. See docs/CALIBRATION_FLOW.md.
  */
 export default function PreflightScreen() {
   const params = useLocalSearchParams<{
@@ -163,12 +168,9 @@ export default function PreflightScreen() {
   const [unavailableReason, setUnavailableReason] = useState('');
   const [voiceOn, setVoiceOn] = useState(true);
   const [now, setNow] = useState(() => Date.now());
-  const [burst, setBurst] = useState(0);
-  const [bigBurst, setBigBurst] = useState(0);
   const analyzerRef = useRef(new PoseAnalyzer());
   const soundsRef = useRef(createCalibrationSounds());
   const voiceRef = useRef(createVoicePrompter(true));
-  const motionRef = useRef<BodyCentreSample[]>([]);
   const stateRef = useRef(state);
   const launchedRef = useRef(false);
   const runIdRef = useRef(createTrackingRunId(params.level));
@@ -187,6 +189,12 @@ export default function PreflightScreen() {
   const dispatch = useCallback((event: PreflightFlowEvent) => {
     setState((current) => reducePreflightFlow(current, event));
   }, []);
+
+  // Teaser footage: one muted player created with the screen (the bundled
+  // asset is loaded long before the hold finishes); the hook mirrors the
+  // reducer's step into it and feeds its clock back as VIDEO_TIME.
+  const teaserPlayer = useTeaserPlayer();
+  useTeaserPlayback(teaserPlayer, state, dispatch);
 
   const cue = useCallback((kind: FeedbackCue) => {
     playHaptic(kind);
@@ -379,25 +387,32 @@ export default function PreflightScreen() {
     [campaignClass, dispatch, intensity, isFirstRun, params, router, setCheckpoint, startRun],
   );
 
-  // Route out once the flow completes. The first run holds the end card for
-  // END_CARD_MS (with a burst) unless the camera never worked at all. The
-  // launcher is read through a ref so a re-created callback cannot restart
-  // the end-card timer.
+  // Route out once the flow completes. The teaser's score card has already
+  // been shown by then (it is a step of the `teaser` phase), so nothing is
+  // held here. The launcher is read through a ref so a re-created callback
+  // cannot fire twice.
   const launchRef = useRef(launchWorkout);
   launchRef.current = launchWorkout;
-  const celebrate = state.phase === 'complete' && isFirstRun && state.outcome !== 'off';
   const outcome = state.phase === 'complete' ? state.outcome : null;
   useEffect(() => {
     if (!outcome) return;
-    if (!celebrate) {
-      launchRef.current(outcome);
-      return;
-    }
-    setBigBurst((count) => count + 1);
-    cue('celebrate');
-    const timer = setTimeout(() => launchRef.current(outcome), END_CARD_MS);
-    return () => clearTimeout(timer);
-  }, [celebrate, cue, outcome]);
+    launchRef.current(outcome);
+  }, [outcome]);
+
+  // Teaser analytics: one event per teaser, on completion or skip.
+  const teaserLoggedRef = useRef(false);
+  const teaserStartedAt = state.teaserStartedAt;
+  const skipped = state.skipped;
+  const landedCount = teaserLandedCount(state);
+  useEffect(() => {
+    if (!outcome || teaserStartedAt === null || teaserLoggedRef.current) return;
+    teaserLoggedRef.current = true;
+    logCalibrationTeaserCompleted({
+      landed: landedCount,
+      skipped,
+      durationMs: Date.now() - teaserStartedAt,
+    });
+  }, [landedCount, outcome, skipped, teaserStartedAt]);
 
   // Calibration funnel instrumentation: one attempt per cycle, then a success
   // (the hold completed with a baseline — where `onboarding_complete` fires on
@@ -439,31 +454,34 @@ export default function PreflightScreen() {
     }
   }, [locked, state.outcome, state.phase, windowHeight, windowWidth]);
 
-  // Feedback: a tick when framing locks, a success cue on every move ✓ (they
-  // never fail, so this always fires four times), a burst + success cue when
-  // the flow completes with a baseline.
+  // Feedback: a tick when framing locks, the success cue (haptic + sound) and
+  // a green PiP flash on every landed teaser clip, the celebration cue on the
+  // score card, and the success cue when the flow completes with a baseline.
   const holding = state.phase === 'hold';
-  const inMoves = state.phase === 'moves';
-  const move = currentMove(state);
-  const landed = moveLanded(state);
+  const inTeaser = state.phase === 'teaser';
+  const onScoreCard = inTeaser && state.teaserStep === 'done';
   useEffect(() => {
     if (holding) cue('tick');
   }, [cue, holding]);
   useEffect(() => {
-    if (landed) cue('phase');
-  }, [cue, landed]);
+    if (landedCount > 0) cue('phase');
+  }, [cue, landedCount]);
   useEffect(() => {
-    if (!locked) return;
-    setBurst((count) => count + 1);
-    cue('phase');
-  }, [cue, locked]);
+    if (onScoreCard) cue('celebrate');
+  }, [cue, onScoreCard]);
+  useEffect(() => {
+    // Skipped straight out of the hold with a baseline: the score card never
+    // ran, so this is the only success cue.
+    if (locked && teaserStartedAt === null) cue('phase');
+  }, [cue, locked, teaserStartedAt]);
 
   // Spoken prompts follow the displayed (debounced) verdict; the prompter
-  // rate-limits and never repeats the same line back to back.
+  // rate-limits and never repeats the same line back to back. The teaser is
+  // silent except "Step in" (urgent: it may recur) and the sign-off.
   const spoken = spokenPrompt(state);
   useEffect(() => {
     if (!spoken) return;
-    voiceRef.current.say(spoken, Date.now(), spoken === "You're set");
+    voiceRef.current.say(spoken, Date.now(), spoken === "You're set" || spoken === 'Step in');
   }, [spoken]);
 
   const onPoseFrame = useCallback(
@@ -474,16 +492,12 @@ export default function PreflightScreen() {
       const smoothed = { ...frame, keypoints: result.keypoints };
       setPoseFrame(smoothed);
       setFeedback(result.feedback);
-      // Raw body-centre travel over the last half second: the move check's
-      // "clearly moving" pass when no classifier fires (bodyMotion.ts).
-      motionRef.current = pushMotionSample(motionRef.current, bodyCentre(smoothed));
       dispatch({
         type: 'FRAME',
         now: frame.timestamp,
         framing: skeletonFraming(smoothed).verdict,
         status: result.status,
         move: result.move,
-        motion: stateRef.current.phase === 'moves' && significantMotion(motionRef.current),
       });
     },
     [dispatch],
@@ -545,36 +559,68 @@ export default function PreflightScreen() {
     );
   }
 
+  // The camera is one component instance throughout: full-screen for the
+  // framing + hold, then the run's PiP (1.5×) bottom-right while the teaser
+  // footage plays behind it. Only its container's style changes, so the
+  // native camera session is never torn down mid-flow.
+  const pipSize = runPipSize(windowWidth, TEASER_PIP_SCALE);
+  // Same corner and offsets as the run (workout.tsx); Skip moves to the left.
+  const pipPlacement = { bottom: Math.max(insets.bottom + spacing.lg, spacing.xl), right: spacing.lg };
+  const cameraView = cameraActive ? (
+    <WorkoutCameraPreview
+      active
+      recordingEnabled={params.record === '1'}
+      onPoseFrame={onPoseFrame}
+      onTrackingStatus={() => {
+        analyzerRef.current.markTrackingLost();
+        dispatch({ type: 'TRACKING_LOST', now: Date.now() });
+      }}
+      onUnavailable={() => {
+        setUnavailableReason('The camera stopped unexpectedly.');
+        dispatch({ type: 'UNAVAILABLE', now: Date.now() });
+      }}
+      permission={permission}
+      poseFrame={poseFrame}
+      poseFeedback={feedback}
+      poseScore={INITIAL_POSE_SCORE}
+      hudTheme={hudTheme}
+      trackingMode="real"
+      unavailableReason={unavailableReason}
+      variant="setup"
+    />
+  ) : (
+    <View style={styles.emptyCamera} />
+  );
+  const devTimer = __DEV__ ? (
+    <Text style={styles.devTimer}>
+      {flowElapsedSeconds(state, now).toFixed(1)}s · {state.phase} ·{' '}
+      {Math.max(0, (now - state.phaseStartedAt) / 1000).toFixed(1)}s · restarts{' '}
+      {state.holdRestarts}
+      {inTeaser
+        ? ` · clip ${Math.min(state.teaserClip + 1, TEASER_CLIPS.length)}/${TEASER_CLIPS.length} ${state.teaserStep ?? ''} ${state.teaserHits.map((hit) => hit ?? '-').join(',')} · video ${state.teaserVideoMs ?? '—'}`
+        : ''}
+    </Text>
+  ) : null;
+
   return (
     <View style={styles.root}>
       <StatusBar hidden />
-      {cameraActive ? (
-        <WorkoutCameraPreview
-          active
-          recordingEnabled={params.record === '1'}
-          onPoseFrame={onPoseFrame}
-          onTrackingStatus={() => {
-            analyzerRef.current.markTrackingLost();
-            dispatch({ type: 'TRACKING_LOST', now: Date.now() });
-          }}
-          onUnavailable={() => {
-            setUnavailableReason('The camera stopped unexpectedly.');
-            dispatch({ type: 'UNAVAILABLE', now: Date.now() });
-          }}
-          permission={permission}
-          poseFrame={poseFrame}
-          poseFeedback={feedback}
-          poseScore={INITIAL_POSE_SCORE}
-          hudTheme={hudTheme}
-          trackingMode="real"
-          unavailableReason={unavailableReason}
-          variant="setup"
-        />
-      ) : (
-        <View style={styles.emptyCamera} />
-      )}
+      {inTeaser && cameraActive ? (
+        <CalibrationTeaser player={teaserPlayer} state={state} theme={hudTheme} />
+      ) : null}
 
-      {cameraActive ? (
+      <RunPipFrame
+        expanded={!(inTeaser && cameraActive)}
+        width={pipSize.width}
+        height={pipSize.height}
+        style={pipPlacement}
+        ring={state.bodyVisible ? colors.lime : PIP_RING_SEARCHING}
+        flash={landedCount}
+      >
+        {cameraView}
+      </RunPipFrame>
+
+      {cameraActive && !inTeaser ? (
         <>
           <LinearGradient
             colors={['rgba(0,0,0,0.72)', 'rgba(0,0,0,0)']}
@@ -586,27 +632,21 @@ export default function PreflightScreen() {
             pointerEvents="none"
             style={styles.bottomScrim}
           />
-          {inMoves && move ? (
-            <MovePromptCoach move={move} index={state.moveIndex} landed={landed} accent={hudTheme.accent} />
-          ) : (
-            <FramingCoach
-              verdict={state.framing}
-              holding={holding}
-              progress={holdProgress(state, now)}
-              accent={hudTheme.accent}
-              hint={
-                holding
-                  ? null
-                  : state.framing === 'searching' || state.framing === 'closer'
-                    ? 'Head to hips is enough'
-                    : null
-              }
-            />
-          )}
+          <FramingCoach
+            verdict={state.framing}
+            holding={holding}
+            progress={holdProgress(state, now)}
+            accent={hudTheme.accent}
+            hint={
+              holding
+                ? null
+                : state.framing === 'searching' || state.framing === 'closer'
+                  ? 'Head to hips is enough'
+                  : null
+            }
+          />
         </>
       ) : null}
-
-      <ParticleBurst trigger={burst} theme={hudTheme} />
 
       <Pressable
         accessibilityRole="button"
@@ -617,18 +657,13 @@ export default function PreflightScreen() {
         <Ionicons name="close" size={23} color={colors.white} />
       </Pressable>
 
-      {cameraPhase ? (
+      {cameraPhase && !inTeaser ? (
+        // Hidden during the teaser: the footage's own cue badge sits here and
+        // nothing is written over the video.
         <View style={[styles.header, { top: insets.top + spacing.md }]}>
-          <Text style={styles.eyebrow}>{inMoves ? 'MOVE CHECK' : holding ? 'LOCKING IN' : 'FRAME UP'}</Text>
+          <Text style={styles.eyebrow}>{holding ? 'LOCKING IN' : 'FRAME UP'}</Text>
           <Text style={styles.runName} numberOfLines={1}>{params.name ?? 'Your run'}</Text>
-          {__DEV__ ? (
-            <Text style={styles.devTimer}>
-              {flowElapsedSeconds(state, now).toFixed(1)}s · {state.phase} ·{' '}
-              {Math.max(0, (now - state.phaseStartedAt) / 1000).toFixed(1)}s · restarts{' '}
-              {state.holdRestarts}
-              {inMoves ? ` · move ${state.moveIndex + 1}/4 ${state.movePasses.join(',')}` : ''}
-            </Text>
-          ) : null}
+          {devTimer}
         </View>
       ) : null}
 
@@ -708,31 +743,26 @@ export default function PreflightScreen() {
         )
       ) : null}
 
-      {cameraPhase ? (
-        <View style={[styles.footer, { bottom: insets.bottom + spacing.lg }]}>
+      {cameraPhase && !onScoreCard ? (
+        // During the teaser the PiP owns the bottom-right corner, so Skip
+        // (and the dev timer) sit bottom-left.
+        <View style={[styles.footer, inTeaser && styles.footerTeaser, { bottom: insets.bottom + spacing.lg }]}>
+          {inTeaser ? devTimer : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={
-              inMoves
-                ? 'Skip the move check and start'
+              inTeaser
+                ? 'Skip the warm-up and start'
                 : state.calibrated
                   ? 'Skip the hold and start'
                   : 'Skip camera setup and start with default settings'
             }
             hitSlop={12}
             onPress={() => dispatch({ type: 'SKIP', now: Date.now() })}
-            style={({ pressed }) => [styles.skip, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.skip, inTeaser && styles.skipSmall, pressed && styles.pressed]}
           >
-            <Text style={styles.skipText}>Skip</Text>
+            <Text style={[styles.skipText, inTeaser && styles.skipTextSmall]}>Skip</Text>
           </Pressable>
-        </View>
-      ) : null}
-
-      {celebrate ? (
-        <View style={styles.endCard} accessible accessibilityLiveRegion="assertive">
-          <ParticleBurst trigger={bigBurst} theme={hudTheme} big count={26} duration={1_100} />
-          <Text style={styles.endEyebrow}>YOU&apos;RE IN</Text>
-          <Text style={styles.endTitle}>Your body is the controller.</Text>
         </View>
       ) : null}
     </View>
@@ -912,6 +942,9 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: 'center',
   },
+  footerTeaser: { left: spacing.lg, right: undefined, alignItems: 'flex-start', gap: spacing.xs },
+  skipSmall: { minHeight: 36, minWidth: 72, paddingHorizontal: spacing.md },
+  skipTextSmall: { fontSize: 13 },
   skip: {
     minHeight: 44,
     minWidth: 96,
@@ -924,20 +957,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.22)',
   },
   skipText: { color: 'rgba(255,255,255,0.86)', fontSize: 14, fontWeight: font.bold, letterSpacing: 0.4 },
-  endCard: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xl,
-    backgroundColor: colors.bg,
-  },
-  endEyebrow: { ...type.micro, color: colors.lime, letterSpacing: 2 },
-  endTitle: {
-    ...type.display,
-    color: colors.white,
-    textAlign: 'center',
-    marginTop: spacing.md,
-  },
   intro: {
     ...StyleSheet.absoluteFillObject,
     paddingHorizontal: spacing.xl,

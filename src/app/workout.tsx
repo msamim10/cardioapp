@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FramingCoach } from '@/components/FramingCoach';
+import { pipStyles, runPipSize } from '@/components/RunPip';
 import { WorkoutCameraPreview } from '@/components/WorkoutCameraPreview';
 import { Card, GradientButton, Pill, ProgressTrack, SpeedPill, StatReadout } from '@/components/ui';
 import { logPoseLatency, logRunRecordingFailed } from '@/lib/analytics';
@@ -298,8 +299,7 @@ export default function WorkoutScreen() {
             : !isCardioSurfPoseAvailable
               ? 'This app build does not include body tracking. Rebuild and reinstall it.'
               : 'Body tracking is unavailable.';
-  const pipWidth = Math.min(120, Math.max(96, screenWidth * 0.28));
-  const pipHeight = pipWidth * (4 / 3);
+  const { width: pipWidth, height: pipHeight } = runPipSize(screenWidth);
 
   // Framing gate (preflight skipped) + Re-center (mid-run). Both show the
   // same far-mode coach as the preflight screen; the gate holds playback
@@ -1041,7 +1041,7 @@ export default function WorkoutScreen() {
           <View
             pointerEvents="box-none"
             style={[
-              styles.pipPlacement,
+              pipStyles.placement,
               {
                 bottom: Math.max(insets.bottom + spacing.lg, spacing.xl),
                 right: spacing.lg,
@@ -1050,7 +1050,7 @@ export default function WorkoutScreen() {
               },
             ]}
           >
-            <View style={styles.pipFrame} pointerEvents="none">
+            <View style={pipStyles.frame} pointerEvents="none">
               <WorkoutCameraPreview
                 active={screenFocused}
                 recordingEnabled={recordRequested}
@@ -1330,20 +1330,6 @@ const styles = StyleSheet.create({
     fontWeight: font.heavy,
     letterSpacing: -0.7,
     marginTop: spacing.sm,
-  },
-  pipPlacement: {
-    position: 'absolute',
-    borderRadius: radius.md,
-    shadowColor: colors.black,
-    shadowOpacity: 0.65,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 12,
-  },
-  pipFrame: {
-    flex: 1,
-    overflow: 'hidden',
-    borderRadius: radius.md,
   },
   pipCloseButton: {
     position: 'absolute',

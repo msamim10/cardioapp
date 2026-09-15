@@ -2,7 +2,7 @@
 
 Reference for the body-tracking → scoring → reward path. Code paths in
 parentheses. The preflight calibration screen that precedes a run (upper-body
-framing, the 3 s hold, the guided moves, once-per-session skip, fallbacks) is
+framing, the 3 s hold, the run teaser, once-per-session skip, fallbacks) is
 documented separately in `docs/CALIBRATION_FLOW.md`.
 
 ## 1. Frame path and latency stamps

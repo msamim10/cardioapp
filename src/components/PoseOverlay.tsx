@@ -131,40 +131,80 @@ function GradeFlash({
   compact: boolean;
   theme: HudTheme;
 }) {
+  const { judgements, lastGrade } = cueScore;
+  return <JudgementPop grade={lastGrade} nonce={judgements} theme={theme} compact={compact} />;
+}
+
+/**
+ * The run's judgement pop, on its own: shows `grade` and fades out every
+ * time `nonce` changes to a new non-zero value. Shared by the in-run HUD
+ * (through `GradeFlash`) and the calibration teaser, so a landed move looks
+ * exactly like it will in the run. `hero` is the full-screen size used over
+ * the teaser video; `label` overrides the grade word (e.g. "✓ PERFECT").
+ */
+export function JudgementPop({
+  grade,
+  nonce,
+  theme = DEFAULT_HUD_THEME,
+  compact = false,
+  hero = false,
+  label,
+}: {
+  grade: CueGrade | null;
+  /** Monotonic counter; each new value replays the pop. */
+  nonce: number;
+  theme?: HudTheme;
+  compact?: boolean;
+  hero?: boolean;
+  label?: string;
+}) {
   const gradeColor: Record<CueGrade, string> = {
     perfect: theme.perfect,
     good: theme.good,
     miss: theme.miss,
   };
   const opacity = useRef(new Animated.Value(0)).current;
-  const [grade, setGrade] = useState<CueGrade | null>(null);
-  const { judgements, lastGrade } = cueScore;
+  const scale = useRef(new Animated.Value(1)).current;
+  const [shown, setShown] = useState<CueGrade | null>(null);
 
   useEffect(() => {
-    if (!judgements || !lastGrade) return;
-    setGrade(lastGrade);
+    if (!nonce || !grade) return;
+    setShown(grade);
     opacity.setValue(1);
-    const animation = Animated.timing(opacity, {
-      toValue: 0,
-      duration: GRADE_FLASH_MS,
-      delay: 150,
-      useNativeDriver: true,
-    });
+    scale.setValue(hero ? 0.7 : 1);
+    const animation = Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: GRADE_FLASH_MS,
+        delay: 150,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scale, { toValue: 1, friction: 5, tension: 140, useNativeDriver: true }),
+    ]);
     animation.start();
     return () => animation.stop();
-  }, [judgements, lastGrade, opacity]);
+  }, [grade, hero, nonce, opacity, scale]);
 
-  if (!grade) return null;
+  if (!shown) return null;
   return (
-    <Animated.View style={[styles.gradeFlash, compact && styles.gradeFlashCompact, { opacity }]}>
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.gradeFlash,
+        compact && styles.gradeFlashCompact,
+        hero && styles.gradeFlashHero,
+        { opacity, transform: [{ scale }] },
+      ]}
+    >
       <Text
         style={[
           styles.gradeText,
           compact && styles.gradeTextCompact,
-          { color: gradeColor[grade] },
+          hero && styles.gradeTextHero,
+          { color: gradeColor[shown] },
         ]}
       >
-        {GRADE_LABEL[grade]}
+        {label ?? GRADE_LABEL[shown]}
       </Text>
     </Animated.View>
   );
@@ -409,6 +449,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   gradeFlashCompact: { top: '34%' },
+  gradeFlashHero: { top: '36%' },
   gradeText: {
     fontSize: 30,
     fontWeight: font.black,
@@ -418,6 +459,13 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
   },
   gradeTextCompact: { fontSize: 13, letterSpacing: 0.8 },
+  gradeTextHero: {
+    fontSize: 44,
+    letterSpacing: 3,
+    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowOffset: { width: 0, height: 3 },
+    textShadowRadius: 10,
+  },
   upcoming: {
     position: 'absolute',
     top: spacing.md,

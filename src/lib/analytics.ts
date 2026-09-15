@@ -86,6 +86,9 @@ export const EVENTS = {
   poseLatency: 'pose_latency',
   // First-run calibration test drive: the user skipped one of the four moves.
   calibrationMoveSkipped: 'calibration_move_skipped',
+  // Calibration teaser (four gameplay clips after the hold) finished or was
+  // skipped: how many clips landed, whether Skip was tapped, how long it ran.
+  calibrationTeaserCompleted: 'calibration_teaser_completed',
   // "Record my run" (docs/RUN_RECORDING.md): opt-in, composed, shared, failed.
   runRecordingEnabled: 'run_recording_enabled',
   runRecordingCompleted: 'run_recording_completed',
@@ -233,6 +236,26 @@ export function logCalibrationFailure(reason: CalibrationFailureReason): void {
 export function logCalibrationMoveSkipped(move: 'Jump' | 'Duck' | 'Left' | 'Right'): void {
   safely('logCalibrationMoveSkipped', () =>
     singularEvent(EVENTS.calibrationMoveSkipped, { move: move.toLowerCase() }),
+  );
+}
+
+/**
+ * The calibration teaser (docs/CALIBRATION_FLOW.md) ended: `landed` clips
+ * out of four were copied, `skipped` when the user tapped Skip mid-teaser,
+ * `durationMs` from the first clip to completion. Local + Singular signal for
+ * whether first-time users follow the footage.
+ */
+export function logCalibrationTeaserCompleted(attrs: {
+  landed: number;
+  skipped: boolean;
+  durationMs: number;
+}): void {
+  safely('logCalibrationTeaserCompleted', () =>
+    singularEvent(EVENTS.calibrationTeaserCompleted, {
+      landed: Math.max(0, Math.round(finiteOr(attrs.landed, 0))),
+      skipped: attrs.skipped,
+      duration_ms: Math.max(0, Math.round(finiteOr(attrs.durationMs, 0))),
+    }),
   );
 }
 
