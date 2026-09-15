@@ -15,7 +15,7 @@ export const INITIAL_SPEECH_GATE: SpeechGate = { lastSpokenAt: -Infinity, lastLi
 
 /**
  * Decide whether `line` may be spoken at `now`. Returns the next gate and
- * whether to speak. `urgent` lines ("You're set") skip the de-dup but never
+ * whether to speak. `urgent` lines ("Step in") skip the de-dup but never
  * the minimum gap.
  */
 export function nextUtterance(

@@ -1,16 +1,22 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { StyleSheet, Text, View } from 'react-native';
 import { withAlpha } from '@/lib/hudThemes';
-import { FRAMING_MESSAGE, FRAMING_WORD, type FramingVerdict } from '@/lib/skeletonFraming';
+import {
+  FRAMING_MESSAGE,
+  FRAMING_STEP_WORD,
+  FRAMING_WORD,
+  type FramingStepSide,
+  type FramingVerdict,
+} from '@/lib/skeletonFraming';
 import { colors, font, spacing } from '@/theme';
 
 /**
  * Far-mode framing UI: the user is across the room, so everything here is
- * legible from three metres — ONE word at ≥ 72 pt, one oversized arrow, and
- * during the hold a ring that fills over three seconds. Shared by the
- * preflight screen and the in-run framing check / re-center overlay. No
- * silhouette or body outline is drawn over the camera: the word + arrow are
- * the whole instruction.
+ * legible from two or three metres — ONE instruction at ≥ 84 pt (one word
+ * per line: MOVE / BACK), one oversized arrow, and during the hold a ring
+ * that fills over three seconds. Shared by the preflight screen and the
+ * in-run framing check / re-center overlay. No silhouette or body outline is
+ * drawn over the camera: the words + arrow are the whole instruction.
  *
  * Built from plain Views (no SVG dependency): the ring is a circle of tick
  * marks, the same construction as `PlanRingGauge`.
@@ -20,6 +26,9 @@ const RING_TICKS = 40;
 const RING_SIZE = 220;
 const RING_TICK_LENGTH = 16;
 const RING_TICK_WIDTH = 5;
+/** The big instruction: ≥ 84 pt, readable from across the room. */
+export const FRAMING_WORD_PT = 88;
+const ARROW_PT = 150;
 
 const ARROW: Partial<Record<FramingVerdict, keyof typeof Ionicons.glyphMap>> = {
   back: 'arrow-down',
@@ -27,9 +36,14 @@ const ARROW: Partial<Record<FramingVerdict, keyof typeof Ionicons.glyphMap>> = {
   center: 'swap-horizontal',
   searching: 'body-outline',
 };
+const STEP_ARROW: Record<FramingStepSide, keyof typeof Ionicons.glyphMap> = {
+  left: 'arrow-back',
+  right: 'arrow-forward',
+};
 
 export function FramingCoach({
   verdict,
+  stepSide = null,
   holding,
   progress,
   accent,
@@ -37,6 +51,8 @@ export function FramingCoach({
   hint,
 }: {
   verdict: FramingVerdict;
+  /** Which way to step when `verdict` is `center` (from `skeletonFraming().stepSide`). */
+  stepSide?: FramingStepSide | null;
   /** Ring phase: framing is ok and the user is holding still. */
   holding: boolean;
   /** Ring fill 0..1 while holding. */
@@ -44,8 +60,9 @@ export function FramingCoach({
   accent: string;
   hint?: string | null;
 }) {
-  const word = holding ? FRAMING_WORD.ok : FRAMING_WORD[verdict];
-  const arrow = holding ? null : ARROW[verdict];
+  const side = verdict === 'center' ? stepSide : null;
+  const word = holding ? FRAMING_WORD.ok : side ? FRAMING_STEP_WORD[side] : FRAMING_WORD[verdict];
+  const arrow = holding ? null : side ? STEP_ARROW[side] : ARROW[verdict];
   const ok = holding || verdict === 'ok';
   const tint = ok ? accent : colors.white;
   return (
@@ -58,24 +75,28 @@ export function FramingCoach({
       accessibilityLabel={
         holding
           ? `Perfect, hold still. ${Math.round(progress * 100)} percent.`
-          : `${FRAMING_MESSAGE[verdict]}. Head, shoulders and hips in frame. Legs do not need to be visible.`
+          : `${side ? `Step ${side}` : FRAMING_MESSAGE[verdict]}. Head, shoulders and hips in frame. Legs do not need to be visible.`
       }
     >
       <View style={styles.stack}>
         {holding ? (
           <HoldRing progress={progress} accent={accent} />
         ) : arrow ? (
-          <Ionicons name={arrow} size={112} color={tint} style={styles.arrow} />
+          <Ionicons name={arrow} size={ARROW_PT} color={tint} style={styles.arrow} />
         ) : null}
-        <Text
-          style={[styles.word, { color: tint }]}
-          numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.7}
-          maxFontSizeMultiplier={1}
-        >
-          {word}
-        </Text>
+        {/* One word per line so every word stays at the full size. */}
+        {word.split(' ').map((line, index) => (
+          <Text
+            key={`${index}-${line}`}
+            style={[styles.word, { color: tint }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.85}
+            maxFontSizeMultiplier={1}
+          >
+            {line}
+          </Text>
+        ))}
         {hint ? <Text style={styles.hint}>{hint}</Text> : null}
       </View>
     </View>
@@ -124,23 +145,24 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    gap: spacing.xs,
   },
   arrow: {
+    marginBottom: spacing.sm,
     textShadowColor: 'rgba(0,0,0,0.7)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 10,
   },
   word: {
-    fontSize: 76,
-    lineHeight: 82,
+    fontSize: FRAMING_WORD_PT,
+    lineHeight: FRAMING_WORD_PT + 6,
     fontWeight: font.heavy,
-    letterSpacing: -2.4,
+    letterSpacing: -2,
     textAlign: 'center',
-    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowColor: 'rgba(0,0,0,0.9)',
     textShadowOffset: { width: 0, height: 3 },
-    textShadowRadius: 12,
+    textShadowRadius: 14,
   },
   hint: {
     color: 'rgba(255,255,255,0.86)',

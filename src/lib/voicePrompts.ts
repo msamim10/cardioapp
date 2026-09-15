@@ -1,6 +1,6 @@
 /**
- * Spoken calibration prompts ("Step back", "Perfect, hold still", "You're
- * set") via `expo-speech`.
+ * Spoken calibration prompts ("Move back", "Perfect, hold still", "Step in")
+ * via `expo-speech`. Nothing is spoken after the hold except "Step in".
  *
  * The user is across the room from the phone during framing, so a voice is
  * the one channel that works at any distance. Rules:

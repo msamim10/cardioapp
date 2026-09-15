@@ -1,6 +1,6 @@
 /**
  * Calibration state machine (preflight screen): a 3-second hold, then a
- * teaser of the run — four short clips of real gameplay, one per move, that
+ * teaser of the run — three short clips of real gameplay, one per move, that
  * the user copies.
  *
  * Pure reducer so `scripts/replay-preflight-flow.ts` can drive it with
@@ -12,22 +12,28 @@
  *
  * Phases
  *   permission  Screen 1 — "Your body is the controller." + Turn on camera.
- *   framing     "Step into frame": one big word (Step in / Closer / Step back /
- *               Center up) until head + shoulders + hips sit inside the frame.
- *               Legs are optional.
+ *   framing     "Step in": one big word (STEP IN / MOVE CLOSER / MOVE BACK /
+ *               STEP LEFT / STEP RIGHT) until head + shoulders + hips sit
+ *               inside the frame. Legs are optional.
  *   hold        Framing is ok: a HOLD_MS ring fills while the user stands
  *               still. Moving, drifting out of frame or losing the body
  *               restarts the ring. When the ring is full (and the analyzer
  *               has its baseline, or the lock grace ran out) → `teaser`.
- *   teaser      The run, already started: `TEASER_CLIPS` (Jump · Duck · Left ·
- *               Right) play one after another from the bundled MP4 while the
- *               camera sits in the run's PiP. Per clip the steps are
+ *   teaser      The run, already started: `TEASER_CLIPS` (Jump · Duck · Left)
+ *               play one after another from the bundled MP4 while the camera
+ *               sits in the run's PiP. It opens with two beats over the frozen
+ *               first frame so nobody is surprised by the footage:
+ *                 intro         "Watch the runner. Copy the move." for
+ *                               TEASER_INTRO_MS
+ *                 card          "First obstacle" for TEASER_CARD_MS
+ *               then per clip
  *                 playing       the clip runs from startMs to endMs
  *                 tail          clip over, frozen frame, TEASER_TAIL_MS more of
  *                               detection (skipped when the move already landed)
- *                 interstitial  "Next up" / "That's it" over the frozen frame
+ *                 interstitial  "Next obstacle" over the frozen frame (between
+ *                               clips only)
  *               and after the last clip
- *                 done          the score card ("3/4 · You're in.") for
+ *                 done          the end beat ("You're in.", no numbers) for
  *                               SCORE_CARD_MS → `complete`.
  *               A classified move inside a clip's window lands it: the clip's
  *               own move is a `perfect`, any other move a `good`. Nothing
@@ -41,8 +47,9 @@
  *   complete    Route out. `outcome` says how the run should start.
  *   unavailable No detector / camera error; explicit "continue without" only.
  *
- * Happy path ≈ 2 s walking in + 3 s hold + ~13–17 s of teaser + 1.5 s score
- * card. The run itself has no further prompts (workout.tsx).
+ * Happy path ≈ 2 s walking in + 3 s hold + ~13–17 s of teaser (intro beats,
+ * clips, interstitials and the end beat included). The run itself has no
+ * further prompts (workout.tsx).
  */
 
 import { CALIBRATION_TEASER, type TeaserClip } from '@/data/calibrationTeaser';
@@ -70,15 +77,22 @@ export const HOLD_LOCK_GRACE_MS = 2_500;
 /** A framing verdict must hold this long before the big word changes. */
 export const FRAMING_DEBOUNCE_MS = 400;
 
-/** The four moves, once each, in this order (also the clip order). */
-export const MOVE_ORDER: readonly Move[] = ['Jump', 'Duck', 'Left', 'Right'];
+/** The three moves, once each, in this order (also the clip order). */
+export const MOVE_ORDER: readonly Move[] = ['Jump', 'Duck', 'Left'];
 
 /** The teaser clips, in playback order. */
 export const TEASER_CLIPS: readonly TeaserClip[] = CALIBRATION_TEASER.clips;
+/**
+ * Opening beat over the frozen first frame of clip 1: "Watch the runner. Copy
+ * the move." The hold has just ended; this is the breath before the footage.
+ */
+export const TEASER_INTRO_MS = 1_800;
+/** "First obstacle" card, still over the frozen first frame, then clip 1 plays. */
+export const TEASER_CARD_MS = 1_000;
 /** Extra detection time after a clip ends (frozen frame) when nothing landed yet. */
 export const TEASER_TAIL_MS = 1_000;
-/** "Next up" / "That's it" over the frozen frame. */
-export const TEASER_INTERSTITIAL_MS = 1_000;
+/** "Next obstacle" over the frozen last frame, between clips only. */
+export const TEASER_INTERSTITIAL_MS = 1_200;
 /**
  * Wall-clock slack past a clip's own length before the flow moves on without
  * the player: a stalled or broken video costs at most this per clip.
@@ -92,21 +106,29 @@ export const TEASER_PLAY_GRACE_MS = 1_000;
 export const TEASER_END_TOLERANCE_MS = 120;
 /** Body not seen for this long during the teaser → "Step in". */
 export const TEASER_STEP_IN_MS = 2_000;
-/** Score card ("3/4 · You're in.") before routing on. */
-export const SCORE_CARD_MS = 1_500;
+/** End beat ("You're in." — no score, no numbers) before routing on. */
+export const SCORE_CARD_MS = 1_200;
+/** Interstitials sit between clips only (none after the last one). */
+const TEASER_INTERSTITIALS = Math.max(0, TEASER_CLIPS.length - 1);
 /** Everything the teaser can add, nobody moving and the player stalled throughout. */
 export const TEASER_MAX_MS =
+  TEASER_INTRO_MS +
+  TEASER_CARD_MS +
   TEASER_CLIPS.reduce(
-    (total, clip) =>
-      total + (clip.endMs - clip.startMs) + TEASER_PLAY_GRACE_MS + TEASER_TAIL_MS + TEASER_INTERSTITIAL_MS,
+    (total, clip) => total + (clip.endMs - clip.startMs) + TEASER_PLAY_GRACE_MS + TEASER_TAIL_MS,
     0,
-  ) + SCORE_CARD_MS;
+  ) +
+  TEASER_INTERSTITIALS * TEASER_INTERSTITIAL_MS +
+  SCORE_CARD_MS;
 /** Everything the teaser takes when every move lands during its clip. */
 export const TEASER_MIN_MS =
-  TEASER_CLIPS.reduce((total, clip) => total + (clip.endMs - clip.startMs) + TEASER_INTERSTITIAL_MS, 0) +
+  TEASER_INTRO_MS +
+  TEASER_CARD_MS +
+  TEASER_CLIPS.reduce((total, clip) => total + (clip.endMs - clip.startMs), 0) +
+  TEASER_INTERSTITIALS * TEASER_INTERSTITIAL_MS +
   SCORE_CARD_MS;
 
-export type TeaserStep = 'playing' | 'tail' | 'interstitial' | 'done';
+export type TeaserStep = 'intro' | 'card' | 'playing' | 'tail' | 'interstitial' | 'done';
 /** How a clip landed: its own move, or any other classified move (lenient). */
 export type TeaserHit = 'perfect' | 'good';
 
@@ -130,7 +152,7 @@ export type PreflightFlowState = {
   holdRestarts: number;
   /** When the teaser began; null before it. */
   teaserStartedAt: number | null;
-  /** Index into TEASER_CLIPS while in `teaser` (TEASER_CLIPS.length on the score card). */
+  /** Index into TEASER_CLIPS while in `teaser` (TEASER_CLIPS.length on the end beat). */
   teaserClip: number;
   teaserStep: TeaserStep | null;
   /** When the current step began; null outside `teaser`. */
@@ -235,12 +257,12 @@ export function teaserHit(state: PreflightFlowState): TeaserHit | null {
   return state.teaserHits[state.teaserClip] ?? null;
 }
 
-/** Clips landed so far (the score card's numerator). */
+/** Clips landed so far (feedback cues + analytics; never shown as a number). */
 export function teaserLandedCount(state: PreflightFlowState): number {
   return state.teaserHits.filter((hit) => hit !== null).length;
 }
 
-/** The current clip is the last one (interstitial says "That's it"). */
+/** The current clip is the last one (no interstitial follows it). */
 export function teaserOnLastClip(state: PreflightFlowState): boolean {
   return state.phase === 'teaser' && state.teaserClip === TEASER_CLIPS.length - 1;
 }
@@ -253,6 +275,10 @@ export function teaserStepDeadline(state: PreflightFlowState): number | null {
   if (state.phase !== 'teaser' || state.teaserStep === null || state.teaserStepStartedAt === null) return null;
   const started = state.teaserStepStartedAt;
   switch (state.teaserStep) {
+    case 'intro':
+      return started + TEASER_INTRO_MS;
+    case 'card':
+      return started + TEASER_CARD_MS;
     case 'playing': {
       const clip = TEASER_CLIPS[state.teaserClip];
       return clip ? started + (clip.endMs - clip.startMs) + TEASER_PLAY_GRACE_MS : started;
@@ -313,7 +339,9 @@ function enterTeaser(state: PreflightFlowState, now: number): PreflightFlowState
     bodyLostSince: null,
     teaserStepIn: false,
   };
-  return TEASER_CLIPS.length === 0 ? enterScoreCard(next, now) : startClip(next, 0, now);
+  if (TEASER_CLIPS.length === 0) return enterScoreCard(next, now);
+  // Park on the first frame of clip 1 for the intro beats; `card` → `playing`.
+  return { ...next, teaserClip: 0, teaserStep: 'intro', teaserStepStartedAt: now };
 }
 
 function startClip(state: PreflightFlowState, index: number, now: number): PreflightFlowState {
@@ -388,6 +416,11 @@ function applyBodyVisible(state: PreflightFlowState, visible: boolean, now: numb
   return { ...state, bodyVisible: false, bodyLostSince };
 }
 
+/** After a clip's window closes: an interstitial, or the end beat after the last clip. */
+function afterClip(state: PreflightFlowState, now: number): PreflightFlowState {
+  return state.teaserClip + 1 < TEASER_CLIPS.length ? enterStep(state, 'interstitial', now) : enterScoreCard(state, now);
+}
+
 /**
  * Clock for the teaser. Every step ends on its own; `playing` also ends when
  * the player reports the clip's endMs. A landed clip skips the tail.
@@ -401,14 +434,18 @@ function settleTeaser(state: PreflightFlowState, now: number): PreflightFlowStat
   const deadline = teaserStepDeadline(next)!;
   const landed = next.teaserHits[next.teaserClip] !== null && next.teaserHits[next.teaserClip] !== undefined;
   switch (next.teaserStep) {
+    case 'intro':
+      return now >= deadline ? enterStep(next, 'card', now) : next;
+    case 'card':
+      return now >= deadline ? startClip(next, 0, now) : next;
     case 'playing': {
       const clip = TEASER_CLIPS[next.teaserClip]!;
       const reachedEnd = next.teaserVideoMs !== null && next.teaserVideoMs >= clip.endMs - TEASER_END_TOLERANCE_MS;
       if (!reachedEnd && now < deadline) return next;
-      return enterStep(next, landed ? 'interstitial' : 'tail', now);
+      return landed ? afterClip(next, now) : enterStep(next, 'tail', now);
     }
     case 'tail':
-      if (landed || now >= deadline) return enterStep(next, 'interstitial', now);
+      if (landed || now >= deadline) return afterClip(next, now);
       return next;
     case 'interstitial': {
       if (now < deadline) return next;
@@ -578,18 +615,18 @@ export function flowElapsedSeconds(state: PreflightFlowState, now: number): numb
 
 /**
  * Spoken prompt for the current state, or null when nothing should be said.
- * The screen rate-limits and de-duplicates; this only picks the line. The
- * teaser is silent except for "Step in" once the body has been missing for
- * TEASER_STEP_IN_MS, and the sign-off on the score card.
+ * The screen rate-limits and de-duplicates; this only picks the line. Nothing
+ * is said after the hold: the teaser is silent except for "Step in" once the
+ * body has been missing for TEASER_STEP_IN_MS, and there is no sign-off.
  */
 export function spokenPrompt(state: PreflightFlowState): string | null {
   switch (state.phase) {
     case 'framing':
       switch (state.framing) {
         case 'back':
-          return 'Step back';
+          return 'Move back';
         case 'closer':
-          return 'Come closer';
+          return 'Move closer';
         case 'center':
           return 'Center up';
         case 'searching':
@@ -600,10 +637,7 @@ export function spokenPrompt(state: PreflightFlowState): string | null {
     case 'hold':
       return 'Perfect, hold still';
     case 'teaser':
-      if (state.teaserStep === 'done') return "You're set";
       return state.teaserStepIn ? 'Step in' : null;
-    case 'complete':
-      return state.outcome === 'off' ? null : "You're set";
     default:
       return null;
   }

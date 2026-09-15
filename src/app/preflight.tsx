@@ -109,12 +109,13 @@ function deriveCalibrationFailureReason(frame: PoseFrame | null): CalibrationFai
  * Calibration: a three-second hold, then a teaser of the run. Screen 1
  * ("Your body is the controller.") asks for the camera; then the far-mode
  * coach of `preflightFlow.ts` runs on top of the untouched `PoseAnalyzer`:
- * one big word until head + shoulders + hips are in frame, a ring while the
- * user holds still, then four short clips of real gameplay (jump, duck,
- * left, right) play full-screen with the camera in the run's PiP — the user
- * copies each dodge, a landed move gets the run's ✓ PERFECT pop, a missed
- * one just moves on; there is no fail state. A score card, then the run.
- * Auto-advance throughout. See docs/CALIBRATION_FLOW.md.
+ * one huge instruction until head + shoulders + hips are in frame, a ring
+ * while the user holds still, then — after an intro beat — three short clips
+ * of real gameplay (jump, duck, left) play full-screen with the camera in the
+ * run's PiP — the user copies each dodge, a landed move gets the run's
+ * ✓ PERFECT pop, a missed one just moves on; there is no fail state. A short
+ * "You're in." beat, then the run. Auto-advance throughout. See
+ * docs/CALIBRATION_FLOW.md.
  */
 export default function PreflightScreen() {
   const params = useLocalSearchParams<{
@@ -387,7 +388,7 @@ export default function PreflightScreen() {
     [campaignClass, dispatch, intensity, isFirstRun, params, router, setCheckpoint, startRun],
   );
 
-  // Route out once the flow completes. The teaser's score card has already
+  // Route out once the flow completes. The teaser's end beat has already
   // been shown by then (it is a step of the `teaser` phase), so nothing is
   // held here. The launcher is read through a ref so a re-created callback
   // cannot fire twice.
@@ -456,7 +457,7 @@ export default function PreflightScreen() {
 
   // Feedback: a tick when framing locks, the success cue (haptic + sound) and
   // a green PiP flash on every landed teaser clip, the celebration cue on the
-  // score card, and the success cue when the flow completes with a baseline.
+  // end beat, and the success cue when the flow completes with a baseline.
   const holding = state.phase === 'hold';
   const inTeaser = state.phase === 'teaser';
   const onScoreCard = inTeaser && state.teaserStep === 'done';
@@ -470,18 +471,19 @@ export default function PreflightScreen() {
     if (onScoreCard) cue('celebrate');
   }, [cue, onScoreCard]);
   useEffect(() => {
-    // Skipped straight out of the hold with a baseline: the score card never
+    // Skipped straight out of the hold with a baseline: the end beat never
     // ran, so this is the only success cue.
     if (locked && teaserStartedAt === null) cue('phase');
   }, [cue, locked, teaserStartedAt]);
 
   // Spoken prompts follow the displayed (debounced) verdict; the prompter
-  // rate-limits and never repeats the same line back to back. The teaser is
-  // silent except "Step in" (urgent: it may recur) and the sign-off.
+  // rate-limits and never repeats the same line back to back. Nothing is said
+  // after the hold: the teaser is silent except "Step in" (urgent: it may
+  // recur once the body comes back and leaves again).
   const spoken = spokenPrompt(state);
   useEffect(() => {
     if (!spoken) return;
-    voiceRef.current.say(spoken, Date.now(), spoken === "You're set" || spoken === 'Step in');
+    voiceRef.current.say(spoken, Date.now(), spoken === 'Step in');
   }, [spoken]);
 
   const onPoseFrame = useCallback(
@@ -634,6 +636,9 @@ export default function PreflightScreen() {
           />
           <FramingCoach
             verdict={state.framing}
+            // The debounced verdict picks the instruction; the side comes from
+            // the latest frame (stable: it only matters outside the centre band).
+            stepSide={skeletonFraming(poseFrame).stepSide}
             holding={holding}
             progress={holdProgress(state, now)}
             accent={hudTheme.accent}
@@ -745,7 +750,7 @@ export default function PreflightScreen() {
 
       {cameraPhase && !onScoreCard ? (
         // During the teaser the PiP owns the bottom-right corner, so Skip
-        // (and the dev timer) sit bottom-left.
+        // (and the dev timer) sit bottom-left. Hidden on the end beat.
         <View style={[styles.footer, inTeaser && styles.footerTeaser, { bottom: insets.bottom + spacing.lg }]}>
           {inTeaser ? devTimer : null}
           <Pressable

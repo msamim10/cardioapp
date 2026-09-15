@@ -20,6 +20,14 @@ import type { PoseFrame, PoseJoint, PoseKeypoint } from '@/lib/poseTracking';
 
 export type FramingVerdict = 'searching' | 'closer' | 'back' | 'center' | 'ok';
 
+/**
+ * Which way the user should step when the verdict is `center`, in the
+ * user's own left/right. Keypoint x is in the mirrored (selfie) preview's
+ * space, so a body on the screen's left has to move to ITS right to reach the
+ * middle — exactly what the mirror shows. Null unless `verdict === 'center'`.
+ */
+export type FramingStepSide = 'left' | 'right';
+
 export type SkeletonFraming = {
   /** Shoulder line → hip line distance as a fraction of the frame (0 when unseen). */
   torsoFraction: number;
@@ -28,6 +36,8 @@ export type SkeletonFraming = {
   /** True when the torso fills the target band, is centred and nothing is clipped. */
   ok: boolean;
   verdict: FramingVerdict;
+  /** The direction to step when `verdict` is `center`; null otherwise. */
+  stepSide: FramingStepSide | null;
 };
 
 /**
@@ -36,20 +46,28 @@ export type SkeletonFraming = {
  */
 export const FRAMING_MIN_TORSO = 0.16;
 /**
- * Above this the head is about to leave the frame on a jump: step back.
- * 0.34 ≈ a standing body that would run off both edges.
+ * Above this the torso is genuinely too close for the detector: move back.
+ * 0.42 ≈ shoulders and hips spanning 40 % of the frame — a person about a
+ * metre from the phone. Was 0.34, which sent people to the far wall; the
+ * analyzer only needs shoulders + hips in view, so the ceiling is generous
+ * and the head-margin / edge checks below catch a real crop.
  */
-export const FRAMING_MAX_TORSO = 0.34;
-/** A key joint within this distance of a side or the bottom edge counts as clipped. */
-export const FRAMING_EDGE_MARGIN = 0.03;
+export const FRAMING_MAX_TORSO = 0.42;
 /**
- * Headroom above the head so a jump stays inside the frame. A jump lifts the
- * body by ~10 % of standing height ≈ 0.3 torso; this is the floor for it.
+ * A key joint within this distance of a side or the bottom edge counts as
+ * clipped. 1.5 % of the frame: on a 1280-tall frame that is ~19 px, i.e.
+ * only a joint really sitting on the edge.
  */
-export const FRAMING_HEAD_MARGIN = 0.07;
-/** The hip centre must sit inside this band, else "center up". */
-export const FRAMING_CENTER_MIN_X = 0.22;
-export const FRAMING_CENTER_MAX_X = 0.78;
+export const FRAMING_EDGE_MARGIN = 0.015;
+/**
+ * Headroom above the head so a jump stays inside the frame. 3 % of the frame
+ * is enough for the detector to keep the shoulders during a hop even when the
+ * crown clips briefly (the analyzer classifies a jump on shoulders + hips).
+ */
+export const FRAMING_HEAD_MARGIN = 0.03;
+/** The hip centre must sit inside this band, else "step left / right". */
+export const FRAMING_CENTER_MIN_X = 0.15;
+export const FRAMING_CENTER_MAX_X = 0.85;
 /** Same confidence the skeleton overlay uses to draw a joint. */
 const VISIBLE_CONFIDENCE = 0.45;
 
@@ -67,6 +85,7 @@ export const NO_SKELETON_FRAMING: SkeletonFraming = {
   clippedJoints: [],
   ok: false,
   verdict: 'searching',
+  stepSide: null,
 };
 
 const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -107,16 +126,19 @@ export function skeletonFraming(frame: PoseFrame | null): SkeletonFraming {
   }
 
   let verdict: FramingVerdict;
+  let stepSide: FramingStepSide | null = null;
   if (clippedJoints.length > 0 || torsoFraction > FRAMING_MAX_TORSO) {
     verdict = 'back';
   } else if (torsoFraction < FRAMING_MIN_TORSO) {
     verdict = 'closer';
   } else if (hipX < FRAMING_CENTER_MIN_X || hipX > FRAMING_CENTER_MAX_X) {
     verdict = 'center';
+    // Mirrored preview: seen on the left of the screen → step to your right.
+    stepSide = hipX < FRAMING_CENTER_MIN_X ? 'right' : 'left';
   } else {
     verdict = 'ok';
   }
-  return { torsoFraction, clippedJoints, ok: verdict === 'ok', verdict };
+  return { torsoFraction, clippedJoints, ok: verdict === 'ok', verdict, stepSide };
 }
 
 /**
@@ -130,22 +152,29 @@ export function bodyVisible(frame: PoseFrame | null): boolean {
 }
 
 /**
- * The ONE big word shown far from the phone (≥ 72 pt). Short enough to read
- * from across a room, no punctuation to squint at.
+ * The ONE instruction shown far from the phone (≥ 84 pt, one word per line).
+ * Upper case, two short words at most, no punctuation to squint at. `center`
+ * is resolved to a side with `FRAMING_STEP_WORD` when the side is known.
  */
 export const FRAMING_WORD: Record<FramingVerdict, string> = {
-  searching: 'Step in',
-  closer: 'Closer',
-  back: 'Step back',
-  center: 'Center up',
-  ok: 'Hold still',
+  searching: 'STEP IN',
+  closer: 'MOVE CLOSER',
+  back: 'MOVE BACK',
+  center: 'STEP OVER',
+  ok: 'HOLD STILL',
+};
+
+/** The `center` instruction once the side is known. */
+export const FRAMING_STEP_WORD: Record<FramingStepSide, string> = {
+  left: 'STEP LEFT',
+  right: 'STEP RIGHT',
 };
 
 /** Longer coaching line for screen readers / the compact layouts. */
 export const FRAMING_MESSAGE: Record<FramingVerdict, string> = {
   searching: 'Step into the frame',
   closer: 'Move closer',
-  back: 'Step back',
+  back: 'Move back',
   center: 'Step toward the middle',
   ok: 'Perfect, hold still.',
 };
