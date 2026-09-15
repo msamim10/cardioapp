@@ -138,7 +138,7 @@ const offering = { identifier: 'default', availablePackages: [] } as unknown as 
 {
   const registry = createPaywallRequestRegistry(() => 'lifecycle');
   const request = registry.open({ offering });
-  let state = INITIAL_PAYWALL_ROUTE_STATE;
+  let state: PaywallRouteState = INITIAL_PAYWALL_ROUTE_STATE;
   const screen = (event: PaywallRouteEvent) => {
     state = reducePaywallRoute(state, event);
     return state.settled === null ? false : registry.settle(request.id, state.settled);
