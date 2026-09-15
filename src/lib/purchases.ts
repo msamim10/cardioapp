@@ -586,8 +586,42 @@ function mapPaywallResult(result: string): PaywallUIResult {
   }
 }
 
+/** The embeddable `Paywall` view component (`RevenueCatUI.Paywall`). */
+export type PaywallViewComponent = PurchasesUIModule['Paywall'];
+
 /**
- * Present the RevenueCat hosted Paywall UI for the current (or given) offering.
+ * The `Paywall` component for our own full-screen route
+ * (`src/app/hosted-paywall.tsx`), or null when it cannot render here: the UI
+ * module is absent (Expo Go / web) or the native view manager is not
+ * registered (a build that predates react-native-purchases-ui). Same lazy
+ * pattern as `getPurchasesUI`, so importing this file never touches native.
+ */
+export function getPaywallView(): PaywallViewComponent | null {
+  const UI = getPurchasesUI();
+  if (!UI || typeof UI.Paywall !== 'function') return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { UIManager } = require('react-native') as typeof import('react-native');
+    if (typeof UIManager?.getViewManagerConfig !== 'function') return null;
+    if (UIManager.getViewManagerConfig('Paywall') == null) return null;
+  } catch {
+    return null;
+  }
+  return UI.Paywall;
+}
+
+/** True when the full-screen paywall route can actually render the SDK view. */
+export function isHostedPaywallViewAvailable(): boolean {
+  return isPurchasesReady() && getPaywallView() !== null;
+}
+
+/**
+ * Present the RevenueCat hosted Paywall UI as the SDK's own page sheet.
+ *
+ * Not used for the app's paywall any more: `SubscriptionContext.presentPaywall`
+ * goes through `presentHostedPaywallScreen` (`hostedPaywall.ts`), which renders
+ * the same paywall full screen in our own route. Kept as the reference sheet
+ * presentation (and for manual comparison), same result mapping.
  *
  * When `ifNeeded` is true, uses `presentPaywallIfNeeded` so already-entitled
  * users are skipped (`not_presented`). Returns `unavailable` when RevenueCat or

@@ -100,6 +100,7 @@
     "test:ghosts": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-ghosts.ts",
     "test:ghosts-client-parity": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-ghosts-client-parity.ts",
     "test:preflight-flow": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-preflight-flow.ts",
+    "test:paywall-route": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-paywall-route.ts",
     "test:recording-log": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-recording-log.ts",
     "test:clips-library": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-clips-library.ts",
     "test:display-moves": "node --import ./scripts/register-src-alias.mjs --experimental-strip-types scripts/replay-display-move-breakdown.ts"

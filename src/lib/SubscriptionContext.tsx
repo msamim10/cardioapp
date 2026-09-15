@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { isRevenueCatConfigured } from './config';
 import { useAuth } from './AuthContext';
+import { presentHostedPaywallScreen } from './hostedPaywall';
 import {
   addCustomerInfoListener,
   checkPremium,
@@ -16,7 +17,6 @@ import {
   getCustomerInfoSafe,
   hasPremium,
   presentCustomerCenterUI,
-  presentPaywallUI,
   purchaseByPlan,
   reportConversionAfterPurchase,
   restorePremium,
@@ -52,7 +52,11 @@ type SubscriptionContextValue = {
   purchase: (plan: PlanKey) => Promise<PurchaseOutcome>;
   /** Returns whether premium is active after restore (null when unavailable). */
   restore: () => Promise<boolean | null>;
-  /** Present the hosted RevenueCat Paywall UI. */
+  /**
+   * Present the hosted RevenueCat paywall, full screen in our own route
+   * (`hosted-paywall`, see `hostedPaywall.ts`). Same results as the SDK's
+   * `presentPaywall()` / `presentPaywallIfNeeded()` used to return.
+   */
   presentPaywall: (opts?: {
     ifNeeded?: boolean;
     offering?: PurchasesOffering | null;
@@ -132,7 +136,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
   const presentPaywall = useCallback<SubscriptionContextValue['presentPaywall']>(
     async (opts) => {
-      const result = await presentPaywallUI(opts);
+      const result = await presentHostedPaywallScreen(opts);
       // The listener updates isPremium, but refresh immediately for snappiness.
       if (result === 'purchased' || result === 'restored') {
         await refresh();

@@ -56,10 +56,12 @@ export default function RootLayout() {
 /**
  * Routes outside the `(onboarding)` group that the first-run ceremony passes
  * through before onboarding is marked complete: calibration, the "first run is
- * ready" offer screen, and the run itself. The gate must treat them as part of
- * onboarding, or it would bounce the user back to welcome mid-ceremony.
+ * ready" offer screen, the hosted paywall it (and the sign-in screen) pushes
+ * full screen, and the run itself. The gate must treat them as part of
+ * onboarding, or it would bounce the user back to welcome mid-ceremony — or
+ * yank the paywall away while it is up.
  */
-const FIRST_RUN_ROUTES = new Set(['preflight', 'first-run-ready', 'workout', 'summary']);
+const FIRST_RUN_ROUTES = new Set(['preflight', 'first-run-ready', 'hosted-paywall', 'workout', 'summary']);
 
 const CHECKPOINT_ROUTES: Record<OnboardingCheckpoint, Href> = {
   plan: '/(onboarding)/plan',
@@ -222,6 +224,17 @@ function RootStack() {
       <Stack.Screen name="edit-email" options={{ presentation: 'card' }} />
       <Stack.Screen name="support" options={{ presentation: 'card' }} />
       <Stack.Screen name="paywall" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+      {/* The hosted RevenueCat paywall, full screen (docs/PAYWALL.md). No swipe
+          to dismiss: the screen's own X (and the SDK's callbacks) pop it. */}
+      <Stack.Screen
+        name="hosted-paywall"
+        options={{
+          presentation: 'fullScreenModal',
+          gestureEnabled: false,
+          headerShown: false,
+          animation: 'slide_from_bottom',
+        }}
+      />
       <Stack.Screen
         name="preflight"
         options={{ animation: 'fade', gestureEnabled: false }}
