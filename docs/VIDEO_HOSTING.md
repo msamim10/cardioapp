@@ -80,10 +80,11 @@ EXPO_PUBLIC_MEDIA_BASE_URL=https://storage.googleapis.com/cardiosurf-mvp-media
 
 ## Calibration teaser clip (bundled, mirrored)
 
-The calibration screen plays four short clips of the Neon Rails run
+The calibration screen plays three short clips of the Neon Rails run
 (`docs/CALIBRATION_FLOW.md` → "Teaser") from a **bundled** asset,
-`assets/video/calibration-neon-rails.mp4` (720×1280, 30 fps, H.264 High,
-silent, fast-start, ≈ 2.6 MB), so onboarding never waits on the network.
+`assets/video/calibration-neon-rails.mp4` (720×1280, 30 fps CFR, H.264 High,
+193 frames = 6.43 s, silent, fast-start, ≈ 2.0 MB), so onboarding never
+waits on the network.
 The same file is mirrored in the bucket for reference / future remote use:
 
 ```
@@ -93,13 +94,18 @@ Content-Type: video/mp4 · Cache-Control: public, max-age=31536000, immutable
 ```
 
 It was cut with ffmpeg from the 1080p vertical HLS rendition of level13
-(`hls-v2/level13/vertical/1080/stream.m3u8` → mp4, then `select` by frame
-range for the four clips, `concat`, `scale=720:1280`, `libx264 -crf 21
--maxrate 2200k`, `-an`, `-movflags +faststart`). The exact frame ranges and
-the resulting in-file boundaries live in `src/data/calibrationTeaser.ts`;
-if the clips are ever re-cut, update that file and re-upload with the same
-headers (`gsutil -h "Content-Type:video/mp4" -h "Cache-Control:public,
-max-age=31536000, immutable" cp …`).
+(`hls-v2/level13/vertical/1080/stream.m3u8` → mp4 with `-c copy`, then one
+`filter_complex`: `split=3`, `select='between(n,447,508)'` /
+`between(n,564,620)` / `between(n,282,355)` (Jump, Duck, Left) each with
+`setpts=N/30/TB`, `concat=n=3`, `scale=720:1280:flags=lanczos`, `fps=30`,
+`format=yuv420p`; encoded `libx264 -profile:v high -preset slow -crf 21
+-maxrate 2200k -bufsize 4400k -g 30 -force_key_frames 0,2.0667,3.9667 -an
+-movflags +faststart`). Build 30 dropped the fourth clip (Right, source
+6.600–9.000 s), so the file carries no unused footage. The exact frame
+ranges and the resulting in-file boundaries live in
+`src/data/calibrationTeaser.ts`; if the clips are ever re-cut, update that
+file and re-upload with the same headers (`gsutil -h "Content-Type:video/mp4"
+-h "Cache-Control:public, max-age=31536000, immutable" cp …`).
 
 ## Recreating the cloud setup from scratch
 
