@@ -139,6 +139,23 @@ OTHER NOTES
 
 ---
 
+## 1.1.1 (TestFlight)
+
+Version string bumped to 1.1.1 so the build lands in TestFlight without
+disturbing 1.1.0 build 28, which is submitted for review. Change: the second
+half of calibration is now a **teaser of the run** — after the 3-second hold
+the camera drops into the run's PiP and four short clips of real Neon Rails
+gameplay play (jump, duck, left, right); the player copies each dodge and gets
+the run's ✓ PERFECT / ✓ GOOD pop, then a 1.5 s score card ("3/4 · You're in.")
+before continuing exactly as before (first run → first-run-ready → paywall;
+repeat runs → the workout; the 12 h once-per-session skip is unchanged). No
+fail state, Skip always available, nothing spoken during the clips. The
+footage is a bundled silent MP4, `assets/video/calibration-neon-rails.mp4`
+(720×1280, 8.8 s, **≈ 2.6 MB** added to the app binary; also mirrored at
+`calibration/neon-rails/teaser.mp4` in the media bucket). See
+`docs/CALIBRATION_FLOW.md`. If 1.1.1 goes to review, update the Review Notes
+sentence about "four quick guided moves" to describe the clips.
+
 ## Release 1.1.0 (build 28)
 
 Build 28 supersedes build 27 (which supersedes 26, 25 and 24; none shipped to
