@@ -139,22 +139,43 @@ OTHER NOTES
 
 ---
 
-## 1.1.1 (TestFlight)
+## 1.1.1 (TestFlight, build 30)
 
 Version string bumped to 1.1.1 so the build lands in TestFlight without
-disturbing 1.1.0 build 28, which is submitted for review. Change: the second
-half of calibration is now a **teaser of the run** — after the 3-second hold
-the camera drops into the run's PiP and four short clips of real Neon Rails
-gameplay play (jump, duck, left, right); the player copies each dodge and gets
-the run's ✓ PERFECT / ✓ GOOD pop, then a 1.5 s score card ("3/4 · You're in.")
-before continuing exactly as before (first run → first-run-ready → paywall;
-repeat runs → the workout; the 12 h once-per-session skip is unchanged). No
-fail state, Skip always available, nothing spoken during the clips. The
-footage is a bundled silent MP4, `assets/video/calibration-neon-rails.mp4`
-(720×1280, 8.8 s, **≈ 2.6 MB** added to the app binary; also mirrored at
-`calibration/neon-rails/teaser.mp4` in the media bucket). See
-`docs/CALIBRATION_FLOW.md`. If 1.1.1 goes to review, update the Review Notes
-sentence about "four quick guided moves" to describe the clips.
+disturbing 1.1.0 build 28, which is submitted for review. Build 30 supersedes
+build 29 (owner feedback on device). Changes:
+
+- **Calibration teaser** — after the 3-second hold the camera drops into the
+  run's PiP and **three** short clips of real Neon Rails gameplay play (jump,
+  duck, left; the "right" clip was cut because it read as a second left).
+  Build 30 adds a 1.8 s intro beat ("Watch the runner. Copy the move.") and a
+  1 s "First obstacle" card over the frozen first frame before clip 1, shows
+  a large "Next obstacle" card (1.2 s, dimmed frozen frame) between clips,
+  and ends on a 1.2 s "You're in." beat with **no score / numbers**. The
+  player copies each dodge and gets the run's ✓ PERFECT / ✓ GOOD pop, then
+  continues exactly as before (first run → first-run-ready → paywall; repeat
+  runs → the workout; the 12 h once-per-session skip is unchanged). No fail
+  state, Skip always available. **Nothing is spoken after the hold** (the
+  "You're set" line is gone); "Step in" is still said if the body is lost for
+  2 s during the clips. The footage is a bundled silent MP4,
+  `assets/video/calibration-neon-rails.mp4` (720×1280, 6.4 s, **≈ 2.0 MB** in
+  the binary; also mirrored at `calibration/neon-rails/teaser.mp4` in the
+  media bucket). See `docs/CALIBRATION_FLOW.md`.
+- **Framing** — the far-mode instruction is now huge and explicit (88 pt,
+  one word per line: MOVE BACK / MOVE CLOSER / STEP LEFT / STEP RIGHT / HOLD
+  STILL, with a 150 pt arrow; spoken "Move back" / "Move closer"), and the
+  framing thresholds were loosened so calibration succeeds from about a
+  metre away instead of the far wall (torso ceiling 0.34 → 0.42, edge margin
+  0.03 → 0.015, head margin 0.07 → 0.03, centre band 0.22–0.78 → 0.15–0.85;
+  ankles still never required).
+- **Paywall full screen** — the hosted RevenueCat paywall is presented in
+  our own full-screen route (`hosted-paywall`, `fullScreenModal`, no swipe to
+  dismiss, our own X top-right) instead of the SDK's page sheet. Same
+  results and follow-ups everywhere (onboarding, level Start, Profile); the
+  custom fallback paywall is unchanged. See `docs/PAYWALL.md`.
+
+If 1.1.1 goes to review, update the Review Notes sentence about "four quick
+guided moves" to describe the three clips.
 
 ## Release 1.1.0 (build 28)
 
