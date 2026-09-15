@@ -48,7 +48,12 @@ export function RunPipFrame({
   const flashOpacity = useRef(new Animated.Value(0)).current;
   const lastFlash = useRef(0);
   useEffect(() => {
-    if (!flash || flash === lastFlash.current) return;
+    if (!flash) {
+      // Counter reset (a new calibration cycle): the next 1 flashes again.
+      lastFlash.current = 0;
+      return;
+    }
+    if (flash === lastFlash.current) return;
     lastFlash.current = flash;
     flashOpacity.setValue(0.85);
     const animation = Animated.timing(flashOpacity, {
