@@ -78,6 +78,29 @@ EXPO_PUBLIC_MEDIA_BASE_URL=https://storage.googleapis.com/cardiosurf-mvp-media
 `getVideoSource('downtown', 'vertical')` →
 `https://storage.googleapis.com/cardiosurf-mvp-media/hls/level1/vertical/master.m3u8`.
 
+## Calibration teaser clip (bundled, mirrored)
+
+The calibration screen plays four short clips of the Neon Rails run
+(`docs/CALIBRATION_FLOW.md` → "Teaser") from a **bundled** asset,
+`assets/video/calibration-neon-rails.mp4` (720×1280, 30 fps, H.264 High,
+silent, fast-start, ≈ 2.6 MB), so onboarding never waits on the network.
+The same file is mirrored in the bucket for reference / future remote use:
+
+```
+gs://cardiosurf-mvp-media/calibration/neon-rails/teaser.mp4
+https://storage.googleapis.com/cardiosurf-mvp-media/calibration/neon-rails/teaser.mp4
+Content-Type: video/mp4 · Cache-Control: public, max-age=31536000, immutable
+```
+
+It was cut with ffmpeg from the 1080p vertical HLS rendition of level13
+(`hls-v2/level13/vertical/1080/stream.m3u8` → mp4, then `select` by frame
+range for the four clips, `concat`, `scale=720:1280`, `libx264 -crf 21
+-maxrate 2200k`, `-an`, `-movflags +faststart`). The exact frame ranges and
+the resulting in-file boundaries live in `src/data/calibrationTeaser.ts`;
+if the clips are ever re-cut, update that file and re-upload with the same
+headers (`gsutil -h "Content-Type:video/mp4" -h "Cache-Control:public,
+max-age=31536000, immutable" cp …`).
+
 ## Recreating the cloud setup from scratch
 
 If the bucket/project ever needs rebuilding (reference):
